@@ -45,6 +45,25 @@ cfr-free mcp               # MCP server on stdio (default command)
 cfr-free export ./backup.sqlite   # consistent snapshot of the local index
 ```
 
+### Docker
+
+```bash
+docker run -d --name cfr-free -p 8787:8787 -v cfr-data:/data \
+  ghcr.io/deffenda/cfr-free:latest
+```
+
+The container syncs on first start (~15 s, ~2–3 MB from eCFR), then serves
+the HTTP API; the index persists in the `cfr-data` volume mounted at `/data`.
+Any CLI command works the same way, e.g.
+`docker run --rm -v cfr-data:/data ghcr.io/deffenda/cfr-free:latest sync` to
+refresh, or `… export /data/backup.sqlite` to snapshot into the volume.
+
+The image runs as a non-root user and binds `0.0.0.0` with the remote opt-in
+already set — inside a container the published port (`-p`) is the exposure
+gate, and loopback would make it unreachable. Outside Docker the CLI still
+defaults to `127.0.0.1` with `CFR_ALLOW_REMOTE=1` required. Images are
+published to GHCR on `v*` tags with build-provenance attestations.
+
 ### Use with Claude (MCP)
 
 Add to your MCP client config (e.g. `claude_desktop_config.json`):
