@@ -1,0 +1,5 @@
+# Generated and vendored trees are not scan targets.
+node_modules/
+dist/
+coverage/
+data/
