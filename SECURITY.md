@@ -8,7 +8,8 @@ Only the latest release on `main` receives security fixes.
 
 Please report suspected vulnerabilities via
 [GitHub private vulnerability reporting](https://github.com/deffenda/cfr-free/security/advisories/new)
-(preferred — keeps the report private until a fix ships). Do not open a
+(preferred — keeps the report private until a fix ships). If that form is
+unavailable, contact the maintainer through GitHub directly. Do not open a
 public issue for security-sensitive reports. You can expect an acknowledgment
 within a few days.
 
