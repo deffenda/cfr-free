@@ -136,7 +136,7 @@ function dispatch(
 
 /** Create (but do not start) the HTTP API server. */
 export function createHttpServer(service: CFRService, logger: Logger): http.Server {
-  return http.createServer((req, res) => {
+  const server = http.createServer((req, res) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.setHeader('allow', 'GET, HEAD');
       sendJson(req, res, 405, errorBody('method_not_allowed', 'only GET and HEAD are supported'));
@@ -176,4 +176,8 @@ export function createHttpServer(service: CFRService, logger: Logger): http.Serv
       }
     }
   });
+  // Bound how long a client may take to complete a request (SPEC §12 #16);
+  // the header timeout already defaults to 60 s.
+  server.requestTimeout = 60_000;
+  return server;
 }

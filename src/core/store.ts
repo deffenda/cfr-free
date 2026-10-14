@@ -91,16 +91,23 @@ CREATE VIRTUAL TABLE IF NOT EXISTS sections_fts USING fts5(
   tokenize = 'porter unicode61'
 );
 
+-- FTS external-content triggers: keep the index consistent with the
+-- 'sections' table on every write path. All three must be updated together
+-- if columns ever change (single schema, no migrations: index is rebuilt
+-- wholesale by sync).
 CREATE TRIGGER IF NOT EXISTS sections_ai AFTER INSERT ON sections BEGIN
   INSERT INTO sections_fts(rowid, citation, heading, text)
   VALUES (new.id, new.citation, new.heading, new.text);
 END;
 
+-- Delete-side mirror of sections_ai (external-content tables do not track
+-- deletions themselves).
 CREATE TRIGGER IF NOT EXISTS sections_ad AFTER DELETE ON sections BEGIN
   INSERT INTO sections_fts(sections_fts, rowid, citation, heading, text)
   VALUES ('delete', old.id, old.citation, old.heading, old.text);
 END;
 
+-- Update path: remove the old index row, then index the new values.
 CREATE TRIGGER IF NOT EXISTS sections_au AFTER UPDATE ON sections BEGIN
   INSERT INTO sections_fts(sections_fts, rowid, citation, heading, text)
   VALUES ('delete', old.id, old.citation, old.heading, old.text);

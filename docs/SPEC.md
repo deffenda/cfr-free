@@ -142,3 +142,19 @@ Unit: citation parser, FTS sanitizer (incl. injection attempts `" OR 1=1--`), XM
 - Branch protection on `main`: PR required, strict up-to-date, required checks `quality (22)` + `quality (24)`; no mandatory review (solo maintainer — documented in CONTRIBUTING).
 - Repo settings: squash merge only, auto-delete head branches, Dependabot (npm + actions weekly), minimal `GITHUB_TOKEN` permissions (`contents: read`).
 - Local pre-push gates: `npm run ci` + `npm run scan` (npm audit, osv-scanner, gitleaks, trivy, semgrep).
+
+## 12. Implementation review round (v0.3 — post-code reviews + live smoke)
+
+Code-review findings on the implemented source, with dispositions:
+
+| #   | Finding (source)                                                       | Disposition                                                                                                                                                                                                      |
+| --- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 13  | `titles.json` contains null dates for reserved titles (**live smoke**) | **Accepted (bug found by live sync)** — schema made nullable; title 38's own dates validated at extraction; regression test seeds a null-date title.                                                             |
+| 14  | FTS/SQL injection via search terms (**Gemma review prompt**)           | **Accepted by design** — terms re-tokenized into ≤12 quoted prefix phrases, always bound parameters; property-tested with `OR`/`--`/quote payloads.                                                              |
+| 15  | DOCTYPE check bypass via case variants (**Nemotron**, minor)           | **Accepted** — check is now case-insensitive; fast-xml-parser never expands external entities regardless.                                                                                                        |
+| 16  | No HTTP server request timeout (**Nemotron**, minor)                   | **Accepted** — `requestTimeout` 60 s set explicitly on the Node HTTP server (headers timeout already defaults to 60 s).                                                                                          |
+| 17  | `quick_check` breaks new databases (**Nemotron**, minor)               | **Rejected** — `PRAGMA quick_check` succeeds on fresh files; covered by every `openTempStore` test (170 tests open fresh DBs).                                                                                   |
+| 18  | `process.once('exit')` useless under SIGKILL (**Nemotron**, minor)     | **Rejected** — nothing survives SIGKILL; WAL journal recovery handles any interruption, and SIGINT/SIGTERM paths run full cleanup.                                                                               |
+| 19  | Parser singleton thread-safety (**Nemotron**, minor)                   | **Rejected** — Node.js is single-threaded; the shared parser is immutable after init.                                                                                                                            |
+| 20  | Sync error message ambiguity, constant naming, trigger docs (**N**)    | **Mixed** — `ERROR_BODY_SNIPPET` → `MAX_ERROR_BODY_CHARS` rename + trigger purpose comments accepted; message rewording rejected (message already states both hypotheses).                                       |
+| 21  | osv-scanner CI action subpath (**CI run**)                             | **Accepted** — corrected to `google/osv-scanner-action/osv-scanner-action` (the `osv-scanner` subpath does not exist at v2.7.0); local script treats non-`3` exits as network/infra warnings, exit 3 = findings. |

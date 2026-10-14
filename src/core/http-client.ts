@@ -46,7 +46,8 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_BYTES = 50 * 1024 * 1024;
 const DEFAULT_RETRIES = 2;
 const DEFAULT_RETRY_DELAY_MS = 250;
-const ERROR_BODY_SNIPPET = 200;
+/** Max characters of an upstream error body embedded in a message. */
+const MAX_ERROR_BODY_CHARS = 200;
 
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -132,7 +133,7 @@ export class HttpClient {
 
     if (!response.ok) {
       const detail = (await response.text().catch(() => ''))
-        .slice(0, ERROR_BODY_SNIPPET)
+        .slice(0, MAX_ERROR_BODY_CHARS)
         .replace(/\s+/g, ' ');
       const suffix = detail ? `: ${detail}` : '';
       throw new HttpError(

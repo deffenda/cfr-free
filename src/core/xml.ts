@@ -32,6 +32,8 @@ export class XmlFormatError extends Error {
   override readonly name = 'XmlFormatError';
 }
 
+const DOCTYPE_RE = /<!DOCTYPE/i;
+
 type OrderNode = Record<string, unknown>;
 type StackEntry = { readonly type: string; readonly id: string };
 
@@ -292,7 +294,9 @@ function walk(
  *   structure, or oversized sections (format-drift tripwires).
  */
 export function parseTitleXml(xml: string): RawSection[] {
-  if (xml.includes('<!DOCTYPE')) throw new XmlFormatError('DOCTYPE declarations are not accepted');
+  // Case-insensitive: XML declares DOCTYPE uppercase, but a smuggled
+  // lowercase variant must not slip past (SPEC §12 #15).
+  if (DOCTYPE_RE.test(xml)) throw new XmlFormatError('DOCTYPE declarations are not accepted');
 
   let parsed: unknown;
   try {

@@ -129,32 +129,65 @@ async function buildChunks(files, budget) {
   return chunks;
 }
 
-function extractContent(data) {
-  const message = data?.choices?.[0]?.message;
-  if (typeof message?.content === 'string' && message.content.length > 0) return message.content;
-  return null;
-}
-
 async function requestCompletion(settings, system, user, maxTokens) {
-  const res = await fetch(`${settings.baseUrl}/v1/chat/completions`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: settings.model,
-      temperature: 0.2,
-      max_tokens: maxTokens,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-    }),
-    signal: AbortSignal.timeout(settings.timeoutMs),
-  });
+  // Streaming is deliberate: non-streaming responses only arrive after the
+  // whole generation, which trips Node fetch's 300 s body timeout on long
+  // reviews. With SSE, bytes keep flowing while the model thinks.
+  let res;
+  try {
+    res = await fetch(`${settings.baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: settings.model,
+        temperature: 0.2,
+        max_tokens: maxTokens,
+        stream: true,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+      }),
+      signal: AbortSignal.timeout(settings.timeoutMs),
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    const cause =
+      err instanceof Error && err.cause instanceof Error ? ` (${err.cause.message})` : '';
+    throw new Error(`request to ${settings.baseUrl} failed: ${detail}${cause}`, { cause: err });
+  }
   if (!res.ok) {
     const body = (await res.text()).slice(0, 300);
     throw new Error(`LM Studio returned HTTP ${res.status}: ${body}`);
   }
-  return res.json();
+
+  let content = '';
+  let reasoning = '';
+  let usage = null;
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for await (const piece of res.body) {
+    buffer += decoder.decode(piece, { stream: true });
+    let newline;
+    while ((newline = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (!line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (payload === '[DONE]') continue;
+      let data;
+      try {
+        data = JSON.parse(payload);
+      } catch {
+        continue;
+      }
+      const delta = data?.choices?.[0]?.delta;
+      if (typeof delta?.content === 'string') content += delta.content;
+      if (typeof delta?.reasoning_content === 'string') reasoning += delta.reasoning_content;
+      if (data?.usage) usage = data.usage;
+    }
+  }
+  return { content, reasoning, usage };
 }
 
 async function reviewChunk(settings, chunk, instruction) {
@@ -165,42 +198,33 @@ async function reviewChunk(settings, chunk, instruction) {
     instruction ? `\nAdditional instruction: ${instruction}` : '',
   ].join('\n');
 
-  let data = await requestCompletion(settings, SYSTEM_PROMPT, user, settings.maxTokens);
-  let content = extractContent(data);
+  let result = await requestCompletion(settings, SYSTEM_PROMPT, user, settings.maxTokens);
 
   // Reasoning models (e.g. gemma-4) spend the token budget on
   // `reasoning_content` before emitting the visible answer. If that happened,
   // retry once with a much larger budget so the answer actually lands.
-  if (content === null) {
-    const reasoning = data?.choices?.[0]?.message?.reasoning_content;
-    if (typeof reasoning === 'string' && reasoning.length > 0) {
-      const expanded = Math.min(settings.maxTokens * 4, 16_000);
-      console.error(
-        `llm-review: empty content after reasoning (${settings.maxTokens} tokens); retrying with ${expanded}`,
-      );
-      data = await requestCompletion(settings, SYSTEM_PROMPT, user, expanded);
-      content = extractContent(data);
-    }
+  if (result.content.length === 0 && result.reasoning.length > 0) {
+    const expanded = Math.min(settings.maxTokens * 4, 16_000);
+    console.error(
+      `llm-review: empty content after reasoning (${settings.maxTokens} tokens); retrying with ${expanded}`,
+    );
+    result = await requestCompletion(settings, SYSTEM_PROMPT, user, expanded);
   }
 
-  const usage = data?.usage;
-  if (usage) {
+  if (result.usage) {
     console.error(
-      `llm-review: tokens prompt=${usage.prompt_tokens ?? '?'} completion=${usage.completion_tokens ?? '?'}`,
+      `llm-review: tokens prompt=${result.usage.prompt_tokens ?? '?'} completion=${result.usage.completion_tokens ?? '?'}`,
     );
   }
-  if (content !== null) return content;
+  if (result.content.length > 0) return result.content;
 
-  const reasoning = data?.choices?.[0]?.message?.reasoning_content;
-  if (typeof reasoning === 'string' && reasoning.length > 0) {
+  if (result.reasoning.length > 0) {
     throw new Error(
-      `model produced only reasoning, no answer (reasoning started: ${JSON.stringify(reasoning.slice(0, 200))}). ` +
+      `model produced only reasoning, no answer (reasoning started: ${JSON.stringify(result.reasoning.slice(0, 200))}). ` +
         'Raise --max-tokens or use a non-reasoning model via --model.',
     );
   }
-  throw new Error(
-    `LM Studio returned no completion content: ${JSON.stringify(data).slice(0, 300)}`,
-  );
+  throw new Error('LM Studio returned no completion content (empty stream)');
 }
 
 async function main() {
