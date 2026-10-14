@@ -120,7 +120,7 @@ export interface IndexStatus {
 
 /** Coarse readiness enum for MCP clients gating queries on one call. */
 export interface HealthReport {
-  readonly status: 'empty' | 'stale' | 'ready';
+  readonly status: 'empty' | 'degraded' | 'stale' | 'ready';
   readonly issueDate: string | null;
   readonly syncedAt: string | null;
   readonly stale: boolean;
@@ -231,15 +231,20 @@ export class CFRService {
     if (!parsed.success) toServiceError(parsed.error);
     const { query, page, perPage, part } = parsed.data;
     const outcome = this.store.search({ query, page, perPage, part });
+    const direct = this.directHit(query, part, outcome.matchMode);
 
     let hits = outcome.hits.map((hit) => this.presentHit(hit, false));
     let total = outcome.total;
-    if (page === 1) {
-      const direct = this.directHit(query, part, outcome.matchMode);
-      if (direct !== null) {
-        hits = [direct, ...hits.filter((hit) => hit.citation !== direct.citation)];
-        if (!direct.inResults) total += 1;
-      }
+    if (direct !== null) {
+      // The pin-adjusted total must be identical on every page: the union of
+      // all pages is what `total` describes, and the pin is part of that
+      // union whether FTS found it or not.
+      if (!direct.inResults) total += 1;
+      // Later pages drop their natural copy of the pinned section: it was
+      // already shown on page 1, so keeping it would duplicate the hit
+      // across the pagination sequence.
+      hits = hits.filter((hit) => hit.citation !== direct.citation);
+      if (page === 1) hits = [direct, ...hits];
     }
 
     const status = this.status();
@@ -259,8 +264,10 @@ export class CFRService {
   /**
    * Pin the exact provision when the query itself is a citation — adjudicators
    * paste `38 CFR 4.130(a)` constantly, and keyword noise above the exact
-   * section would be a correctness failure. Page 1 only; honors the part
-   * filter; `total` only counts the pin when FTS did not already return it.
+   * section would be a correctness failure. Computed on every page so the
+   * pin-adjusted `total` stays consistent across the pagination sequence;
+   * only page 1 prepends the hit itself. Honors the part filter; `total`
+   * only counts the pin when FTS did not already return it.
    */
   private directHit(
     query: string,
@@ -318,8 +325,11 @@ export class CFRService {
    * (neighbors like `4.151a` frequently explain the gap).
    */
   private notFoundMessage(citation: string): string {
+    // Phrase, not tokenized: `"4 150"` matches sections that actually
+    // reference the citation, while bare tokens (`"4"* AND "150"*`) rank
+    // unrelated sections that merely contain both fragments.
     const mentions = this.store
-      .search({ query: citation, page: 1, perPage: 5 })
+      .search({ query: `"${citation}"`, page: 1, perPage: 5 })
       .hits.map((hit) => hit.citation)
       .filter((found) => found.toLowerCase() !== citation.toLowerCase());
     const base =
@@ -424,12 +434,22 @@ export class CFRService {
 
   /**
    * One-call readiness verdict for MCP clients: `empty` (no index yet),
-   * `stale` (aged past CFR_MAX_AGE_DAYS), or `ready` (query away).
+   * `degraded` (structure drift — live rows disagree with the structure
+   * tree, so provisions may be missing), `stale` (aged past
+   * CFR_MAX_AGE_DAYS), or `ready` (query away). Precedence is
+   * empty → degraded → stale → ready: incomplete data is the less safe
+   * failure, and the `stale` boolean below still reports age alongside.
    */
   health(): HealthReport {
     const status = this.status();
     const state: HealthReport['status'] =
-      status.sections === 0 ? 'empty' : status.stale ? 'stale' : 'ready';
+      status.sections === 0
+        ? 'empty'
+        : status.structureDrift === true
+          ? 'degraded'
+          : status.stale
+            ? 'stale'
+            : 'ready';
     return {
       status: state,
       issueDate: status.issueDate,

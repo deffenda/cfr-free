@@ -297,6 +297,14 @@ describe('MCP server (in-memory transport)', () => {
     expect(result.structuredContent?.['issueDate']).toBe('2026-10-09');
   });
 
+  it('health reports structure drift as degraded', async () => {
+    temp.store.setMeta('structure_expected_sections', '9999');
+    temp.store.setMeta('structure_expected_appendices', '0');
+    const result = (await client.callTool({ name: 'health', arguments: {} })) as ToolCallResult;
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent?.['status']).toBe('degraded');
+  });
+
   it('health reports store failures as tool errors', async () => {
     temp.store.close();
     const result = (await client.callTool({ name: 'health', arguments: {} })) as ToolCallResult;

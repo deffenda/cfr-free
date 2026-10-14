@@ -66,6 +66,14 @@ export class RateLimiter {
   /**
    * Drop the least-recently-seen peers once the map exceeds `maxPeers` —
    * bounding memory against peer-address floods (IPv6 spaces are huge).
+   *
+   * Known trade-offs, deliberate: a client rotating source addresses (a
+   * single IPv6 /64 is enough) mints fresh full-capacity buckets, and
+   * eviction drops a legitimate peer's accumulated spend — inherent to any
+   * per-address limiter and accepted over a global bucket (which one
+   * abusive peer could exhaust for everyone). Eviction sorts at most
+   * `maxPeers` entries and only runs when a *new* peer pushes the map over
+   * the cap; established peers never trigger it.
    */
   prune(): void {
     if (this.buckets.size <= this.maxPeers) return;

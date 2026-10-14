@@ -98,7 +98,7 @@ disorders?"_ or _"Search Title 38 for traumatic brain injury compensation."_
 | `browse_title38`     | `chapter?`, `part?`, `subpart?`        | Children of the requested hierarchy level                                                                                                                                                                        |
 | `index_status`       | —                                      | Issue date, last sync, row counts, staleness, drift flag, and what the last sync amended/added/removed                                                                                                           |
 | `list_parts`         | —                                      | Parts in the index with titles and section/appendix counts                                                                                                                                                       |
-| `health`             | —                                      | One-call readiness verdict: `ready`, `stale`, or `empty`                                                                                                                                                         |
+| `health`             | —                                      | One-call readiness verdict: `ready`, `stale`, `degraded` (structure drift), or `empty`                                                                                                                           |
 
 All tools are **read-only** and query only the local index — they never hit
 the network. Search and section responses carry a freshness envelope

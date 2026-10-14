@@ -107,7 +107,7 @@ const listPartsOutputSchema = z.object({
 });
 
 const healthOutputSchema = z.object({
-  status: z.enum(['empty', 'stale', 'ready']),
+  status: z.enum(['empty', 'degraded', 'stale', 'ready']),
   issueDate: z.string().nullable(),
   syncedAt: z.string().nullable(),
   stale: z.boolean(),
@@ -348,8 +348,9 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
       title: 'Index readiness',
       description:
         'One-call readiness verdict for the local index: "ready" (query away), "stale" (older than ' +
-        'CFR_MAX_AGE_DAYS — verify results against the current eCFR), or "empty" (no index yet — run ' +
-        '`cfr-free sync`). Clients should gate queries on this before spending tool calls.',
+        'CFR_MAX_AGE_DAYS — verify results against the current eCFR), "degraded" (structure drift — ' +
+        'provisions may be missing; verify against the current eCFR), or "empty" (no index yet — ' +
+        'run `cfr-free sync`). Clients should gate queries on this before spending tool calls.',
       outputSchema: healthOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,
     },
