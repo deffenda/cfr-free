@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { HttpClient, type FetchLike } from '../src/core/http-client.js';
 import { EcfrApi } from '../src/core/ecfr.js';
-import { SyncError } from '../src/core/sync.js';
+import { CommandError } from '../src/exit-codes.js';
 import { ensureIndex } from '../src/commands/ensure-index.js';
 import { createTestLogger, FIXTURE_SECTIONS, openTempStore } from './helpers.js';
 
@@ -86,7 +86,12 @@ describe('ensureIndex', () => {
     const temp = openTempStore({ seed: false });
     try {
       const config = loadConfig({ CFR_AUTO_SYNC: '0' });
-      await expect(ensureIndex(temp.store, config, createTestLogger())).rejects.toThrow(SyncError);
+      await expect(ensureIndex(temp.store, config, createTestLogger())).rejects.toThrow(
+        CommandError,
+      );
+      await expect(ensureIndex(temp.store, config, createTestLogger())).rejects.toMatchObject({
+        exitCode: 3,
+      });
       await expect(ensureIndex(temp.store, config, createTestLogger())).rejects.toThrow(
         /cfr-free sync/,
       );

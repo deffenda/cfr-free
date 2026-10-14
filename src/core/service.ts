@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { normalizeCitation } from './citations.js';
-import { browse as browseStructure, parseStructure, type BrowseResult } from './structure.js';
+import {
+  browse as browseStructure,
+  parseStructure,
+  type BrowseResult,
+  type StructureNode,
+} from './structure.js';
 import { Store, type SearchHit, type MatchMode } from './store.js';
 
 /**
@@ -83,6 +88,31 @@ export interface IndexStatus {
   readonly stale: boolean;
   readonly maxAgeDays: number;
   readonly parserVersion: string | null;
+  /** True when parsed counts differ from the structure tree; null when never recorded. */
+  readonly structureDrift: boolean | null;
+}
+
+/** One part present in the local index. */
+export interface PartSummary {
+  readonly part: string;
+  readonly title: string | null;
+  readonly sections: number;
+  readonly appendices: number;
+}
+
+/** Strip a leading `Part <id>—` prefix from a structure label for display. */
+function partTitle(identifier: string, label: string): string {
+  const prefix = `Part ${identifier}`;
+  if (label.startsWith(prefix)) {
+    const rest = label.slice(prefix.length).replace(/^[—–\-:.\s]+/, '');
+    if (rest.length > 0) return rest;
+  }
+  return label;
+}
+
+function collectPartTitles(node: StructureNode, into: Map<string, string>): void {
+  if (node.type === 'part') into.set(node.identifier, partTitle(node.identifier, node.label));
+  for (const child of node.children) collectPartTitles(child, into);
 }
 
 function toServiceError(error: unknown): never {
@@ -183,6 +213,7 @@ export class CFRService {
     const issueDate = this.store.getMeta('issue_date');
     const syncedAt = this.store.getMeta('synced_at');
     const sections = this.store.countSections();
+    const appendices = Number(this.store.getMeta('appendices_count') ?? '0');
     let stale = true;
     if (syncedAt !== null) {
       const ageMs = Date.now() - Date.parse(syncedAt);
@@ -192,10 +223,45 @@ export class CFRService {
       issueDate,
       syncedAt,
       sections,
-      appendices: Number(this.store.getMeta('appendices_count') ?? '0'),
+      appendices,
       stale,
       maxAgeDays: this.maxAgeDays,
       parserVersion: this.store.getMeta('parser_version'),
+      structureDrift: this.structureDrift(sections),
     };
+  }
+
+  /**
+   * Compare the live row total against the structure-tree expectations
+   * recorded at sync time. Null when an old index predates the expectation
+   * meta. Catches both parse drift (warned at sync) and vanished rows.
+   */
+  private structureDrift(sections: number): boolean | null {
+    const expectedSectionsRaw = this.store.getMeta('structure_expected_sections');
+    const expectedAppendicesRaw = this.store.getMeta('structure_expected_appendices');
+    if (expectedSectionsRaw === null || expectedAppendicesRaw === null) return null;
+    const expectedSections = Number(expectedSectionsRaw);
+    const expectedAppendices = Number(expectedAppendicesRaw);
+    if (!Number.isFinite(expectedSections) || !Number.isFinite(expectedAppendices)) return true;
+    return sections !== expectedSections + expectedAppendices;
+  }
+
+  /** Parts present in the index, joined with titles from the structure tree. */
+  listParts(): PartSummary[] {
+    const titles = new Map<string, string>();
+    const structureJson = this.store.getMeta('structure_json');
+    if (structureJson !== null) {
+      try {
+        collectPartTitles(parseStructure(JSON.parse(structureJson)), titles);
+      } catch {
+        // Unreadable structure: still list parts, just without titles.
+      }
+    }
+    return this.store.listParts().map((row) => ({
+      part: row.part,
+      title: titles.get(row.part) ?? null,
+      sections: row.sections,
+      appendices: row.appendices,
+    }));
   }
 }

@@ -29,6 +29,7 @@ const searchOutputSchema = z.object({
       path: z.string(),
       snippet: z.string(),
       score: z.number(),
+      matches: z.array(z.string()),
     }),
   ),
 });
@@ -67,12 +68,25 @@ const statusOutputSchema = z.object({
   stale: z.boolean(),
   maxAgeDays: z.number(),
   parserVersion: z.string().nullable(),
+  structureDrift: z.boolean().nullable(),
+});
+
+const listPartsOutputSchema = z.object({
+  parts: z.array(
+    z.object({
+      part: z.string(),
+      title: z.string().nullable(),
+      sections: z.number(),
+      appendices: z.number(),
+    }),
+  ),
 });
 
 type SearchOutput = z.infer<typeof searchOutputSchema>;
 type SectionOutput = z.infer<typeof sectionOutputSchema>;
 type BrowseOutput = z.infer<typeof browseOutputSchema>;
 type StatusOutput = z.infer<typeof statusOutputSchema>;
+type ListPartsOutput = z.infer<typeof listPartsOutputSchema>;
 
 function textContent(payload: unknown): string {
   return JSON.stringify(payload, null, 2);
@@ -91,7 +105,8 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
       title: 'Search Title 38 CFR regulations',
       description:
         'Full-text search across the local Title 38 (VA) CFR index using ranked keyword matching. ' +
-        'Returns section citations, headings, relevance snippets and bm25 scores (lower is better). ' +
+        'Returns section citations, headings, relevance snippets, bm25 scores (lower is better) ' +
+        'and the query terms visible in each hit. ' +
         'Use `part` to scope results to a single CFR part (e.g. "4" for ratings, "17" for prosthetics). ' +
         'Follow up with get_section to read a hit in full.',
       inputSchema: {
@@ -131,7 +146,10 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
           perPage: args.per_page,
           part: args.part,
         });
-        const structuredContent: SearchOutput = { ...response, hits: [...response.hits] };
+        const structuredContent: SearchOutput = {
+          ...response,
+          hits: response.hits.map((hit) => ({ ...hit, matches: [...hit.matches] })),
+        };
         return {
           content: [{ type: 'text', text: textContent(structuredContent) }],
           structuredContent,
@@ -237,6 +255,37 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
         };
       } catch (error) {
         logger.error('tool index_status failed', { message: toClientMessage(error) });
+        return {
+          content: [{ type: 'text', text: `Error: ${toClientMessage(error)}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.registerTool(
+    'list_parts',
+    {
+      title: 'List CFR parts in the local index',
+      description:
+        'Enumerate every Title 38 CFR part present in the local index, with its structure-tree title ' +
+        'and section/appendix counts. Use this to discover which parts are searchable.',
+      inputSchema: {},
+      outputSchema: listPartsOutputSchema,
+      annotations: READ_ONLY_ANNOTATIONS,
+    },
+    async () => {
+      try {
+        const parts = service.listParts();
+        const structuredContent: ListPartsOutput = {
+          parts: parts.map((row) => ({ ...row })),
+        };
+        return {
+          content: [{ type: 'text', text: textContent(structuredContent) }],
+          structuredContent,
+        };
+      } catch (error) {
+        logger.error('tool list_parts failed', { message: toClientMessage(error) });
         return {
           content: [{ type: 'text', text: `Error: ${toClientMessage(error)}` }],
           isError: true,

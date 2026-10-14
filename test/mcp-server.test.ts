@@ -33,10 +33,16 @@ describe('MCP server (in-memory transport)', () => {
     temp.cleanup();
   });
 
-  it('lists all four read-only tools with annotations', async () => {
+  it('lists all five read-only tools with annotations', async () => {
     const result = await client.listTools();
     const names = result.tools.map((tool) => tool.name).sort();
-    expect(names).toEqual(['browse_title38', 'get_section', 'index_status', 'search_regulations']);
+    expect(names).toEqual([
+      'browse_title38',
+      'get_section',
+      'index_status',
+      'list_parts',
+      'search_regulations',
+    ]);
     for (const tool of result.tools) {
       expect(tool.annotations?.readOnlyHint).toBe(true);
       expect(tool.annotations?.destructiveHint).toBe(false);
@@ -124,6 +130,40 @@ describe('MCP server (in-memory transport)', () => {
     expect(result.structuredContent?.['sections']).toBe(4);
     expect(result.structuredContent?.['issueDate']).toBe('2026-10-09');
     expect(result.structuredContent?.['maxAgeDays']).toBe(7);
+    // Fixtures predate the expected-counts meta: drift is unknown, not false.
+    expect(result.structuredContent?.['structureDrift']).toBeNull();
+  });
+
+  it('list_parts returns parts with titles and counts', async () => {
+    const result = (await client.callTool({
+      name: 'list_parts',
+      arguments: {},
+    })) as ToolCallResult;
+    expect(result.isError).toBeFalsy();
+    const parts = result.structuredContent?.['parts'] as Array<{
+      part: string;
+      title: string | null;
+      sections: number;
+      appendices: number;
+    }>;
+    expect(parts).toEqual([
+      { part: '4', title: 'Schedule for Rating Disabilities', sections: 2, appendices: 1 },
+      { part: '17', title: 'Medical Care', sections: 1, appendices: 0 },
+    ]);
+  });
+
+  it('search_regulations reports the query terms visible in each hit', async () => {
+    const result = (await client.callTool({
+      name: 'search_regulations',
+      arguments: { query: 'mental disorder' },
+    })) as ToolCallResult;
+    expect(result.isError).toBeFalsy();
+    const hits = result.structuredContent?.['hits'] as Array<{
+      citation: string;
+      matches: string[];
+    }>;
+    expect(hits[0]?.matches).toContain('mental');
+    expect(hits[0]?.matches).toContain('disorder');
   });
 
   it('browse_title38 surfaces structure misses as tool errors', async () => {
@@ -139,6 +179,16 @@ describe('MCP server (in-memory transport)', () => {
     temp.store.close();
     const result = (await client.callTool({
       name: 'index_status',
+      arguments: {},
+    })) as ToolCallResult;
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('Error:');
+  });
+
+  it('list_parts reports store failures as tool errors', async () => {
+    temp.store.close();
+    const result = (await client.callTool({
+      name: 'list_parts',
       arguments: {},
     })) as ToolCallResult;
     expect(result.isError).toBe(true);

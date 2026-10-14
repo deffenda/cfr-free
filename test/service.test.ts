@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CFRService, ServiceError } from '../src/core/service.js';
 import { StructureError } from '../src/core/structure.js';
-import { openTempStore } from './helpers.js';
+import { FIXTURE_SECTIONS, FIXTURE_STRUCTURE, openTempStore } from './helpers.js';
 
 function withService(fn: (service: CFRService) => void): void {
   const temp = openTempStore();
@@ -190,6 +190,126 @@ describe('CFRService.status', () => {
       const service = new CFRService(temp.store, 7);
       temp.store.replaceAll([], '2026-10-09', { synced_at: 'yesterday-ish' });
       expect(service.status().stale).toBe(true);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('reports structure drift against recorded expectations', () => {
+    const temp = openTempStore();
+    try {
+      const service = new CFRService(temp.store, 7);
+      // Fixtures predate the expectation meta: drift unknown, not false.
+      expect(service.status().structureDrift).toBeNull();
+
+      // The fixture index holds 3 sections + 1 appendix.
+      const meta = {
+        synced_at: new Date().toISOString(),
+        appendices_count: '1',
+        structure_json: JSON.stringify(FIXTURE_STRUCTURE),
+        structure_expected_sections: '3',
+        structure_expected_appendices: '1',
+      };
+      temp.store.replaceAll(FIXTURE_SECTIONS, '2026-10-09', meta);
+      expect(service.status().structureDrift).toBe(false);
+
+      temp.store.replaceAll(FIXTURE_SECTIONS, '2026-10-09', {
+        ...meta,
+        structure_expected_sections: '4',
+      });
+      expect(service.status().structureDrift).toBe(true);
+
+      temp.store.replaceAll(FIXTURE_SECTIONS, '2026-10-09', {
+        ...meta,
+        structure_expected_sections: 'nope',
+      });
+      expect(service.status().structureDrift).toBe(true);
+    } finally {
+      temp.cleanup();
+    }
+  });
+});
+
+describe('CFRService.listParts', () => {
+  it('lists parts with structure titles and per-kind counts', () => {
+    const temp = openTempStore();
+    try {
+      const service = new CFRService(temp.store, 7);
+      expect(service.listParts()).toEqual([
+        { part: '4', title: 'Schedule for Rating Disabilities', sections: 2, appendices: 1 },
+        { part: '17', title: 'Medical Care', sections: 1, appendices: 0 },
+      ]);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('falls back to null titles when structure is missing', () => {
+    const temp = openTempStore({ seed: false });
+    try {
+      temp.store.replaceAll(
+        [
+          {
+            kind: 'section' as const,
+            heading: 'H.',
+            chapter: 'I',
+            subchapter: null,
+            part: '4',
+            subpart: null,
+            subjectGroup: null,
+            path: '/title:38/chapter:I/part:4',
+            text: 'T.',
+            markdown: 'T.',
+            citation: '4.1',
+          },
+        ],
+        '2026-10-09',
+        {},
+      );
+      const service = new CFRService(temp.store, 7);
+      expect(service.listParts()).toEqual([{ part: '4', title: null, sections: 1, appendices: 0 }]);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('keeps the raw label when it has no Part <id> prefix', () => {
+    const temp = openTempStore({ seed: false });
+    try {
+      temp.store.replaceAll(FIXTURE_SECTIONS, '2026-10-09', {
+        structure_json: JSON.stringify({
+          type: 'title',
+          identifier: '38',
+          label: 'Title 38',
+          children: [
+            {
+              type: 'chapter',
+              identifier: 'I',
+              label: 'Chapter I',
+              children: [
+                { type: 'part', identifier: '4', label: 'Custom label', children: [] },
+                { type: 'part', identifier: '17', label: 'Part 17—Medical Care', children: [] },
+              ],
+            },
+          ],
+        }),
+      });
+      const parts = new CFRService(temp.store, 7).listParts();
+      expect(parts.find((row) => row.part === '4')?.title).toBe('Custom label');
+      expect(parts.find((row) => row.part === '17')?.title).toBe('Medical Care');
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('degrades to null titles when stored structure is unreadable', () => {
+    const temp = openTempStore();
+    try {
+      temp.store.replaceAll(FIXTURE_SECTIONS, '2026-10-09', { structure_json: '{not json' });
+      const service = new CFRService(temp.store, 7);
+      const parts = service.listParts();
+      expect(parts.length).toBeGreaterThan(0);
+      expect(parts.every((row) => row.title === null)).toBe(true);
     } finally {
       temp.cleanup();
     }
