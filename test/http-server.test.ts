@@ -69,6 +69,10 @@ describe('Titan HTTP API', () => {
     expect((await get('/api/v1/search')).status).toBe(400);
     expect((await get('/api/v1/search?q=no')).status).toBe(400);
     expect((await get('/api/v1/search?q=mental+disorder&part=abc')).status).toBe(400);
+    // Number('abc') is NaN — rejected by schema validation before any SQL.
+    expect((await get('/api/v1/search?q=mental&page=abc')).status).toBe(400);
+    expect((await get('/api/v1/search?q=mental&page=2.5')).status).toBe(400);
+    expect((await get('/api/v1/search?q=mental&per_page=999')).status).toBe(400);
   });
 
   it('returns full sections by citation', async () => {

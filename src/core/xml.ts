@@ -33,6 +33,8 @@ export class XmlFormatError extends Error {
 }
 
 const DOCTYPE_RE = /<!DOCTYPE/i;
+/** Independent of the DOCTYPE check: fail closed if declarations ever appear. */
+const ENTITY_RE = /<!ENTITY/i;
 
 type OrderNode = Record<string, unknown>;
 type StackEntry = { readonly type: string; readonly id: string };
@@ -78,7 +80,8 @@ function getAttributes(node: OrderNode): Record<string, string> {
 }
 
 /** Concatenate all text within a node list, descending through elements. */
-function inlineText(nodes: readonly unknown[]): string {
+function inlineText(nodes: readonly unknown[], depth: number): string {
+  if (depth > MAX_DEPTH) throw new XmlFormatError(`XML nesting exceeds ${MAX_DEPTH} levels`);
   let out = '';
   for (const node of nodes) {
     if (!isOrderNode(node)) continue;
@@ -87,7 +90,7 @@ function inlineText(nodes: readonly unknown[]): string {
       if (key === TEXT_KEY) {
         if (typeof value === 'string') out += value;
       } else if (Array.isArray(value)) {
-        out += inlineText(value);
+        out += inlineText(value, depth + 1);
       }
     }
   }
@@ -99,9 +102,10 @@ interface Rendered {
   readonly text: string;
 }
 
-function renderTable(children: readonly unknown[]): Rendered {
+function renderTable(children: readonly unknown[], depth: number): Rendered {
+  if (depth > MAX_DEPTH) throw new XmlFormatError(`XML nesting exceeds ${MAX_DEPTH} levels`);
   const rows: string[][] = [];
-  collectTableRows(children, rows);
+  collectTableRows(children, rows, depth + 1);
   if (rows.length === 0) return { markdown: '', text: '' };
   const header = rows[0] ?? [];
   const markdownRows = [
@@ -119,7 +123,8 @@ function escapePipe(cell: string): string {
   return cell.split('|').join('\\|');
 }
 
-function collectTableRows(children: readonly unknown[], rows: string[][]): void {
+function collectTableRows(children: readonly unknown[], rows: string[][], depth: number): void {
+  if (depth > MAX_DEPTH) throw new XmlFormatError(`XML nesting exceeds ${MAX_DEPTH} levels`);
   for (const child of children) {
     if (!isOrderNode(child)) continue;
     for (const [key, value] of Object.entries(child)) {
@@ -128,19 +133,22 @@ function collectTableRows(children: readonly unknown[], rows: string[][]): void 
         rows.push(
           value.map((cell) =>
             isOrderNode(cell)
-              ? collapseWhitespace(inlineText(Object.values(cell).filter(Array.isArray).flat()))
+              ? collapseWhitespace(
+                  inlineText(Object.values(cell).filter(Array.isArray).flat(), depth + 1),
+                )
               : '',
           ),
         );
       } else if (key === 'THEAD' || key === 'TBODY' || key === 'TFOOT') {
-        collectTableRows(value, rows);
+        collectTableRows(value, rows, depth + 1);
       }
     }
   }
 }
 
 /** Render a list of content nodes to markdown + plain text in one pass. */
-function renderBlocks(nodes: readonly unknown[]): Rendered {
+function renderBlocks(nodes: readonly unknown[], depth: number): Rendered {
+  if (depth > MAX_DEPTH) throw new XmlFormatError(`XML nesting exceeds ${MAX_DEPTH} levels`);
   const markdownParts: string[] = [];
   const textParts: string[] = [];
 
@@ -157,7 +165,7 @@ function renderBlocks(nodes: readonly unknown[]): Rendered {
         continue;
       }
       if (key === ATTR_KEY || !Array.isArray(value)) continue;
-      const block = renderBlock(key, value);
+      const block = renderBlock(key, value, depth + 1);
       if (block.markdown.length > 0) markdownParts.push(block.markdown);
       if (block.text.length > 0) textParts.push(block.text);
     }
@@ -165,22 +173,23 @@ function renderBlocks(nodes: readonly unknown[]): Rendered {
   return { markdown: markdownParts.join('\n\n'), text: textParts.join('\n\n') };
 }
 
-function renderBlock(tag: string, children: readonly unknown[]): Rendered {
-  if (tag === 'TABLE') return renderTable(children);
+function renderBlock(tag: string, children: readonly unknown[], depth: number): Rendered {
+  if (depth > MAX_DEPTH) throw new XmlFormatError(`XML nesting exceeds ${MAX_DEPTH} levels`);
+  if (tag === 'TABLE') return renderTable(children, depth);
   if (tag === 'HEAD') {
-    const value = collapseWhitespace(inlineText(children));
+    const value = collapseWhitespace(inlineText(children, depth + 1));
     return { markdown: `### ${value}`, text: value };
   }
   // Paragraphs, authority notes and source credits render identically in both
   // representations; unknown containers are descended into recursively.
-  const direct = collapseWhitespace(inlineText(children));
+  const direct = collapseWhitespace(inlineText(children, depth + 1));
   const hasElementChildren = children.some(
     (child) => isOrderNode(child) && child[TEXT_KEY] === undefined,
   );
   if (!hasElementChildren || tag === 'P' || tag === 'FP' || tag === 'SECAUTH' || tag === 'CITA') {
     return { markdown: direct, text: direct };
   }
-  return renderBlocks(children);
+  return renderBlocks(children, depth + 1);
 }
 
 function cleanHeading(head: string, citation: string, kind: SectionKind): string {
@@ -229,13 +238,13 @@ function extractSection(
     }
     const headChildren = child['HEAD'];
     if (Array.isArray(headChildren) && head.length === 0) {
-      head = inlineText(headChildren);
+      head = inlineText(headChildren, 0);
       continue;
     }
     content.push(child);
   }
 
-  const rendered = renderBlocks(content);
+  const rendered = renderBlocks(content, 0);
   if (rendered.text.length > MAX_SECTION_CHARS) {
     throw new XmlFormatError(
       `${citation} exceeds ${MAX_SECTION_CHARS} characters — unexpected document size`,
@@ -297,6 +306,10 @@ export function parseTitleXml(xml: string): RawSection[] {
   // Case-insensitive: XML declares DOCTYPE uppercase, but a smuggled
   // lowercase variant must not slip past (SPEC §12 #15).
   if (DOCTYPE_RE.test(xml)) throw new XmlFormatError('DOCTYPE declarations are not accepted');
+  // Belt and braces: entity declarations require a DOCTYPE, but reject them
+  // independently so the billion-laughs class stays closed even if the
+  // DOCTYPE gate ever changes (SPEC §12 #35).
+  if (ENTITY_RE.test(xml)) throw new XmlFormatError('ENTITY declarations are not accepted');
 
   let parsed: unknown;
   try {

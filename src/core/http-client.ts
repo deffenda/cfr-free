@@ -59,6 +59,67 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Stream a response body while enforcing the byte cap: an oversized payload
+ * is rejected *as it arrives*, instead of being buffered into memory first
+ * and checked afterwards (SPEC §12 #28).
+ */
+async function readBodyCapped(
+  response: Response,
+  maxBytes: number,
+  pathname: string,
+): Promise<string> {
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        throw new HttpError(
+          `response from ${pathname} exceeds ${maxBytes} bytes`,
+          pathname,
+          response.status,
+        );
+      }
+      chunks.push(value);
+    }
+  } finally {
+    // Release the connection whether we finished or bailed out early.
+    await reader.cancel().catch(() => undefined);
+  }
+  return Buffer.concat(chunks, total).toString('utf8');
+}
+
+/**
+ * Read at most the first `MAX_ERROR_BODY_CHARS` bytes of an error body —
+ * enough for a useful message, never an unbounded read (SPEC §12 #29).
+ */
+async function readErrorSnippet(response: Response): Promise<string> {
+  if (!response.body) return '';
+  try {
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    try {
+      while (total < MAX_ERROR_BODY_CHARS) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        total += value.byteLength;
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
+    return Buffer.concat(chunks, total).subarray(0, MAX_ERROR_BODY_CHARS).toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
 /** Retry only transient failures: network errors, timeouts, 429 and 5xx. */
 function isRetryable(error: unknown): boolean {
   if (error instanceof HttpError) {
@@ -132,9 +193,7 @@ export class HttpClient {
     }
 
     if (!response.ok) {
-      const detail = (await response.text().catch(() => ''))
-        .slice(0, MAX_ERROR_BODY_CHARS)
-        .replace(/\s+/g, ' ');
+      const detail = (await readErrorSnippet(response)).replace(/\s+/g, ' ');
       const suffix = detail ? `: ${detail}` : '';
       throw new HttpError(
         `HTTP ${response.status} for ${url.pathname}${suffix}`,
@@ -146,20 +205,13 @@ export class HttpClient {
     const maxBytes = this.options.maxBytes ?? DEFAULT_MAX_BYTES;
     const declaredLength = response.headers.get('content-length');
     if (declaredLength !== null && Number.parseInt(declaredLength, 10) > maxBytes) {
+      await response.body?.cancel().catch(() => undefined);
       throw new HttpError(
         `response from ${url.pathname} exceeds ${maxBytes} bytes`,
         url.pathname,
         response.status,
       );
     }
-    const text = await response.text();
-    if (Buffer.byteLength(text, 'utf8') > maxBytes) {
-      throw new HttpError(
-        `response from ${url.pathname} exceeds ${maxBytes} bytes`,
-        url.pathname,
-        response.status,
-      );
-    }
-    return text;
+    return await readBodyCapped(response, maxBytes, url.pathname);
   }
 }

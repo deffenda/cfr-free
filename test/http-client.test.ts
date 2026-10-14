@@ -123,6 +123,36 @@ describe('HttpClient', () => {
     await expect(client.getText(URL_UNDER_TEST)).rejects.toThrow(/exceeds 1024 bytes/);
   });
 
+  it('stops reading an oversized stream instead of buffering it', async () => {
+    // No content-length: the cap can only be enforced while streaming.
+    let pulls = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array(600));
+        if (pulls >= 100) controller.close();
+      },
+    });
+    const client = makeClient(async () => new Response(stream), { maxBytes: 1024 });
+    await expect(client.getText(URL_UNDER_TEST)).rejects.toThrow(/exceeds 1024 bytes/);
+    // Rejected after ~2 chunks; the remaining stream must never be pulled.
+    expect(pulls).toBeLessThan(10);
+  });
+
+  it('reads only a bounded snippet of an error body', async () => {
+    let pulls = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array(100).fill(0x65));
+        if (pulls >= 1000) controller.close();
+      },
+    });
+    const client = makeClient(async () => new Response(stream, { status: 400 }), { retries: 0 });
+    await expect(client.getText(URL_UNDER_TEST)).rejects.toThrow(/HTTP 400/);
+    expect(pulls).toBeLessThan(10);
+  });
+
   it('rejects invalid JSON', async () => {
     const client = makeClient(async () => okResponse('not json'));
     await expect(client.getJson(URL_UNDER_TEST, (raw) => raw)).rejects.toThrow(/invalid JSON/);

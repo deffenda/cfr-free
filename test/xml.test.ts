@@ -78,6 +78,19 @@ describe('parseTitleXml', () => {
     expect(() => parseTitleXml(malicious)).toThrow(/DOCTYPE/);
   });
 
+  it('rejects ENTITY declarations independently of the DOCTYPE gate', () => {
+    const smuggled =
+      '<ECFR><!ENTITY lol "lol"><DIV8 N="1.9" TYPE="SECTION"><HEAD>§ 1.9 x</HEAD></DIV8></ECFR>';
+    expect(() => parseTitleXml(smuggled)).toThrow(XmlFormatError);
+    expect(() => parseTitleXml(smuggled)).toThrow(/ENTITY/);
+  });
+
+  it('rejects section content nested past the depth cap', () => {
+    const inner = `${'<DIV N="n" TYPE="DIV9">'.repeat(70)}<P>deep</P>${'</DIV>'.repeat(70)}`;
+    const xml = `<DIV8 N="1.8" TYPE="SECTION"><HEAD>§ 1.8 deep.</HEAD>${inner}</DIV8>`;
+    expect(() => parseTitleXml(xml)).toThrow(/nesting exceeds 64 levels/);
+  });
+
   it('rejects sections without an N attribute', () => {
     const broken = '<DIV8 TYPE="SECTION"><HEAD>§ 1.1 x</HEAD><P>body</P></DIV8>';
     expect(() => parseTitleXml(broken)).toThrow(/without N attribute/);
