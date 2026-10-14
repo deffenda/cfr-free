@@ -22,6 +22,9 @@ describe.skipIf(!live)('live e2e (real eCFR)', () => {
       const ecfr = new EcfrApi(new HttpClient({ userAgent: `cfr-free/${VERSION}-live-e2e` }));
       const report = await syncIndex({ ecfr, store: temp.store, logger });
 
+      // Tripwire floor: live Title 38 carries ~2 950 sections; 2 000 catches
+      // catastrophic format drift (parse collapse) while leaving headroom for
+      // benign content reorganizations.
       expect(report.sections).toBeGreaterThan(2000);
       expect(Date.parse(report.issueDate)).not.toBeNaN();
 

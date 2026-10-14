@@ -57,7 +57,14 @@ export function registerResources(server: McpServer, service: CFRService, logger
         'Walks a model through searching the local Title 38 index and reading the most ' +
         'relevant sections before answering.',
       argsSchema: {
-        topic: z.string().min(3).max(200).describe('the benefits/regulatory topic to research'),
+        topic: z
+          .string()
+          .min(3)
+          .max(200)
+          // Defense-in-depth: control characters (newlines, escapes) could
+          // restructure the generated message — reject them outright.
+          .regex(/^[^\p{C}]+$/u, 'topic must not contain control characters')
+          .describe('the benefits/regulatory topic to research'),
         part: z
           .string()
           .regex(/^\d{1,3}$/)
