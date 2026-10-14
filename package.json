@@ -1,0 +1,61 @@
+{
+  "name": "cfr-free",
+  "version": "0.1.0",
+  "description": "Self-hosted Title 38 CFR data service: SQLite FTS5 index built from the eCFR API, with an MCP server and HTTP API",
+  "keywords": [
+    "mcp",
+    "cfr",
+    "38-cfr",
+    "veterans",
+    "ecfr",
+    "sqlite",
+    "fts5"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "bin": {
+    "cfr-free": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "scan": "bash tools/security-scan.sh",
+    "scan:audit": "npm audit --audit-level=high",
+    "review": "node tools/llm-review.mjs",
+    "review:spec": "node tools/llm-review.mjs docs/SPEC.md",
+    "ci": "npm run format:check && npm run lint && npm run typecheck && npm run test:coverage && npm run build && npm run scan:audit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "fast-xml-parser": "^5.11.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.19.0",
+    "@vitest/coverage-v8": "^5.0.4",
+    "eslint": "^10.12.0",
+    "eslint-plugin-security": "^4.2.0",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "typescript": "5.9.3",
+    "typescript-eslint": "^8.71.2",
+    "vitest": "^5.0.4"
+  },
+  "allowScripts": {
+    "fsevents@2.3.3": true
+  }
+}
