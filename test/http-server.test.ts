@@ -315,3 +315,50 @@ describe('Titan HTTP request-size caps', () => {
     expect(response.status).toBe(200);
   });
 });
+
+describe('Titan HTTP rate limiting', () => {
+  let temp: TempStore;
+  let server: http.Server;
+  let base: string;
+
+  beforeEach(async () => {
+    temp = openTempStore();
+  });
+
+  afterEach(async () => {
+    if (server !== undefined) {
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      });
+    }
+    temp.cleanup();
+  });
+
+  it('answers 429 with retry-after once the peer budget is spent', async () => {
+    server = createHttpServer(new CFRService(temp.store, 7), createTestLogger(), {
+      rateLimit: { capacity: 1, refillPerSec: 0.1 },
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const first = await fetch(`${base}/health`);
+    expect(first.status).toBe(200);
+
+    const second = await fetch(`${base}/health`);
+    expect(second.status).toBe(429);
+    expect(Number(second.headers.get('retry-after'))).toBeGreaterThanOrEqual(1);
+    expect(((await second.json()) as Json)['error']).toBe('rate_limited');
+  });
+
+  it('never limits without an explicit rateLimit option (loopback default)', async () => {
+    server = createHttpServer(new CFRService(temp.store, 7), createTestLogger());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    for (let i = 0; i < 50; i += 1) {
+      const response = await fetch(`${base}/health`);
+      expect(response.status).toBe(200);
+    }
+  });
+});

@@ -581,3 +581,60 @@ describe('CFRService direct-hit excerpts', () => {
     }
   });
 });
+
+describe('CFRService vanished-citation guidance', () => {
+  it('points to eCFR and surfaces mentioning sections', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '4.151a',
+          heading: 'Disability of participants in medal ceremonies.',
+          text: 'Ratings for conditions under § 4.151 are evaluated under this paragraph.',
+        }),
+      ],
+    });
+    try {
+      const service = new CFRService(temp.store, 7);
+      expect(() => service.getSection('4.151')).toThrow(/reserved, removed, or outside Title 38/);
+      try {
+        service.getSection('4.151');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '';
+        expect(message).toContain('ecfr.gov/current/title-38/section-4.151');
+        expect(message).toContain('4.151a');
+      }
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('omits the mentions clause when nothing references the citation', () => {
+    withService((service) => {
+      try {
+        service.getSection('999.999');
+        expect.unreachable('expected not_found');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '';
+        expect(message).toContain('no indexed content for citation 999.999');
+        expect(message).not.toContain('mention it');
+      }
+    });
+  });
+});
+
+describe('CFRService historical-version guidance', () => {
+  it('links the eCFR point-in-time URL in the stale notice', () => {
+    const temp = openTempStore();
+    try {
+      temp.store.setMeta(
+        'synced_at',
+        new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      );
+      const search = new CFRService(temp.store, 7).search({ query: 'mental disorder' });
+      expect(search.notice).toContain('point-in-time');
+      expect(search.notice).toContain('/on/<YYYY-MM-DD>/title-38/section-<citation>');
+    } finally {
+      temp.cleanup();
+    }
+  });
+});

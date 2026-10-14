@@ -54,13 +54,18 @@ citation?)` encodes the adjudicator workflow: locate criteria → read
 11. **`docker-compose.yml`** (legacy #10 remainder) — single-command
     deployment: HTTP server, `/data` volume, healthcheck. **Built in Round 1.**
 12. **Rate limiting for remote binding** (legacy #4) — token bucket keyed by
-    peer address, active only when `CFR_ALLOW_REMOTE=1`.
+    peer address, active only when `CFR_ALLOW_REMOTE=1`. **Built.**
 13. **Sync-change report** — per-citation content hashes across syncs:
     "N sections amended since your last sync" with the list.
 14. **Reserved / removed section clarity** — reads of reserved or vanished
-    citations say so explicitly instead of `not_found`.
+    citations say so explicitly instead of `not_found`. **Built** (Title 38
+    has no reserved placeholders in the XML, so vanished citations get
+    reserved/removed/outside-Title-38 guidance + the eCFR verify link +
+    indexed sections that mention them).
 15. **Historical-version guidance** — effective-date-of-claim disclaimer with
     a deep link to the eCFR historical/annual-edition archive (CUE claims).
+    **Built** (stale notices + the claim-evaluation prompt link the verified
+    point-in-time URL form `/on/<date>/title-38/section-<citation>`).
 
 ## Later
 

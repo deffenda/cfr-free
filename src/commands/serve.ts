@@ -32,7 +32,12 @@ export async function runServeCommand(config: AppConfig, logger: Logger): Promis
   try {
     const freshness = await ensureIndex(store, config, logger);
     const service = new CFRService(store, config.maxAgeDays);
-    const server = createHttpServer(service, logger);
+    const server = createHttpServer(service, logger, {
+      // A per-peer budget only for deliberately exposed deployments: the
+      // unauthenticated API needs a coarse DoS guard when it leaves
+      // loopback, while local tooling must never throttle itself.
+      ...(config.allowRemote ? { rateLimit: { capacity: 60, refillPerSec: 10 } } : {}),
+    });
 
     await new Promise<void>((resolve, reject) => {
       server.once('error', (error) =>
