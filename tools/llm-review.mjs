@@ -10,7 +10,7 @@
  *   --model <name>         Model id (default: $LMSTUDIO_MODEL or google/gemma-4-12b)
  *   --base-url <url>       LM Studio base URL (default: $LMSTUDIO_BASE_URL or http://localhost:1234)
  *   --max-tokens <n>       Completion budget per request (default: 4000)
- *   --budget <chars>       Max source chars per request (default: 24000)
+ *   --budget <chars>       Max source chars per request (default: 20000)
  *   -h, --help             Show help
  *
  * Defaults to reviewing docs/SPEC.md plus src/ when no paths are given.
@@ -25,9 +25,16 @@ const SYSTEM_PROMPT = [
   'The project must pass Snyk (dependencies, injection, unsafe patterns) and SonarQube',
   '(complexity, coverage, maintainability) gates.',
   '',
+  'Trust model: you see only the material inside this request. Files may be split',
+  'across independent requests, and large files are truncated (marked',
+  '`...[truncated at N chars]`). Never claim to have seen code you were not given;',
+  'flag cross-file suspicions as "verify: <file>" instead of asserting them.',
+  '',
   'Return ONLY a prioritized findings list:',
   '- Severity labels: BLOCKER, MAJOR, MINOR.',
   '- Each finding: file (and line if known) → what is wrong → concrete fix.',
+  '- Evidence first: every finding must name or quote the exact code it comes from;',
+  '  drop any finding you cannot ground in the provided material.',
   '- No praise, no summary preamble, no restating the code.',
   '- Max ~500 words per response.',
 ].join('\n');
@@ -45,7 +52,7 @@ Options:
   --model <name>         Model id (default: $LMSTUDIO_MODEL or google/gemma-4-12b)
   --base-url <url>       LM Studio base URL (default: $LMSTUDIO_BASE_URL or http://localhost:1234)
   --max-tokens <n>       Completion budget per request (default: 4000)
-  --budget <chars>       Max source chars per request (default: 24000)
+  --budget <chars>       Max source chars per request (default: 20000)
   -h, --help             Show this help`;
 
 function parseCli() {
@@ -242,7 +249,10 @@ async function main() {
     ).replace(/\/+$/, ''),
     model: values.model ?? process.env.LMSTUDIO_MODEL ?? 'google/gemma-4-12b',
     maxTokens: positiveInt(values['max-tokens'], 4000),
-    budget: positiveInt(values.budget, 24_000),
+    // LM Studio starts returning empty streams on request payloads much
+    // above ~21k chars (observed across review rounds); keep the source
+    // budget under that with room for the prompt envelope.
+    budget: positiveInt(values.budget, 20_000),
     timeoutMs: positiveInt(process.env.LLM_REVIEW_TIMEOUT_MS, 600_000),
   };
 

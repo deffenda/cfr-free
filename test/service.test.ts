@@ -388,6 +388,66 @@ describe('CFRService citation-direct search', () => {
       expect(result.hits[0]?.citationDisplay).toMatch(/^38 C\.F\.R\. § /);
     });
   });
+
+  it('keeps the pin-adjusted total consistent on later pages', () => {
+    // 4.132 matches the AND-mode citation query; the pinned 4.130 does not
+    // (its citation and text never say "38" or "cfr"), so the pin is added
+    // to the result union — and every page must report that same total.
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '4.130',
+          text:
+            'Residual functional capacity evaluation for mental disorder claims under the rating ' +
+            'schedule applies in part 4 and after the 130 day waiting period for claims.',
+        }),
+        makeSection({
+          citation: '4.132',
+          text: 'Refer to 38 CFR 4.130 and the 38 CFR rule for details.',
+        }),
+      ],
+    });
+    try {
+      const service = new CFRService(temp.store, 7);
+      const first = service.search({ query: '38 CFR 4.130', page: 1, perPage: 5 });
+      const second = service.search({ query: '38 CFR 4.130', page: 2, perPage: 5 });
+      expect(first.hits[0]?.citation).toBe('4.130');
+      expect(first.hits[0]?.direct).toBe(true);
+      expect(first.total).toBe(2);
+      expect(second.total).toBe(2);
+      expect(second.hits).toHaveLength(0);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('does not repeat the pin on later pages', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '4.130',
+          text:
+            'Residual functional capacity evaluation for mental disorder claims under the rating ' +
+            'schedule applies in part 4 and after the 130 day waiting period for claims.',
+        }),
+        makeSection({ citation: '4.131', text: '4 130 4 130 4 130' }),
+      ],
+    });
+    try {
+      const service = new CFRService(temp.store, 7);
+      const page1 = service.search({ query: '4.130', page: 1, perPage: 1 });
+      const page2 = service.search({ query: '4.130', page: 2, perPage: 1 });
+      expect(page1.hits[0]?.citation).toBe('4.130');
+      expect(page1.hits[0]?.direct).toBe(true);
+      // 4.131 ranks first (denser, shorter), so the pinned section's natural
+      // copy falls on page 2 — where it must not reappear after the pin.
+      expect(page2.hits.some((hit) => hit.citation === '4.130')).toBe(false);
+      expect(page1.total).toBe(2);
+      expect(page2.total).toBe(2);
+    } finally {
+      temp.cleanup();
+    }
+  });
 });
 
 describe('CFRService freshness envelope', () => {
@@ -529,6 +589,36 @@ describe('CFRService.health', () => {
       );
       const health = new CFRService(temp.store, 7).health();
       expect(health.status).toBe('stale');
+      expect(health.stale).toBe(true);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('reports degraded when live rows disagree with the structure tree', () => {
+    const temp = openTempStore();
+    try {
+      temp.store.setMeta('structure_expected_sections', '9999');
+      temp.store.setMeta('structure_expected_appendices', '0');
+      const service = new CFRService(temp.store, 7);
+      expect(service.status().structureDrift).toBe(true);
+      expect(service.health().status).toBe('degraded');
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('prefers degraded over stale when the index is drifted and old', () => {
+    const temp = openTempStore();
+    try {
+      temp.store.setMeta('structure_expected_sections', '9999');
+      temp.store.setMeta('structure_expected_appendices', '0');
+      temp.store.setMeta(
+        'synced_at',
+        new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      );
+      const health = new CFRService(temp.store, 7).health();
+      expect(health.status).toBe('degraded');
       expect(health.stale).toBe(true);
     } finally {
       temp.cleanup();

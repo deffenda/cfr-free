@@ -492,14 +492,25 @@ export class Store {
   }
 
   /** sha256 of every indexed section's text — the pre-sync snapshot. */
+  /**
+   * SHA-256 of every section's text, keyed by citation. Read in bounded
+   * rowid batches: materializing the whole corpus in one `.all()` would
+   * roughly double sync's peak memory (text + map), which matters in the
+   * memory-capped container image.
+   */
   captureTextHashes(): Map<string, string> {
-    const rows = this.stmt('SELECT citation, text FROM sections').all() as Record<
-      string,
-      unknown
-    >[];
     const hashes = new Map<string, string>();
-    for (const row of rows) {
-      hashes.set(String(row['citation']), hashText(String(row['text'])));
+    const statement = this.stmt(
+      'SELECT id, citation, text FROM sections WHERE id > ? ORDER BY id LIMIT 500',
+    );
+    let cursor = -1;
+    for (;;) {
+      const rows = statement.all(cursor) as Record<string, unknown>[];
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        hashes.set(String(row['citation']), hashText(String(row['text'])));
+        cursor = Number(row['id']);
+      }
     }
     return hashes;
   }

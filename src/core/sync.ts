@@ -10,8 +10,9 @@ import { parseTitleXml, type RawSection } from './xml.js';
  * parse, then atomically replace the store contents in one transaction.
  */
 
-/** Bump when the parsing contract changes (recorded in `meta`). */
-export const PARSER_VERSION = '1';
+/** Bump when the parsing contract changes (recorded in `meta`).
+ *  v2: numeric character references (`&#xA7;` → §) are now decoded. */
+export const PARSER_VERSION = '2';
 
 /** Raised when a sync cannot produce a usable index. */
 export class SyncError extends Error {

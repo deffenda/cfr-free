@@ -65,7 +65,49 @@ function isOrderNode(value: unknown): value is OrderNode {
 }
 
 function collapseWhitespace(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
+  // Every rendered text path funnels through here (paragraphs, table cells,
+  // headings, footnotes, source credits), so this is also where numeric
+  // character references get decoded — see decodeNumericEntities.
+  return decodeNumericEntities(value).replace(/\s+/g, ' ').trim();
+}
+
+const NUMERIC_ENTITY_RE = /&#(?:x([0-9a-fA-F]+)|([0-9]+));/g;
+
+/**
+ * Decode numeric character references (`&#xA7;`, `&#x201C;`, `&#160;`, …)
+ * to their characters.
+ *
+ * fast-xml-parser decodes only *named* entities (`&amp;`, `&lt;`, …), but
+ * eCFR encodes §, em dashes and smart quotes exclusively in numeric form —
+ * live title-38 XML (part 4, issue 2026-10-09) contains 276 `&#xA7;` and
+ * zero literal `§`. Without this step every section text, heading, snippet
+ * and `references[]` extraction would carry the raw entity into the index.
+ *
+ * Runs post-parse on text: the document's real markup was already consumed
+ * by the parser, so a decoded `<`/`&` is an inert character, never a tag.
+ * One accepted edge: the parser first resolves `&amp;` to a bare `&`, so a
+ * source that deliberately escapes a numeric reference (`&amp;#xA7;`)
+ * surfaces as literal `&#xA7;` and is decoded once more here — trading that
+ * rare echo for never touching markup (a pre-parse pass could turn
+ * `&#x22;` inside an attribute value into a quote and corrupt structure).
+ * The parser already drops invalid numeric refs (NUL, C0 controls,
+ * surrogate halves); these guards repeat that stance independently (belt
+ * and braces, SPEC §12 #35) and additionally refuse DEL and the C1 block
+ * (0x80–0x9F — the parser passes `&#x85;` NEL through raw) plus
+ * out-of-range codepoints the parser passes through — `String.fromCodePoint`
+ * throws on those, so this guard is load-bearing during sync. Single linear
+ * pass; `&#` presence short-circuits the common case. Exported for tests.
+ */
+export function decodeNumericEntities(value: string): string {
+  if (!value.includes('&#')) return value;
+  return value.replace(NUMERIC_ENTITY_RE, (match, hex?: string, dec?: string) => {
+    const code = hex !== undefined ? Number.parseInt(hex, 16) : Number.parseInt(dec ?? '', 10);
+    if (!Number.isInteger(code) || code <= 0 || code > 0x10ffff) return match;
+    if (code >= 0xd800 && code <= 0xdfff) return match;
+    if (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) return match;
+    if (code >= 0x7f && code <= 0x9f) return match;
+    return String.fromCodePoint(code);
+  });
 }
 
 function getAttributes(node: OrderNode): Record<string, string> {
@@ -130,13 +172,14 @@ function collectTableRows(children: readonly unknown[], rows: string[][], depth:
     for (const [key, value] of Object.entries(child)) {
       if (!Array.isArray(value)) continue;
       if (key === 'TR') {
+        // Pretty-printed XML puts whitespace text nodes between cells; they
+        // are formatting, not content, and must not shift the columns.
+        const cells = value.filter((cell) => isOrderNode(cell) && cell[TEXT_KEY] === undefined);
         rows.push(
-          value.map((cell) =>
-            isOrderNode(cell)
-              ? collapseWhitespace(
-                  inlineText(Object.values(cell).filter(Array.isArray).flat(), depth + 1),
-                )
-              : '',
+          cells.map((cell) =>
+            collapseWhitespace(
+              inlineText(Object.values(cell).filter(Array.isArray).flat(), depth + 1),
+            ),
           ),
         );
       } else if (key === 'THEAD' || key === 'TBODY' || key === 'TFOOT') {
