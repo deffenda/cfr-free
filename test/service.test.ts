@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CFRService, ServiceError } from '../src/core/service.js';
 import { StructureError } from '../src/core/structure.js';
-import { FIXTURE_SECTIONS, FIXTURE_STRUCTURE, openTempStore } from './helpers.js';
+import { FIXTURE_SECTIONS, FIXTURE_STRUCTURE, makeSection, openTempStore } from './helpers.js';
 
 function withService(fn: (service: CFRService) => void): void {
   const temp = openTempStore();
@@ -346,6 +346,236 @@ describe('CFRService.listParts', () => {
     try {
       const service = new CFRService(temp.store, 7);
       expect(() => service.browse({ chapter: 42 as never })).toThrow(/invalid input/);
+    } finally {
+      temp.cleanup();
+    }
+  });
+});
+
+describe('CFRService citation-direct search', () => {
+  it('pins the exact section when the query is a citation', () => {
+    withService((service) => {
+      const result = service.search({ query: '38 CFR 4.130' });
+      const first = result.hits[0];
+      expect(first?.citation).toBe('4.130');
+      expect(first?.direct).toBe(true);
+      expect(first?.citationDisplay).toBe('38 C.F.R. § 4.130');
+      expect(first?.sourceUrl).toBe('https://www.ecfr.gov/current/title-38/section-4.130');
+      expect(first?.matches).toEqual(expect.arrayContaining(['4', '130']));
+      expect(result.hits.filter((hit) => hit.citation === '4.130')).toHaveLength(1);
+      expect(result.total).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it('resolves § prefixes and paragraph designators', () => {
+    withService((service) => {
+      expect(service.search({ query: '§ 4.125(a)' }).hits[0]?.citation).toBe('4.125');
+      expect(service.search({ query: '4.125(a)(1)' }).hits[0]?.citation).toBe('4.125');
+    });
+  });
+
+  it('suppresses the pin when the part filter excludes it', () => {
+    withService((service) => {
+      const result = service.search({ query: '38 CFR 17.15', part: '4' });
+      expect(result.hits.some((hit) => hit.direct)).toBe(false);
+    });
+  });
+
+  it('leaves non-citation queries unpinned', () => {
+    withService((service) => {
+      const result = service.search({ query: 'mental disorder' });
+      expect(result.hits.every((hit) => hit.direct)).toBe(false);
+      expect(result.hits[0]?.citationDisplay).toMatch(/^38 C\.F\.R\. § /);
+    });
+  });
+});
+
+describe('CFRService freshness envelope', () => {
+  it('reports issue date and no notice on a fresh index', () => {
+    withService((service) => {
+      const search = service.search({ query: 'mental disorder' });
+      expect(search.indexIssueDate).toBe('2026-10-09');
+      expect(search.indexStale).toBe(false);
+      expect(search.notice).toBeNull();
+      const section = service.getSection('4.125');
+      expect(section.indexStale).toBe(false);
+      expect(section.notice).toBeNull();
+    });
+  });
+
+  it('emits a stale notice when the index ages out', () => {
+    const temp = openTempStore();
+    try {
+      temp.store.setMeta(
+        'synced_at',
+        new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      );
+      const service = new CFRService(temp.store, 7);
+      const search = service.search({ query: 'mental disorder' });
+      expect(search.indexStale).toBe(true);
+      expect(search.notice).toMatch(/stale/);
+      expect(service.getSection('4.125').notice).toMatch(/verify against the current eCFR/);
+    } finally {
+      temp.cleanup();
+    }
+  });
+});
+
+describe('CFRService phrase and acronym search', () => {
+  it('finds spelled-out text from a claims acronym query', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '4.131',
+          heading: 'Posttraumatic stress disorder.',
+          text: 'Posttraumatic stress disorder evaluation criteria apply under this section.',
+        }),
+      ],
+    });
+    try {
+      const service = new CFRService(temp.store, 7);
+      expect(service.search({ query: 'ptsd' }).hits[0]?.citation).toBe('4.131');
+      expect(service.search({ query: 'ptsd criteria' }).hits[0]?.citation).toBe('4.131');
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('matches a quoted phrase as an exact token sequence', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '4.16',
+          heading: 'Total disability ratings.',
+          text: 'Individual unemployability findings are made under this section.',
+        }),
+        makeSection({
+          citation: '4.17',
+          heading: 'Unemployability procedures.',
+          text: 'The individual may seek unemployability findings later.',
+        }),
+      ],
+    });
+    try {
+      const service = new CFRService(temp.store, 7);
+      const result = service.search({ query: '"individual unemployability"' });
+      const citations = result.hits.map((hit) => hit.citation);
+      expect(citations).toContain('4.16');
+      expect(citations).not.toContain('4.17'); // words present, sequence not
+    } finally {
+      temp.cleanup();
+    }
+  });
+});
+
+describe('CFRService.getSection references', () => {
+  it('extracts cross-references with availability flags', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '3.303',
+          text: 'Basic service requirements apply. See § 3.304 and § 4.130 for specifics under 38 CFR 999.999.',
+        }),
+        makeSection({ citation: '3.304', text: 'Presumptive service-connection rules.' }),
+      ],
+    });
+    try {
+      const section = new CFRService(temp.store, 7).getSection('3.303');
+      expect(section.references).toEqual([
+        { citation: '3.304', available: true },
+        { citation: '4.130', available: false },
+        { citation: '999.999', available: false },
+      ]);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('returns an empty list when the text cites nothing', () => {
+    withService((service) => {
+      expect(service.getSection('4.125').references).toEqual([]);
+    });
+  });
+});
+
+describe('CFRService.health', () => {
+  it('reports ready on a fresh seeded index', () => {
+    withService((service) => {
+      const health = service.health();
+      expect(health.status).toBe('ready');
+      expect(health.issueDate).toBe('2026-10-09');
+      expect(health.stale).toBe(false);
+      expect(health.syncedAt).toBeTruthy();
+    });
+  });
+
+  it('reports empty on an unseeded index', () => {
+    const temp = openTempStore({ seed: false });
+    try {
+      const health = new CFRService(temp.store, 7).health();
+      expect(health.status).toBe('empty');
+      expect(health.issueDate).toBeNull();
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('reports stale when the index ages out', () => {
+    const temp = openTempStore();
+    try {
+      temp.store.setMeta(
+        'synced_at',
+        new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      );
+      const health = new CFRService(temp.store, 7).health();
+      expect(health.status).toBe('stale');
+      expect(health.stale).toBe(true);
+    } finally {
+      temp.cleanup();
+    }
+  });
+});
+
+describe('CFRService direct-hit excerpts', () => {
+  it('cuts long section text on a sentence boundary', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '4.99',
+          heading: 'Total disability framework.',
+          text:
+            'Total disability will be found when the evidence shows the veteran is unable to ' +
+            'follow a substantially gainful occupation. ' +
+            'Secondary considerations include age, education, and work experience. ' +
+            'Additional factors may apply.',
+        }),
+      ],
+    });
+    try {
+      const hit = new CFRService(temp.store, 7).search({ query: '38 CFR 4.99' }).hits[0];
+      expect(hit?.citation).toBe('4.99');
+      expect(hit?.snippet.startsWith('Total disability will be found')).toBe(true);
+      expect(hit?.snippet.endsWith('.')).toBe(true);
+      // Cuts at the last sentence boundary within the ~200-char window.
+      expect(hit?.snippet.length ?? 0).toBeLessThan(200);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('falls back to a word boundary when text has no sentence breaks', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '4.98',
+          heading: 'Run-on text.',
+          text: `lorem ipsum dolor sit amet consectetur ${'adipiscing '.repeat(30)}`,
+        }),
+      ],
+    });
+    try {
+      const hit = new CFRService(temp.store, 7).search({ query: '38 CFR 4.98' }).hits[0];
+      expect(hit?.snippet.endsWith('…')).toBe(true);
     } finally {
       temp.cleanup();
     }

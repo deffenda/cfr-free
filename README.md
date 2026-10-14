@@ -16,9 +16,9 @@ keys, no telemetry — one Node process and one SQLite file.
 - **Local full-text search** over every section and appendix of Title 38,
   powered by SQLite FTS5 (BM25-ranked with citation/heading weighting,
   relevance snippets, and the matched terms shown per hit).
-- **MCP server** with five read-only tools any MCP client can use:
+- **MCP server** with six read-only tools any MCP client can use:
   `search_regulations`, `get_section`, `browse_title38`, `index_status`,
-  `list_parts`.
+  `list_parts`, `health`.
 - **HTTP JSON API** for scripts and apps: search, read sections, browse the
   CFR hierarchy, health check, Prometheus metrics.
 - **Freshness tracking**: the index records the eCFR issue date it was built
@@ -64,6 +64,11 @@ gate, and loopback would make it unreachable. Outside Docker the CLI still
 defaults to `127.0.0.1` with `CFR_ALLOW_REMOTE=1` required. Images are
 published to GHCR on `v*` tags with build-provenance attestations.
 
+Prefer Compose? `docker compose up -d --build` serves the API on
+`127.0.0.1:8787` with a named volume, healthcheck, and sync left explicit
+(`docker compose run --rm cfr-free sync`) so starts never trigger a surprise
+download.
+
 ### Use with Claude (MCP)
 
 Add to your MCP client config (e.g. `claude_desktop_config.json`):
@@ -84,22 +89,28 @@ disorders?"_ or _"Search Title 38 for traumatic brain injury compensation."_
 
 ### MCP tools
 
-| Tool                 | Arguments                              | Returns                                                    |
-| -------------------- | -------------------------------------- | ---------------------------------------------------------- |
-| `search_regulations` | `query`, `page?`, `per_page?`, `part?` | Ranked hits: citation, heading, snippet, score, matches    |
-| `get_section`        | `citation` (e.g. `38 CFR 4.125`)       | Full section text as markdown + ecfr.gov link              |
-| `browse_title38`     | `chapter?`, `part?`, `subpart?`        | Children of the requested hierarchy level                  |
-| `index_status`       | —                                      | Issue date, last sync, row counts, staleness, drift flag   |
-| `list_parts`         | —                                      | Parts in the index with titles and section/appendix counts |
+| Tool                 | Arguments                              | Returns                                                                                                                                                                                                          |
+| -------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `search_regulations` | `query`, `page?`, `per_page?`, `part?` | Ranked hits: citation (+ `38 C.F.R. §` display form, ecfr.gov link), heading, snippet, score, matches — with exact-citation pinning, `"quoted phrase"` search, and claims-acronym expansion (PTSD, TDIU, SMC, …) |
+| `get_section`        | `citation` (e.g. `38 CFR 4.125`)       | Full section text as markdown + ecfr.gov link + cross-references with availability flags                                                                                                                         |
+| `browse_title38`     | `chapter?`, `part?`, `subpart?`        | Children of the requested hierarchy level                                                                                                                                                                        |
+| `index_status`       | —                                      | Issue date, last sync, row counts, staleness, drift flag                                                                                                                                                         |
+| `list_parts`         | —                                      | Parts in the index with titles and section/appendix counts                                                                                                                                                       |
+| `health`             | —                                      | One-call readiness verdict: `ready`, `stale`, or `empty`                                                                                                                                                         |
 
 All tools are **read-only** and query only the local index — they never hit
-the network.
+the network. Search and section responses carry a freshness envelope
+(`indexStale` + a `notice` when the local index has aged out) so a client can
+never unknowingly quote a lapsed version.
 
 Beyond tools, the server exposes two MCP **resources** that clients can read
 directly — `cfr://index/status` (freshness JSON: issue date, last sync, row
 counts, staleness, drift) and `cfr://title38/parts` (parts with titles and
-counts) — plus one **prompt**, `cfr_research` (`topic`, `part?`), which walks a
-model through the search → read → cite workflow before answering.
+counts) — plus two **prompts**: `cfr_research` (`topic`, `part?`), which walks
+a model through the search → read → cite workflow, and
+`cfr_claim_evaluation` (`issue`, `part?`, `citation?`), which encodes the
+adjudicator workflow: readiness gate → locate criteria → quote verbatim →
+follow cross-references → paste-ready citations with source URLs.
 
 ### HTTP API
 

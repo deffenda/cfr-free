@@ -21,9 +21,15 @@ const searchOutputSchema = z.object({
   perPage: z.number(),
   total: z.number(),
   matchMode: z.enum(['and', 'or']),
+  indexIssueDate: z.string().nullable(),
+  indexStale: z.boolean(),
+  notice: z.string().nullable(),
   hits: z.array(
     z.object({
       citation: z.string(),
+      citationDisplay: z.string(),
+      sourceUrl: z.string(),
+      direct: z.boolean(),
       heading: z.string(),
       part: z.string().nullable(),
       path: z.string(),
@@ -46,6 +52,9 @@ const sectionOutputSchema = z.object({
   markdown: z.string(),
   text: z.string(),
   sourceUrl: z.string(),
+  references: z.array(z.object({ citation: z.string(), available: z.boolean() })),
+  indexStale: z.boolean(),
+  notice: z.string().nullable(),
 });
 
 const structureEntrySchema = z.object({
@@ -82,11 +91,19 @@ const listPartsOutputSchema = z.object({
   ),
 });
 
+const healthOutputSchema = z.object({
+  status: z.enum(['empty', 'stale', 'ready']),
+  issueDate: z.string().nullable(),
+  syncedAt: z.string().nullable(),
+  stale: z.boolean(),
+});
+
 type SearchOutput = z.infer<typeof searchOutputSchema>;
 type SectionOutput = z.infer<typeof sectionOutputSchema>;
 type BrowseOutput = z.infer<typeof browseOutputSchema>;
 type StatusOutput = z.infer<typeof statusOutputSchema>;
 type ListPartsOutput = z.infer<typeof listPartsOutputSchema>;
+type HealthOutput = z.infer<typeof healthOutputSchema>;
 
 function textContent(payload: unknown): string {
   return JSON.stringify(payload, null, 2);
@@ -180,7 +197,11 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
     },
     async (args) => {
       try {
-        const result: SectionOutput = service.getSection(args.citation);
+        const section = service.getSection(args.citation);
+        const result: SectionOutput = {
+          ...section,
+          references: section.references.map((reference) => ({ ...reference })),
+        };
         return {
           content: [{ type: 'text', text: textContent(result) }],
           structuredContent: result,
@@ -286,6 +307,34 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
         };
       } catch (error) {
         logger.error('tool list_parts failed', { message: toClientMessage(error) });
+        return {
+          content: [{ type: 'text', text: `Error: ${toClientMessage(error)}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.registerTool(
+    'health',
+    {
+      title: 'Index readiness',
+      description:
+        'One-call readiness verdict for the local index: "ready" (query away), "stale" (older than ' +
+        'CFR_MAX_AGE_DAYS — verify results against the current eCFR), or "empty" (no index yet — run ' +
+        '`cfr-free sync`). Clients should gate queries on this before spending tool calls.',
+      outputSchema: healthOutputSchema,
+      annotations: READ_ONLY_ANNOTATIONS,
+    },
+    async () => {
+      try {
+        const structuredContent: HealthOutput = service.health();
+        return {
+          content: [{ type: 'text', text: textContent(structuredContent) }],
+          structuredContent,
+        };
+      } catch (error) {
+        logger.error('tool health failed', { message: toClientMessage(error) });
         return {
           content: [{ type: 'text', text: `Error: ${toClientMessage(error)}` }],
           isError: true,

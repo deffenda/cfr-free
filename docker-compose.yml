@@ -1,0 +1,38 @@
+# Single-command deployment of the cfr-free HTTP API + MCP server.
+#
+#   docker compose up -d --build        # serve on 127.0.0.1:8787
+#   docker compose run --rm cfr-free sync   # build/refresh the local index
+#
+# The published port binds to loopback by default; change the left side of
+# "127.0.0.1:8787:8787" (and only with an auth proxy in front) to expose it.
+services:
+  cfr-free:
+    build: .
+    image: ghcr.io/deffenda/cfr-free:latest
+    container_name: cfr-free
+    ports:
+      - '127.0.0.1:8787:8787'
+    environment:
+      CFR_MAX_AGE_DAYS: '14'
+      # Sync explicitly (`docker compose run --rm cfr-free sync`) so the API
+      # never triggers a surprise full-download on start.
+      CFR_AUTO_SYNC: '0'
+      CFR_LOG_LEVEL: 'info'
+    volumes:
+      - cfr-data:/data
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:8787/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  cfr-data:

@@ -271,3 +271,47 @@ describe('Titan HTTP API', () => {
     }
   });
 });
+
+describe('Titan HTTP request-size caps', () => {
+  let temp: TempStore;
+  let server: http.Server;
+  let base: string;
+
+  beforeEach(async () => {
+    temp = openTempStore();
+    server = createHttpServer(new CFRService(temp.store, 7), createTestLogger());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      server.closeAllConnections();
+    });
+    temp.cleanup();
+  });
+
+  it('rejects URLs and query values that exceed the byte caps', async () => {
+    // q above 800 bytes but URL under 2048 → 400 at the param cap
+    const bigQ = new URLSearchParams({ q: 'x'.repeat(850) }).toString();
+    const paramResponse = await fetch(`${base}/api/v1/search?${bigQ}`);
+    expect(paramResponse.status).toBe(400);
+    expect(((await paramResponse.json()) as Json)['error']).toBe('invalid_input');
+
+    // oversized part parameter
+    const partResponse = await fetch(`${base}/api/v1/search?q=mental&part=${'1'.repeat(20)}`);
+    expect(partResponse.status).toBe(400);
+    expect(((await partResponse.json()) as Json)['message']).toContain('part exceeds');
+
+    // whole URL above 2048 bytes → 414 before validation
+    const hugeResponse = await fetch(`${base}/api/v1/search?q=${'y'.repeat(3000)}`);
+    expect(hugeResponse.status).toBe(414);
+    expect(((await hugeResponse.json()) as Json)['error']).toBe('uri_too_long');
+  });
+
+  it('still serves valid queries under the caps', async () => {
+    const response = await fetch(`${base}/api/v1/search?q=${encodeURIComponent('§ 4.125')}`);
+    expect(response.status).toBe(200);
+  });
+});

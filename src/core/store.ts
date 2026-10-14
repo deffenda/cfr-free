@@ -128,8 +128,11 @@ const UPSERT_META_SQL = `
 INSERT INTO meta (key, value) VALUES (?, ?)
 ON CONFLICT(key) DO UPDATE SET value = excluded.value`;
 
-const SNIPPET_TEXT = `snippet(sections_fts, 2, '', '', '…', 24)`;
-const SNIPPET_HEADING = `snippet(sections_fts, 1, '', '', '…', 24)`;
+// 36 tokens ≈ 2–3 sentences: enough context to quote from, bounded enough
+// for token-sensitive MCP consumers. tidySnippet() then trims leading
+// mid-sentence fragments (SPEC: sentence-boundary fidelity).
+const SNIPPET_TEXT = `snippet(sections_fts, 2, '', '', '…', 36)`;
+const SNIPPET_HEADING = `snippet(sections_fts, 1, '', '', '…', 36)`;
 const SNIPPET_EXPR = `CASE WHEN ${SNIPPET_TEXT} = '' THEN ${SNIPPET_HEADING} ELSE ${SNIPPET_TEXT} END`;
 
 /** Current schema version, stored in `PRAGMA user_version`. */
@@ -176,22 +179,82 @@ FROM sections_fts
 JOIN sections s ON s.id = sections_fts.rowid
 WHERE sections_fts MATCH ? AND s.part = ?`;
 
+const DIRECT_MATCH_SQL = `
+SELECT 1
+FROM sections_fts
+JOIN sections s ON s.id = sections_fts.rowid
+WHERE sections_fts MATCH ? AND s.citation = ? COLLATE NOCASE
+LIMIT 1`;
+
+/**
+ * Curated VA claims-language → regulatory-phrase expansions (one direction:
+ * acronym → phrase). Queries written in rating-office shorthand ("ptsd",
+ * "TDIU", "SMC") match text that only spells the concept out, while the
+ * primary prefix term still catches text that uses the acronym itself.
+ * Kept deliberately small: every entry is unambiguous in Title 38 context.
+ */
+const SYNONYM_PHRASES: Readonly<Record<string, string>> = {
+  ptsd: 'posttraumatic stress',
+  tbi: 'traumatic brain injury',
+  tdiu: 'individual unemployability',
+  smc: 'special monthly compensation',
+  dic: 'dependency indemnity compensation',
+  mst: 'military sexual trauma',
+  hlr: 'high level review',
+  bva: 'board of veterans appeals',
+  nsc: 'non service connected',
+};
+
 /**
  * Translate free text into a safe FTS5 match string.
  *
- * Every token is emitted as a quoted prefix phrase (`"tok"*`), so user input
- * can never introduce FTS5 operators. The result is always passed to SQLite
- * as a bound parameter, never concatenated into SQL.
+ * Quoted spans become phrase queries (exact token sequence, prefix on the
+ * last token) so verbatim regulatory language can be searched as written.
+ * Every other token is emitted as a quoted prefix (`"tok"*`), optionally
+ * grouped with a curated claims-language synonym phrase. User input can
+ * never introduce FTS5 operators: every emitted piece is alphanumeric
+ * tokens wrapped in quotes, and the result is always passed to SQLite as a
+ * bound parameter, never concatenated into SQL.
  */
 export function toFtsQuery(raw: string, mode: MatchMode): string | null {
-  const tokens = raw
-    .toLowerCase()
+  const parts: string[] = [];
+  let budget = MAX_TERMS;
+
+  const remaining = raw.toLowerCase().replace(/"([^"]{3,200})"/g, (_match, span: string) => {
+    const words = span.split(/[^\p{L}\p{N}]+/u).filter((word) => word.length > 0);
+    if (words.length > 0 && budget > 0) {
+      parts.push(`"${words.join(' ')}"*`);
+      budget = Math.max(0, budget - words.length);
+    }
+    return ' ';
+  });
+
+  const tokens = remaining
     .split(/[^\p{L}\p{N}]+/u)
     .filter((token) => token.length > 0)
-    .slice(0, MAX_TERMS);
-  if (tokens.length === 0) return null;
-  const terms = tokens.map((token) => `"${token}"*`);
-  return terms.join(mode === 'and' ? ' AND ' : ' OR ');
+    .slice(0, budget);
+  for (const token of tokens) {
+    const phrase = SYNONYM_PHRASES[token];
+    parts.push(phrase === undefined ? `"${token}"*` : `("${token}"* OR "${phrase}"*)`);
+  }
+  if (parts.length === 0) return null;
+  return parts.join(mode === 'and' ? ' AND ' : ' OR ');
+}
+
+/**
+ * Trim a snippet so it never starts mid-sentence: when the window opens
+ * on a lowercase fragment and a sentence boundary arrives in the first
+ * 60% (so at least ~40% of the window remains), restart at the next
+ * sentence. Returns the input unchanged when no safe boundary exists.
+ */
+export function tidySnippet(raw: string): string {
+  const snippet = raw.trim();
+  if (!/^[a-z]/.test(snippet)) return snippet;
+  const boundary = snippet.match(/[.!?]["')\]]?\s+/);
+  if (boundary?.index !== undefined && boundary.index < snippet.length * 0.6) {
+    return snippet.slice(boundary.index + boundary[0].length);
+  }
+  return snippet;
 }
 
 /** Ensure the on-disk schema version is compatible; adopt legacy files. */
@@ -218,7 +281,7 @@ function isBusyError(error: unknown): boolean {
 }
 
 /** Query tokens that actually appear in a hit (citation/heading/snippet). */
-function visibleMatches(
+export function visibleMatches(
   tokens: readonly string[],
   hit: {
     citation: string;
@@ -419,6 +482,14 @@ export class Store {
     return row ? toSectionRow(row) : null;
   }
 
+  /** Whether any indexed row (section or appendix) carries this citation. */
+  hasSection(citation: string): boolean {
+    const row = this.stmt('SELECT 1 FROM sections WHERE citation = ? COLLATE NOCASE LIMIT 1').get(
+      citation,
+    );
+    return row !== undefined;
+  }
+
   private countMatches(match: MatchMode, query: string, part?: string): number {
     const ftsQuery = toFtsQuery(query, match);
     if (ftsQuery === null) return 0;
@@ -472,12 +543,24 @@ export class Store {
         heading: String(record['heading']),
         part: nullableString(record['part']),
         path: String(record['path']),
-        snippet: String(record['snippet'] ?? ''),
+        snippet: tidySnippet(String(record['snippet'] ?? '')),
         score: Number(record['score'] ?? 0),
       };
       return { ...hit, matches: visibleMatches(queryTokens, hit) };
     });
     return { hits, total, page: query.page, perPage, matchMode: mode };
+  }
+
+  /**
+   * Whether an exact citation participates in the FTS result set for this
+   * query/mode — used by the service to adjust `total` when it prepends a
+   * direct citation hit that FTS itself did not return.
+   */
+  hasSearchMatch(mode: MatchMode, rawQuery: string, citation: string): boolean {
+    const ftsQuery = toFtsQuery(rawQuery, mode);
+    if (ftsQuery === null) return false;
+    const row = this.stmt(DIRECT_MATCH_SQL).get(ftsQuery, citation);
+    return row !== undefined;
   }
 
   /** Every part present in the index, with per-kind counts. */
