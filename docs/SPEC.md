@@ -146,7 +146,7 @@ Unit: citation parser, FTS sanitizer (incl. injection attempts `" OR 1=1--`), XM
 - Branch protection on `main`: PR required, strict up-to-date, required checks `quality (22)` + `quality (24)`; no mandatory review (solo maintainer — documented in CONTRIBUTING).
 - Repo settings: squash merge only, auto-delete head branches, Dependabot (npm + actions weekly), minimal `GITHUB_TOKEN` permissions (`contents: read`).
 - Local pre-push gates: `npm run ci` + `npm run scan` (npm audit, osv-scanner, gitleaks, trivy, semgrep).
-- Container (v0.5): multi-stage `Dockerfile` (node:22-alpine, non-root, index in `/data` volume); CI `docker` job builds the image and runs a hermetic offline smoke (no eCFR in PR CI). `release.yml` on `v*` tags runs the full CI gate + a live container e2e (real sync, HTTP surface, MCP `list_parts` handshake), then publishes `ghcr.io/deffenda/cfr-free:{version,major.minor,latest}` with SLSA provenance attestation — built-in `GITHUB_TOKEN` only, no secrets.
+- Container (v0.5): multi-stage `Dockerfile` (node:22-alpine, non-root, index in `/data` volume); CI `docker` job builds the image and runs a hermetic offline smoke (no eCFR in PR CI). `release.yml` on `v*` tags runs the full CI gate + a live container e2e (real sync, HTTP surface, MCP `list_parts` handshake), then publishes multi-arch (`linux/amd64` + `linux/arm64`) `ghcr.io/deffenda/cfr-free:{version,major.minor,latest}` with SLSA provenance attestation — built-in `GITHUB_TOKEN` only, no secrets.
 
 ## 12. Implementation review round (v0.3 — post-code reviews + live smoke)
 
