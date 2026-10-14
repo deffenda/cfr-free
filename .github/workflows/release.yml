@@ -1,0 +1,99 @@
+name: Release
+
+# Cutting a `v*` tag runs the full CI gate plus a live container e2e (real
+# eCFR sync inside the image), then publishes the image to GHCR with SLSA
+# build provenance. Uses only the built-in GITHUB_TOKEN — no secrets needed.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: full CI gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run ci
+
+  container-e2e:
+    name: container e2e (live sync + serve + mcp)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Build image
+        run: docker build -t cfr-free:release .
+      - name: Sync a real index inside the container
+        run: docker run --rm -v cfr-release-vol:/data cfr-free:release sync
+      - name: Serve and verify the HTTP surface
+        run: |
+          docker run -d --name cfr -v cfr-release-vol:/data -p 8787:8787 cfr-free:release
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8787/health >/dev/null && break || sleep 1; done
+          curl -fsS http://127.0.0.1:8787/health | grep '"status":"ok"'
+          curl -fsS http://127.0.0.1:8787/metrics | grep -E '^cfr_free_sections [1-9]'
+          curl -fsS 'http://127.0.0.1:8787/api/v1/search?q=mental+disorder&per_page=1' | grep '"citation"'
+          docker rm -f cfr
+      - name: MCP stdio handshake against the synced index
+        run: |
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"release-smoke","version":"1.0.0"}}}' \
+            '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_parts","arguments":{}}}' \
+            | timeout 30 docker run --rm -i -v cfr-release-vol:/data cfr-free:release mcp \
+            | grep -o 'Schedule for Rating Disabilities' | head -1
+
+  publish:
+    name: publish to GHCR
+    needs: [ci, container-e2e]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true

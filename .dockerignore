@@ -1,0 +1,11 @@
+.git
+.github
+node_modules
+dist
+coverage
+test
+docs
+tools
+*.md
+Dockerfile
+.dockerignore

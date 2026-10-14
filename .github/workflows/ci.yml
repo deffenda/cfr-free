@@ -53,6 +53,27 @@ jobs:
         with:
           scan-args: --lockfile package-lock.json
 
+  docker:
+    name: docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Build image
+        run: docker build -t cfr-free:ci .
+      - name: Offline smoke — version and empty-index exit code
+        # Deliberately network-free: the image must work without eCFR, and an
+        # empty index with auto-sync off must exit 3 with a sync hint. The
+        # full sync+serve+MCP e2e runs in the release workflow on tags.
+        run: |
+          docker run --rm cfr-free:ci version | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$'
+          set +e
+          out=$(docker run --rm -e CFR_AUTO_SYNC=0 cfr-free:ci serve 2>&1)
+          code=$?
+          set -e
+          echo "$out"
+          test "$code" -eq 3
+          echo "$out" | grep -F 'cfr-free sync'
+
   sonar:
     name: sonar
     # Runs only when the repository has SONAR_TOKEN configured (SonarQube or
