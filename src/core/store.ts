@@ -226,14 +226,18 @@ function visibleMatches(
     snippet: string;
   },
 ): string[] {
-  const haystack = `${hit.citation}\n${hit.heading}\n${hit.snippet}`.toLowerCase();
+  const words = `${hit.citation}\n${hit.heading}\n${hit.snippet}`
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u);
   const seen = new Set<string>();
   const matches: string[] = [];
   for (const token of tokens) {
     if (matches.length >= 8) break;
     if (seen.has(token)) continue;
     seen.add(token);
-    if (haystack.includes(token)) matches.push(token);
+    // Word-start match mirrors the FTS prefix semantics ("term"*) and avoids
+    // false positives like token "in" matching inside "brain".
+    if (words.some((word) => word.startsWith(token))) matches.push(token);
   }
   return matches;
 }
