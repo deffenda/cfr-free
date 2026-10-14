@@ -1,57 +1,75 @@
-# cfr-free — TOP 10 IMPROVEMENTS
+# cfr-free — Top 20 build items (groomed)
 
-A prioritized roadmap for the highest-value improvements, focused on
-user-facing value, operational robustness, ecosystem fit, and maintainability.
+Mission filter: **accuracy and information quality for veteran support
+officers and claims adjudicators evaluating a veteran's claim.** Every item
+must make it easier to find, verify, quote, or trust the governing Title 38
+CFR text. Groomed 2026-10-14 from the legacy top-10 (items 2, 3, 5, 6, 7, 8
+already shipped: exit codes, `export`, `/metrics`, `list_parts`, concurrent
+sync prevention, `matches[]`; item 10 ships as Dockerfile, compose follows).
 
-1. **MCP health check tool** — MCP clients need to know whether the index is
-   ready before issuing queries. A dedicated `health` tool returns a simple
-   `{status: 'ready'|'stale'|'empty'}` payload, letting clients avoid
-   unnecessary requests against an unprepared index and improving ecosystem fit.
+## Round 1 — built (2026-10-14)
 
-2. **Granular CLI exit codes** — Scripts currently only distinguish exit code 2
-   (config/usage errors) from code 1 (everything else). Adding exit code 3
-   ("index empty, auto-sync disabled") and exit code 4 ("port already in use")
-   gives operators precise failure signals for automation and log correlation.
+All ten items below shipped together with `docker-compose.yml` (item 11):
+citation-direct pinning, phrase search, acronym expansion, cross-reference
+extraction, freshness envelope, citation display/deep links, sentence-boundary
+snippets, the `cfr_claim_evaluation` prompt, the `health` tool, and HTTP byte
+caps. SPEC §5/§6 document the resulting surface.
 
-3. **Index backup / export subcommand** — There is no way to persist the SQLite
-   index without re-downloading the full eCFR dump. A `cfr-free export <path>`
-   command copies the index file, enabling disaster recovery, migration, and
-   offline backup without repeat syncs, improving operational robustness.
+1. **Citation-direct search resolution** — a query that _is_ a citation
+   (`4.130`, `38 CFR 4.16`, `§ 3.350(a)`) must surface that exact section as
+   the top hit. Adjudicators paste citations constantly; fuzzy keyword noise
+   above the exact provision is a correctness failure.
+2. **Quoted-phrase search** — quoted spans (`"traumatic brain injury"`) map
+   to exact FTS5 phrase queries so verbatim regulatory language can be
+   searched as written, not as loose token soup.
+3. **VA acronym / phrase expansion** — curated synonym groups (`ptsd` ↔
+   posttraumatic stress, `tdiu` ↔ individual unemployability, `smc` ↔ special
+   monthly compensation, `mst`, `dic`, `tbi`, `hlr`, `bva`, `nsc`) so queries
+   in either the acronym language of the rating office or the full regulatory
+   language find the same provisions.
+4. **Cross-reference extraction** — `get_section` returns `references[]`:
+   every `§ 4.105` / `38 CFR 4.130` mentioned in the text, with an
+   `available` flag (present locally vs. needs eCFR). Claims reasoning
+   routinely ping-pongs across parts; surfacing the web of citations removes
+   manual grep work.
+5. **Freshness envelope on every response** — search and section reads carry
+   `indexIssueDate`, `indexStale`, and a `notice` when the index is stale, so
+   an AI client can never unknowingly quote a lapsed version.
+6. **Legal citation formatting + eCFR deep links on hits** — every hit gains
+   `citationDisplay` (`38 C.F.R. § 4.130`) and `sourceUrl`, ready to paste
+   into a rating decision or brief.
+7. **Sentence-boundary snippet windows** — snippets widen (36 tokens) and
+   never start mid-sentence, so quoted context reads as prose, not shards.
+8. **Claim-evaluation MCP prompt** — `cfr_claim_evaluation(issue, part?,
+citation?)` encodes the adjudicator workflow: locate criteria → read
+   verbatim → follow cross-references → cite with source URL and issue date.
+9. **MCP `health` tool** — `ready | stale | empty` in one call; clients gate
+   queries on it instead of parsing full status payloads.
+10. **HTTP query byte caps** (legacy #9) — router-level hard limits
+    (URL ≤ 2048 bytes, `q` ≤ 800 bytes, `part` ≤ 10 bytes) on top of zod, so
+    malformed oversized requests die before validation.
 
-4. **HTTP API rate limiting** — The Titan HTTP server has no protection against
-   sustained or burst traffic. Adding simple per-IP rate limiting (e.g., 60
-   requests/minute) prevents resource exhaustion under load, improves stability
-   for self-hosted deployments, and aligns with operational robustness best
-   practices.
+## Next round
 
-5. **Prometheus `/metrics` endpoint** — Operators currently must parse the
-   human-readable `index_status` output. A `GET /api/v1/metrics` route
-   exposing row count, issue date, synced timestamp, and staleness flag in
-   Prometheus exposition format gives instant observability without custom
-   scraping, improving operational observability.
+11. **`docker-compose.yml`** (legacy #10 remainder) — single-command
+    deployment: HTTP server, `/data` volume, healthcheck. **Built in Round 1.**
+12. **Rate limiting for remote binding** (legacy #4) — token bucket keyed by
+    peer address, active only when `CFR_ALLOW_REMOTE=1`.
+13. **Sync-change report** — per-citation content hashes across syncs:
+    "N sections amended since your last sync" with the list.
+14. **Reserved / removed section clarity** — reads of reserved or vanished
+    citations say so explicitly instead of `not_found`.
+15. **Historical-version guidance** — effective-date-of-claim disclaimer with
+    a deep link to the eCFR historical/annual-edition archive (CUE claims).
 
-6. **MCP `list_parts` tool** — Users currently discover parts by trial-and-error
-   searching. A `list_parts` tool enumerates every CFR part present in the local
-   index with section counts, enabling rapid hierarchy discovery and improving
-   user-facing value for new users.
+## Later
 
-7. **Concurrent sync prevention** — When `cfr-free sync` is invoked while another
-   sync holds the SQLite lock, the CLI reports "sync in progress, please wait"
-   instead of failing with a confusing database-locked error, improving failure
-   modes and operator experience.
-
-8. **Search result term transparency** — Search hits currently include a `snippet`
-   but not the matching terms that drove the score. Surface the top contributing
-   keywords per hit (e.g., "matched: 'traumatic brain injury'") to make results
-   more explainable and improve user-facing value.
-
-9. **Hardened HTTP query string size caps** — Beyond zod validation, enforce
-   hard byte limits on all query parameters at the HTTP router level (e.g., `q`
-   max 500 bytes, `part` max 10 chars), defending against malformed or malicious
-   requests that could slip through validation and improving security surface
-   area.
-
-10. **Docker + docker-compose distribution** — Publish a `Dockerfile` and
-    `docker-compose.yml` for single-process deployment (HTTP + MCP on stdio),
-    lowering the barrier for new self-hosted users and improving ecosystem fit
-    and packaging distribution.
+16. **OpenAPI 3.1 document** (§13 #17) for third-party API consumers.
+17. **Auto-refresh stale index at startup** (§13 #14) beyond `CFR_AUTO_SYNC`.
+18. **Per-section amendment dates** — research eCFR's amendment metadata
+    feed; if derivable, attach `amendedAt` to sections (gold for date-of-claim
+    analysis).
+19. **Definitions quick access** — dedicated path to §3.1 master definitions
+    (e.g. "established profession of medicine") from tools/resources.
+20. **Appendix parity in browse** — verify appendices appear in `browse` and
+    `list_parts` navigation consistently with sections.

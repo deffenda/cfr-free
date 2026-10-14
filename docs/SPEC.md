@@ -82,27 +82,28 @@ CREATE VIRTUAL TABLE sections_fts USING fts5(
 
 ## 5. Titan HTTP API (GET-only, JSON, bind 127.0.0.1)
 
-| Route                            | Params                                | Returns                                                      |
-| -------------------------------- | ------------------------------------- | ------------------------------------------------------------ |
-| `GET /health`                    | —                                     | `{status, issueDate, syncedAt, sections, …, structureDrift}` |
-| `GET /metrics`                   | —                                     | Prometheus text exposition (see below)                       |
-| `GET /api/v1/search`             | `q` (req), `page`, `per_page`, `part` | hits: citation, heading, snippet, score, matches             |
-| `GET /api/v1/sections/:citation` | citation URL-encoded                  | full markdown + text + metadata + source URL                 |
-| `GET /api/v1/browse`             | `chapter`, `part`, `subpart`          | children of that node (type, id, label)                      |
+| Route                            | Params                                | Returns                                                                                                                                                                                             |
+| -------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /health`                    | —                                     | `{status, issueDate, syncedAt, sections, …, structureDrift}`                                                                                                                                        |
+| `GET /metrics`                   | —                                     | Prometheus text exposition (see below)                                                                                                                                                              |
+| `GET /api/v1/search`             | `q` (req), `page`, `per_page`, `part` | hits: citation(+display form), source URL, direct flag, heading, snippet, score, matches + `indexIssueDate`/`indexStale`/`notice` envelope; a query that _is_ a citation is pinned as the first hit |
+| `GET /api/v1/sections/:citation` | citation URL-encoded                  | full markdown + text + metadata + source URL + `references[]` (cross-cites with local-availability flags)                                                                                           |
+| `GET /api/v1/browse`             | `chapter`, `part`, `subpart`          | children of that node (type, id, label)                                                                                                                                                             |
 
-Hardening: no request bodies, zod-validated query strings, `X-Content-Type-Options: nosniff`, request timeout, 404/405/400 with machine-readable error JSON, `Cache-Control: max-age=3600` on section reads (content only changes on amendment). No auth — documented as localhost-only; `HOST` env can override deliberately.
+Hardening: no request bodies, zod-validated query strings, router-level byte caps (URL ≤ 2048 bytes → `414 uri_too_long`; `q` ≤ 800 bytes, `part` ≤ 10 bytes → `400`), `X-Content-Type-Options: nosniff`, request timeout, 404/405/400 with machine-readable error JSON, `Cache-Control: max-age=3600` on section reads (content only changes on amendment). No auth — documented as localhost-only; `HOST` env can override deliberately.
 
 The API is JSON-only with one deliberate exception: `GET /metrics` serves Prometheus exposition text (gauges: `cfr_free_sections`, `cfr_free_appendices`, `cfr_free_stale`, `cfr_free_max_age_days`, `cfr_free_issue_date_timestamp_seconds`, `cfr_free_synced_at_timestamp_seconds`, and `cfr_free_structure_drift` when recorded) so scrapers need no JSON parsing. It returns the same read-only data as `/health`.
 
 ## 6. MCP tools (all read-only annotations)
 
-1. `search_regulations(query, page?, per_page?, part?)` → ranked hits with citations, snippets, bm25 scores and the query terms visible in each hit (`matches`).
-2. `get_section(citation)` → accepts `4.125`, `§ 4.125`, `38 CFR 4.125`; returns markdown text, heading, path, issue date, eCFR source URL.
+1. `search_regulations(query, page?, per_page?, part?)` → ranked hits with citations, snippets, bm25 scores and the query terms visible in each hit (`matches`). A query that _is_ a citation (`4.130`, `38 CFR 4.16`, `§ 3.350(a)`) pins that exact section as the first hit; quoted spans search as exact phrases; curated claims acronyms (ptsd, tdiu, smc, mst, dic, tbi, hlr, bva, nsc) expand to their regulatory phrases; every response carries the `indexIssueDate`/`indexStale`/`notice` freshness envelope and hits carry `citationDisplay` + `sourceUrl`.
+2. `get_section(citation)` → accepts `4.125`, `§ 4.125`, `38 CFR 4.125`; returns markdown text, heading, path, issue date, eCFR source URL, and `references[]` (every `§`/`38 CFR` cross-cite in the text with a local-availability flag).
 3. `browse_title38(chapter?, part?, subpart?)` → structure children at that level.
 4. `index_status()` → freshness (issue date, synced at, staleness vs. `CFR_MAX_AGE_DAYS`, structure-drift flag).
 5. `list_parts()` → every part present in the index with its structure-tree title and section/appendix counts.
+6. `health()` → one-call readiness verdict: `ready` | `stale` | `empty` (plus issue date and last sync) for clients gating queries.
 
-All return MCP `structuredContent` + text content. `readOnlyHint: true`, `openWorldHint: false` (post-sync: no network). Beyond tools, the server registers two read-only **resources** — `cfr://index/status` (freshness JSON) and `cfr://title38/parts` (parts list) — and the `cfr_research` **prompt** (`topic`, `part?`) encoding the search → read → cite workflow. Startup: if index missing or older than `CFR_MAX_AGE_DAYS` (default 7) and `CFR_AUTO_SYNC != 0`, sync first (progress → stderr), then serve. No stdout logging ever.
+All return MCP `structuredContent` + text content. `readOnlyHint: true`, `openWorldHint: false` (post-sync: no network). Beyond tools, the server registers two read-only **resources** — `cfr://index/status` (freshness JSON) and `cfr://title38/parts` (parts list) — and two **prompts**: `cfr_research` (`topic`, `part?`) encoding the search → read → cite workflow, and `cfr_claim_evaluation` (`issue`, `part?`, `citation?`) encoding the adjudicator workflow (health gate → locate criteria → quote verbatim → follow `references[]` → paste-ready citations with source URLs and issue date). Startup: if index missing or older than `CFR_MAX_AGE_DAYS` (default 7) and `CFR_AUTO_SYNC != 0`, sync first (progress → stderr), then serve. No stdout logging ever.
 
 ## 7. Security / Snyk / SonarQube plan
 

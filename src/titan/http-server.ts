@@ -20,6 +20,13 @@ const BROWSE_PATH = '/api/v1/browse';
 const HEALTH_PATH = '/health';
 const METRICS_PATH = '/metrics';
 
+// Router-level request-size caps, enforced before validation: zod already
+// bounds `q` to 200 chars (≤ 800 UTF-8 bytes) and `part` to 3 digits, so
+// these only kill pathological requests (megabyte URLs) one layer earlier.
+const MAX_URL_BYTES = 2048;
+const MAX_QUERY_BYTES = 800;
+const MAX_PART_BYTES = 10;
+
 type JsonBody = Record<string, unknown>;
 
 function sendJson(
@@ -66,6 +73,19 @@ function errorBody(code: string, message: string, extra?: JsonBody): JsonBody {
 function parseOptionalInt(raw: string | null): number | undefined {
   if (raw === null || raw === '') return undefined;
   return Number(raw);
+}
+
+/** First oversized query parameter, or null when every cap holds. */
+function oversizedParam(url: URL): string | null {
+  const q = url.searchParams.get('q');
+  if (q !== null && Buffer.byteLength(q, 'utf8') > MAX_QUERY_BYTES) {
+    return `q exceeds ${MAX_QUERY_BYTES} bytes`;
+  }
+  const part = url.searchParams.get('part');
+  if (part !== null && Buffer.byteLength(part, 'utf8') > MAX_PART_BYTES) {
+    return `part exceeds ${MAX_PART_BYTES} bytes`;
+  }
+  return null;
 }
 
 function handleSearch(
@@ -216,11 +236,27 @@ export function createHttpServer(service: CFRService, logger: Logger): http.Serv
       return;
     }
 
+    if (Buffer.byteLength(req.url ?? '/', 'utf8') > MAX_URL_BYTES) {
+      sendJson(
+        req,
+        res,
+        414,
+        errorBody('uri_too_long', `request URL exceeds ${MAX_URL_BYTES} bytes`),
+      );
+      return;
+    }
+
     let url: URL;
     try {
       url = new URL(req.url ?? '/', 'http://localhost');
     } catch {
       sendJson(req, res, 400, errorBody('invalid_input', 'malformed request URL'));
+      return;
+    }
+
+    const oversized = oversizedParam(url);
+    if (oversized !== null) {
+      sendJson(req, res, 400, errorBody('invalid_input', oversized));
       return;
     }
 

@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import { normalizeCitation } from './citations.js';
+import { extractReferences } from './references.js';
 import {
   browse as browseStructure,
   parseStructure,
   type BrowseResult,
   type StructureNode,
 } from './structure.js';
-import { Store, type SearchHit, type MatchMode } from './store.js';
+import { Store, visibleMatches, type SearchHit, type MatchMode } from './store.js';
 
 /**
  * Application facade shared by the MCP server and the HTTP API. All input
@@ -43,13 +44,29 @@ export interface SearchInput {
   readonly part?: string | undefined;
 }
 
+/** A search hit dressed for human/legal consumption. */
+export interface PresentedHit extends SearchHit {
+  /** Paste-ready legal citation, e.g. `38 C.F.R. § 4.130`. */
+  readonly citationDisplay: string;
+  /** Permalink to the provision on ecfr.gov. */
+  readonly sourceUrl: string;
+  /** True when this row was pinned because the query *is* this citation. */
+  readonly direct: boolean;
+}
+
 export interface SearchResponse {
   readonly query: string;
   readonly page: number;
   readonly perPage: number;
   readonly total: number;
   readonly matchMode: MatchMode;
-  readonly hits: readonly SearchHit[];
+  readonly hits: readonly PresentedHit[];
+  /** Issue date of the local index backing these results. */
+  readonly indexIssueDate: string | null;
+  /** True when the local index is older than CFR_MAX_AGE_DAYS. */
+  readonly indexStale: boolean;
+  /** Warning to surface to a client when the index is stale; null otherwise. */
+  readonly notice: string | null;
 }
 
 const citationInputSchema = z.string().trim().min(1).max(120);
@@ -78,6 +95,12 @@ export interface SectionDetail {
   readonly markdown: string;
   readonly text: string;
   readonly sourceUrl: string;
+  /** Citations referenced from this text, with local-availability flags. */
+  readonly references: ReadonlyArray<{ readonly citation: string; readonly available: boolean }>;
+  /** True when the local index backing this read is older than CFR_MAX_AGE_DAYS. */
+  readonly indexStale: boolean;
+  /** Warning to surface when the index is stale; null otherwise. */
+  readonly notice: string | null;
 }
 
 export interface IndexStatus {
@@ -90,6 +113,14 @@ export interface IndexStatus {
   readonly parserVersion: string | null;
   /** True when parsed counts differ from the structure tree; null when never recorded. */
   readonly structureDrift: boolean | null;
+}
+
+/** Coarse readiness enum for MCP clients gating queries on one call. */
+export interface HealthReport {
+  readonly status: 'empty' | 'stale' | 'ready';
+  readonly issueDate: string | null;
+  readonly syncedAt: string | null;
+  readonly stale: boolean;
 }
 
 /** One part present in the local index. */
@@ -133,6 +164,53 @@ function sourceUrlFor(kind: 'section' | 'appendix', citation: string): string {
   return `https://www.ecfr.gov/current/title-38/section-${encodeURIComponent(citation)}`;
 }
 
+/** Sections are numeric citations; everything else is an appendix name. */
+function kindForCitation(citation: string): 'section' | 'appendix' {
+  return /^\d/.test(citation) ? 'section' : 'appendix';
+}
+
+/** Paste-ready display form for hits (`38 C.F.R. § 4.130`). */
+function displayCitation(kind: 'section' | 'appendix', citation: string): string {
+  return kind === 'section' ? `38 C.F.R. § ${citation}` : citation;
+}
+
+/** Strip trailing paragraph designators: `3.350(a)(4)` → `3.350`. */
+function stripParagraphSuffix(query: string): string {
+  // Loop with a flat anchored pattern instead of one nested quantifier —
+  // identical behavior, and linear-time for ReDoS checkers.
+  let stripped = query.trim();
+  for (;;) {
+    const next = stripped.replace(/\s*\([a-z0-9]{1,4}\)$/i, '');
+    if (next === stripped) return next;
+    stripped = next;
+  }
+}
+
+/** First sentence(s) of a section's text, capped at ~200 chars on a boundary. */
+function excerpt(text: string): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  if (clean.length <= 200) return clean;
+  const window = clean.slice(0, 200);
+  const stop = Math.max(
+    window.lastIndexOf('. '),
+    window.lastIndexOf('? '),
+    window.lastIndexOf('! '),
+  );
+  if (stop >= 100) return clean.slice(0, stop + 1);
+  const word = window.lastIndexOf(' ');
+  return `${window.slice(0, word > 0 ? word : 200)}…`;
+}
+
+/** Stale-index warning shared by search and section reads. */
+function noticeFor(status: IndexStatus): string | null {
+  if (!status.stale) return null;
+  return (
+    `local index is stale (issue date ${status.issueDate ?? 'unknown'}, ` +
+    `synced ${status.syncedAt ?? 'never'}, limit ${status.maxAgeDays} days) — ` +
+    'verify against the current eCFR before relying on this text'
+  );
+}
+
 /** Read-only operations over the local Title 38 index. */
 export class CFRService {
   private readonly store: Store;
@@ -148,13 +226,83 @@ export class CFRService {
     if (!parsed.success) toServiceError(parsed.error);
     const { query, page, perPage, part } = parsed.data;
     const outcome = this.store.search({ query, page, perPage, part });
+
+    let hits = outcome.hits.map((hit) => this.presentHit(hit, false));
+    let total = outcome.total;
+    if (page === 1) {
+      const direct = this.directHit(query, part, outcome.matchMode);
+      if (direct !== null) {
+        hits = [direct, ...hits.filter((hit) => hit.citation !== direct.citation)];
+        if (!direct.inResults) total += 1;
+      }
+    }
+
+    const status = this.status();
     return {
       query,
       page,
       perPage,
-      total: outcome.total,
+      total,
       matchMode: outcome.matchMode,
-      hits: outcome.hits,
+      hits,
+      indexIssueDate: status.issueDate,
+      indexStale: status.stale,
+      notice: noticeFor(status),
+    };
+  }
+
+  /**
+   * Pin the exact provision when the query itself is a citation — adjudicators
+   * paste `38 CFR 4.130(a)` constantly, and keyword noise above the exact
+   * section would be a correctness failure. Page 1 only; honors the part
+   * filter; `total` only counts the pin when FTS did not already return it.
+   */
+  private directHit(
+    query: string,
+    part: string | undefined,
+    matchMode: MatchMode,
+  ): (PresentedHit & { readonly inResults: boolean }) | null {
+    const normalized = normalizeCitation(stripParagraphSuffix(query));
+    if (normalized === null) return null;
+    const row = this.store.getSection(normalized.citation, normalized.kind);
+    if (row === null) return null;
+    if (part !== undefined && row.part !== part) return null;
+    const inResults = this.store.hasSearchMatch(matchMode, query, row.citation);
+    const hit = this.presentHit(
+      {
+        citation: row.citation,
+        heading: row.heading,
+        part: row.part,
+        path: row.path,
+        snippet: excerpt(row.text),
+        // Fabricated bm25, strictly better than any real score, so array order
+        // and score order agree; `direct: true` is the reliable client signal.
+        score: -1_000_000,
+        matches: visibleMatches(
+          query
+            .toLowerCase()
+            .split(/[^\p{L}\p{N}]+/u)
+            .filter(Boolean),
+          {
+            citation: row.citation,
+            heading: row.heading,
+            snippet: row.text,
+          },
+        ),
+      },
+      true,
+    );
+    return { ...hit, inResults };
+  }
+
+  /** Attach display citation, source URL, and direct flag to a raw hit. */
+  private presentHit(hit: SearchHit, direct: boolean): PresentedHit {
+    const kind = kindForCitation(hit.citation);
+    return {
+      ...hit,
+      citationDisplay: displayCitation(kind, hit.citation),
+      sourceUrl: sourceUrlFor(kind, hit.citation),
+      direct,
     };
   }
 
@@ -173,6 +321,7 @@ export class CFRService {
     if (row === null) {
       throw new ServiceError(`no indexed content for citation ${normalized.citation}`, 'not_found');
     }
+    const status = this.status();
     return {
       citation: row.citation,
       kind: row.kind,
@@ -185,6 +334,12 @@ export class CFRService {
       markdown: row.markdown,
       text: row.text,
       sourceUrl: sourceUrlFor(row.kind, row.citation),
+      references: extractReferences(row.text).map((citation) => ({
+        citation,
+        available: this.store.hasSection(citation),
+      })),
+      indexStale: status.stale,
+      notice: noticeFor(status),
     };
   }
 
@@ -228,6 +383,22 @@ export class CFRService {
       maxAgeDays: this.maxAgeDays,
       parserVersion: this.store.getMeta('parser_version'),
       structureDrift: this.structureDrift(sections),
+    };
+  }
+
+  /**
+   * One-call readiness verdict for MCP clients: `empty` (no index yet),
+   * `stale` (aged past CFR_MAX_AGE_DAYS), or `ready` (query away).
+   */
+  health(): HealthReport {
+    const status = this.status();
+    const state: HealthReport['status'] =
+      status.sections === 0 ? 'empty' : status.stale ? 'stale' : 'ready';
+    return {
+      status: state,
+      issueDate: status.issueDate,
+      syncedAt: status.syncedAt,
+      stale: status.stale,
     };
   }
 

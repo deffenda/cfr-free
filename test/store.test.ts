@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { Store, StoreError, MAX_TERMS, toFtsQuery } from '../src/core/store.js';
+import { Store, StoreError, MAX_TERMS, toFtsQuery, tidySnippet } from '../src/core/store.js';
 import { FIXTURE_SECTIONS, makeSection, openTempStore } from './helpers.js';
 
 describe('toFtsQuery', () => {
@@ -32,6 +32,51 @@ describe('toFtsQuery', () => {
   it('returns null for inputs with no alphanumerics', () => {
     expect(toFtsQuery('!!! ???', 'and')).toBeNull();
     expect(toFtsQuery('', 'or')).toBeNull();
+  });
+
+  it('turns quoted spans into prefix-phrase queries', () => {
+    expect(toFtsQuery('"traumatic brain injury" evaluation', 'and')).toBe(
+      '"traumatic brain injury"* AND "evaluation"*',
+    );
+    // A quoted span with only operator-looking content stays fully quoted.
+    expect(toFtsQuery('"NEAR(a b)"', 'and')).toBe('"near a b"*');
+  });
+
+  it('expands curated claims acronyms into phrase alternatives', () => {
+    expect(toFtsQuery('ptsd', 'and')).toBe('("ptsd"* OR "posttraumatic stress"*)');
+    expect(toFtsQuery('ptsd rating', 'and')).toBe(
+      '("ptsd"* OR "posttraumatic stress"*) AND "rating"*',
+    );
+    expect(toFtsQuery('evaluation', 'and')).toBe('"evaluation"*'); // no false expansion
+  });
+
+  it('charges phrase words against the term budget', () => {
+    const phrase = '"one two three four five"'; // 5 words
+    const many = `${phrase} ${Array.from({ length: 20 }, (_, i) => `term${i}`).join(' ')}`;
+    const query = toFtsQuery(many, 'and');
+    // 5 phrase words + 7 loose terms = MAX_TERMS words consumed.
+    expect((query ?? '').split(' AND ')).toHaveLength(1 + (MAX_TERMS - 5));
+    // A phrase alone may exceed the budget; loose terms then stay empty.
+    const longPhrase = `"${Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ')}" tail`;
+    expect(toFtsQuery(longPhrase, 'and')).not.toContain('tail');
+  });
+});
+
+describe('tidySnippet', () => {
+  it('drops a leading lowercase fragment when a sentence boundary follows', () => {
+    expect(tidySnippet('rating agency shall return the report. Evaluation continues here.')).toBe(
+      'Evaluation continues here.',
+    );
+  });
+
+  it('keeps snippets that already start a sentence', () => {
+    expect(tidySnippet('The rating agency shall return. next')).toBe(
+      'The rating agency shall return. next',
+    );
+  });
+
+  it('keeps fragments with no usable boundary', () => {
+    expect(tidySnippet('subordinate clause without end')).toBe('subordinate clause without end');
   });
 });
 
