@@ -1,3 +1,4 @@
+import { CHANGE_LIST_CAP, diffHashes, hashText, type SyncChanges } from './changes.js';
 import type { Logger } from '../logger.js';
 import type { EcfrApi } from './ecfr.js';
 import { countNodes, parseStructure, type StructureNode } from './structure.js';
@@ -28,6 +29,8 @@ export interface SyncReport {
   readonly sections: number;
   readonly appendices: number;
   readonly durationMs: number;
+  /** Provision-level delta versus the previous index (counts only). */
+  readonly changes: { readonly changed: number; readonly added: number; readonly removed: number };
 }
 
 function countKinds(sections: readonly RawSection[]): { sections: number; appendices: number } {
@@ -84,6 +87,13 @@ export async function syncIndex(deps: SyncDeps): Promise<SyncReport> {
   }
   const expected = verifyAgainstStructure(sections, structure, logger);
 
+  // Snapshot the outgoing index so the rebuild can report what actually
+  // changed at the provision level (roadmap: sync-change report).
+  const previousIssueDate = store.getMeta('issue_date');
+  const previousParser = store.getMeta('parser_version');
+  const oldHashes =
+    store.countSections() > 0 ? store.captureTextHashes() : new Map<string, string>();
+
   const counts = countKinds(sections);
   store.replaceAll(sections, issueDate, {
     issue_date: issueDate,
@@ -99,11 +109,45 @@ export async function syncIndex(deps: SyncDeps): Promise<SyncReport> {
     source: 'ecfr.gov',
   });
 
+  const newHashes = new Map<string, string>();
+  for (const section of sections) newHashes.set(section.citation, hashText(section.text));
+  const baseline = oldHashes.size === 0;
+  const diff = diffHashes(oldHashes, newHashes);
+  const changes: SyncChanges = baseline
+    ? {
+        fromIssueDate: null,
+        toIssueDate: issueDate,
+        changed: 0,
+        added: 0,
+        removed: 0,
+        changedCitations: [],
+        addedCitations: [],
+        removedCitations: [],
+        baseline: true,
+        parserChanged: false,
+        recordedAt: new Date().toISOString(),
+      }
+    : {
+        fromIssueDate: previousIssueDate,
+        toIssueDate: issueDate,
+        changed: diff.changed.length,
+        added: diff.added.length,
+        removed: diff.removed.length,
+        changedCitations: diff.changed.slice(0, CHANGE_LIST_CAP),
+        addedCitations: diff.added.slice(0, CHANGE_LIST_CAP),
+        removedCitations: diff.removed.slice(0, CHANGE_LIST_CAP),
+        baseline: false,
+        parserChanged: previousParser !== PARSER_VERSION,
+        recordedAt: new Date().toISOString(),
+      };
+  store.setMeta('last_changes', JSON.stringify(changes));
+
   const report: SyncReport = {
     issueDate,
     sections: counts.sections,
     appendices: counts.appendices,
     durationMs: Date.now() - startedAt,
+    changes: { changed: changes.changed, added: changes.added, removed: changes.removed },
   };
   logger.info('index rebuilt', { ...report });
   return report;

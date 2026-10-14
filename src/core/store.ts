@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { hashText } from './changes.js';
 import type { SectionKind, RawSection } from './xml.js';
 
 /**
@@ -488,6 +489,19 @@ export class Store {
       citation,
     );
     return row !== undefined;
+  }
+
+  /** sha256 of every indexed section's text — the pre-sync snapshot. */
+  captureTextHashes(): Map<string, string> {
+    const rows = this.stmt('SELECT citation, text FROM sections').all() as Record<
+      string,
+      unknown
+    >[];
+    const hashes = new Map<string, string>();
+    for (const row of rows) {
+      hashes.set(String(row['citation']), hashText(String(row['text'])));
+    }
+    return hashes;
   }
 
   private countMatches(match: MatchMode, query: string, part?: string): number {

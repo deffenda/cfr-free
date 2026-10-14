@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { normalizeCitation } from './citations.js';
 import { extractReferences } from './references.js';
+import type { SyncChanges } from './changes.js';
 import {
   browse as browseStructure,
   parseStructure,
@@ -113,6 +114,8 @@ export interface IndexStatus {
   readonly parserVersion: string | null;
   /** True when parsed counts differ from the structure tree; null when never recorded. */
   readonly structureDrift: boolean | null;
+  /** What the most recent sync changed at the provision level; null before any sync. */
+  readonly lastChanges: SyncChanges | null;
 }
 
 /** Coarse readiness enum for MCP clients gating queries on one call. */
@@ -404,7 +407,19 @@ export class CFRService {
       maxAgeDays: this.maxAgeDays,
       parserVersion: this.store.getMeta('parser_version'),
       structureDrift: this.structureDrift(sections),
+      lastChanges: this.lastChanges(),
     };
+  }
+
+  /** Parsed sync-change record; corrupted meta degrades to null, never throws. */
+  private lastChanges(): SyncChanges | null {
+    const raw = this.store.getMeta('last_changes');
+    if (raw === null) return null;
+    try {
+      return JSON.parse(raw) as SyncChanges;
+    } catch {
+      return null;
+    }
   }
 
   /**

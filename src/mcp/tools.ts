@@ -78,6 +78,21 @@ const statusOutputSchema = z.object({
   maxAgeDays: z.number(),
   parserVersion: z.string().nullable(),
   structureDrift: z.boolean().nullable(),
+  lastChanges: z
+    .object({
+      fromIssueDate: z.string().nullable(),
+      toIssueDate: z.string(),
+      changed: z.number(),
+      added: z.number(),
+      removed: z.number(),
+      changedCitations: z.array(z.string()),
+      addedCitations: z.array(z.string()),
+      removedCitations: z.array(z.string()),
+      baseline: z.boolean(),
+      parserChanged: z.boolean(),
+      recordedAt: z.string(),
+    })
+    .nullable(),
 });
 
 const listPartsOutputSchema = z.object({
@@ -269,7 +284,19 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
     },
     async () => {
       try {
-        const result: StatusOutput = service.status();
+        const status = service.status();
+        const result: StatusOutput = {
+          ...status,
+          lastChanges:
+            status.lastChanges === null
+              ? null
+              : {
+                  ...status.lastChanges,
+                  changedCitations: [...status.lastChanges.changedCitations],
+                  addedCitations: [...status.lastChanges.addedCitations],
+                  removedCitations: [...status.lastChanges.removedCitations],
+                },
+        };
         return {
           content: [{ type: 'text', text: textContent(result) }],
           structuredContent: result,

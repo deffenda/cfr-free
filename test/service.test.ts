@@ -638,3 +638,39 @@ describe('CFRService historical-version guidance', () => {
     }
   });
 });
+
+describe('CFRService last sync changes', () => {
+  it('surfaces the recorded change report and survives corrupted meta', () => {
+    const temp = openTempStore();
+    try {
+      const service = new CFRService(temp.store, 7);
+      // Seeded fixture stores never synced — no record yet.
+      expect(service.status().lastChanges).toBeNull();
+
+      temp.store.setMeta(
+        'last_changes',
+        JSON.stringify({
+          fromIssueDate: '2026-10-01',
+          toIssueDate: '2026-10-09',
+          changed: 2,
+          added: 1,
+          removed: 0,
+          changedCitations: ['4.125', '4.130'],
+          addedCitations: ['4.126'],
+          removedCitations: [],
+          baseline: false,
+          parserChanged: false,
+          recordedAt: '2026-10-09T00:00:00.000Z',
+        }),
+      );
+      const status = service.status();
+      expect(status.lastChanges?.changed).toBe(2);
+      expect(status.lastChanges?.changedCitations).toEqual(['4.125', '4.130']);
+
+      temp.store.setMeta('last_changes', '{not json');
+      expect(service.status().lastChanges).toBeNull();
+    } finally {
+      temp.cleanup();
+    }
+  });
+});
