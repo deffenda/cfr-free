@@ -148,7 +148,10 @@ export function registerResources(server: McpServer, service: CFRService, logger
                 'related criteria, cross-part rules) and read the ones that bear on the issue.\n' +
                 "5. Conclude with paste-ready citations (38 C.F.R. § X.YYY) plus each provision's " +
                 'sourceUrl and the index issue date; if the response flags a stale index, tell the ' +
-                'user to verify the text against the current eCFR before relying on it.',
+                'user to verify the text against the current eCFR before relying on it. For ' +
+                "date-of-claim or CUE questions, link the point-in-time version the veteran's " +
+                'claim was evaluated under: https://www.ecfr.gov/on/<YYYY-MM-DD>/title-38/' +
+                'section-<citation>.',
             },
           },
         ],

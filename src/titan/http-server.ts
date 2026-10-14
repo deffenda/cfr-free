@@ -2,6 +2,7 @@ import http from 'node:http';
 import { ServiceError, type CFRService } from '../core/service.js';
 import { StructureError } from '../core/structure.js';
 import type { Logger } from '../logger.js';
+import { RateLimiter } from './rate-limit.js';
 
 /**
  * Titan HTTP API: a tiny GET-only JSON surface over the local index.
@@ -227,38 +228,69 @@ function dispatch(
   sendJson(req, res, 404, errorBody('not_found', `no route for ${pathname}`));
 }
 
+/** Optional server knobs; the default (loopback) deployment needs none. */
+export interface HttpServerOptions {
+  /** Per-peer request budget — enabled only when the bind is deliberately remote. */
+  readonly rateLimit?: { readonly capacity: number; readonly refillPerSec: number };
+}
+
+/**
+ * Method, rate, and size gates that run before routing. Returns the parsed
+ * URL, or null when the request was already answered with an error.
+ */
+function precheck(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  limiter: RateLimiter | null,
+): URL | null {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.setHeader('allow', 'GET, HEAD');
+    sendJson(req, res, 405, errorBody('method_not_allowed', 'only GET and HEAD are supported'));
+    return null;
+  }
+  if (limiter !== null) {
+    const verdict = limiter.consume(req.socket.remoteAddress ?? 'unknown');
+    if (!verdict.allowed) {
+      res.setHeader('retry-after', String(Math.max(1, Math.ceil(verdict.retryAfterSec))));
+      sendJson(req, res, 429, errorBody('rate_limited', 'too many requests — retry shortly'));
+      return null;
+    }
+  }
+  if (Buffer.byteLength(req.url ?? '/', 'utf8') > MAX_URL_BYTES) {
+    sendJson(
+      req,
+      res,
+      414,
+      errorBody('uri_too_long', `request URL exceeds ${MAX_URL_BYTES} bytes`),
+    );
+    return null;
+  }
+  let url: URL;
+  try {
+    url = new URL(req.url ?? '/', 'http://localhost');
+  } catch {
+    sendJson(req, res, 400, errorBody('invalid_input', 'malformed request URL'));
+    return null;
+  }
+  const oversized = oversizedParam(url);
+  if (oversized !== null) {
+    sendJson(req, res, 400, errorBody('invalid_input', oversized));
+    return null;
+  }
+  return url;
+}
+
 /** Create (but do not start) the HTTP API server. */
-export function createHttpServer(service: CFRService, logger: Logger): http.Server {
+export function createHttpServer(
+  service: CFRService,
+  logger: Logger,
+  options: HttpServerOptions = {},
+): http.Server {
+  const limiter =
+    options.rateLimit === undefined ? null : new RateLimiter({ ...options.rateLimit });
   const server = http.createServer((req, res) => {
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
-      res.setHeader('allow', 'GET, HEAD');
-      sendJson(req, res, 405, errorBody('method_not_allowed', 'only GET and HEAD are supported'));
-      return;
-    }
-
-    if (Buffer.byteLength(req.url ?? '/', 'utf8') > MAX_URL_BYTES) {
-      sendJson(
-        req,
-        res,
-        414,
-        errorBody('uri_too_long', `request URL exceeds ${MAX_URL_BYTES} bytes`),
-      );
-      return;
-    }
-
-    let url: URL;
-    try {
-      url = new URL(req.url ?? '/', 'http://localhost');
-    } catch {
-      sendJson(req, res, 400, errorBody('invalid_input', 'malformed request URL'));
-      return;
-    }
-
-    const oversized = oversizedParam(url);
-    if (oversized !== null) {
-      sendJson(req, res, 400, errorBody('invalid_input', oversized));
-      return;
-    }
+    const url = precheck(req, res, limiter);
+    if (url === null) return;
 
     try {
       dispatch(service, req, res, url);

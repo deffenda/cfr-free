@@ -207,7 +207,9 @@ function noticeFor(status: IndexStatus): string | null {
   return (
     `local index is stale (issue date ${status.issueDate ?? 'unknown'}, ` +
     `synced ${status.syncedAt ?? 'never'}, limit ${status.maxAgeDays} days) — ` +
-    'verify against the current eCFR before relying on this text'
+    'verify against the current eCFR before relying on this text; for the version ' +
+    'in force on a past date (e.g. the date of claim) use the eCFR point-in-time ' +
+    'URL /on/<YYYY-MM-DD>/title-38/section-<citation>'
   );
 }
 
@@ -306,6 +308,25 @@ export class CFRService {
     };
   }
 
+  /**
+   * Actionable not-found guidance: a section-shaped citation that missed the
+   * index may be reserved, removed, or simply outside Title 38 — so say that,
+   * link the provision on eCFR, and surface indexed sections that mention it
+   * (neighbors like `4.151a` frequently explain the gap).
+   */
+  private notFoundMessage(citation: string): string {
+    const mentions = this.store
+      .search({ query: citation, page: 1, perPage: 5 })
+      .hits.map((hit) => hit.citation)
+      .filter((found) => found.toLowerCase() !== citation.toLowerCase());
+    const base =
+      `no indexed content for citation ${citation} — it may be reserved, removed, ` +
+      'or outside Title 38 as of the local issue date';
+    const verify = `verify it on eCFR: ${sourceUrlFor(kindForCitation(citation), citation)}`;
+    if (mentions.length === 0) return `${base}; ${verify}`;
+    return `${base}; ${verify}. Indexed sections that mention it: ${mentions.join(', ')}`;
+  }
+
   /** Fetch one section by citation (`4.125`, `§ 4.125`, `38 CFR 4.125`, …). */
   getSection(citationInput: string): SectionDetail {
     const parsed = citationInputSchema.safeParse(citationInput);
@@ -319,7 +340,7 @@ export class CFRService {
     }
     const row = this.store.getSection(normalized.citation, normalized.kind);
     if (row === null) {
-      throw new ServiceError(`no indexed content for citation ${normalized.citation}`, 'not_found');
+      throw new ServiceError(this.notFoundMessage(normalized.citation), 'not_found');
     }
     const status = this.status();
     return {
