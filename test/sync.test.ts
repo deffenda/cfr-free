@@ -21,6 +21,7 @@ const FULL_XML = `<?xml version="1.0" encoding="UTF-8"?>
 
 interface FetchRouteOptions {
   issueDate?: string | null;
+  latestIssueDate?: string | null;
   xml?: string;
   structure?: unknown;
   failFull?: boolean;
@@ -44,7 +45,8 @@ function makeFetch(options: FetchRouteOptions = {}): FetchLike {
           {
             number: 38,
             name: 'Pensions, Bonuses, and Veterans\u2019 Relief',
-            latest_issue_date: '2026-08-27',
+            latest_issue_date:
+              options.latestIssueDate === undefined ? '2026-08-27' : options.latestIssueDate,
             up_to_date_as_of: issueDate,
             latest_amended_on: '2026-08-27',
           },
@@ -113,6 +115,16 @@ describe('syncIndex', () => {
     try {
       const report = await syncIndex(deps);
       expect(report.issueDate).toBe('2026-08-27');
+    } finally {
+      deps.temp.cleanup();
+    }
+  });
+
+  it('falls back to up_to_date_as_of when latest_issue_date is null', async () => {
+    const deps = makeDeps(makeFetch({ latestIssueDate: null }));
+    try {
+      const report = await syncIndex(deps);
+      expect(report.issueDate).toBe(ISSUE_DATE);
     } finally {
       deps.temp.cleanup();
     }

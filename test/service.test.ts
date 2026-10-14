@@ -310,6 +310,42 @@ describe('CFRService.listParts', () => {
       const parts = service.listParts();
       expect(parts.length).toBeGreaterThan(0);
       expect(parts.every((row) => row.title === null)).toBe(true);
+      expect(() => service.browse()).toThrow(/unreadable/);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('keeps an exact "Part N" label with no title after the prefix', () => {
+    const temp = openTempStore();
+    try {
+      temp.store.replaceAll(FIXTURE_SECTIONS, '2026-10-09', {
+        structure_json: JSON.stringify({
+          type: 'title',
+          identifier: '38',
+          label: 'Title 38',
+          children: [
+            {
+              type: 'chapter',
+              identifier: 'I',
+              label: 'Chapter I',
+              children: [{ type: 'part', identifier: '4', label: 'Part 4', children: [] }],
+            },
+          ],
+        }),
+      });
+      const parts = new CFRService(temp.store, 7).listParts();
+      expect(parts.find((row) => row.part === '4')?.title).toBe('Part 4');
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('rejects browse input that fails schema validation', () => {
+    const temp = openTempStore();
+    try {
+      const service = new CFRService(temp.store, 7);
+      expect(() => service.browse({ chapter: 42 as never })).toThrow(/invalid input/);
     } finally {
       temp.cleanup();
     }

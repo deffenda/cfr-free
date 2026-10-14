@@ -41,4 +41,23 @@ describe('createShutdownController', () => {
     await controller.handle('SIGINT');
     expect(exit).toHaveBeenCalledWith(1);
   });
+
+  it('logs non-Error cleanup failures before exiting 1', async () => {
+    const exit = vi.fn();
+    const logger = createTestLogger();
+    const controller = createShutdownController(
+      () => {
+        throw 'kaboom';
+      },
+      { exit, logger },
+    );
+
+    await controller.handle('SIGINT');
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(
+      logger.records.some(
+        (record) => record.message === 'shutdown failed' && record.fields?.['message'] === 'kaboom',
+      ),
+    ).toBe(true);
+  });
 });

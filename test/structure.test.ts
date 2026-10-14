@@ -29,6 +29,18 @@ describe('parseStructure', () => {
     expect(root.children).toHaveLength(1);
     expect(root.children[0]?.identifier).toBe('I');
   });
+
+  it('coerces non-string labels and non-array children', () => {
+    const root = parseStructure({
+      type: 'title',
+      identifier: '38',
+      label: 't',
+      children: [{ type: 'chapter', identifier: 'I', label: 7, children: 'nope' }],
+    });
+    const chapter = root.children[0];
+    expect(chapter?.label).toBe('');
+    expect(chapter?.children).toEqual([]);
+  });
 });
 
 describe('browse', () => {

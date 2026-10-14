@@ -50,4 +50,8 @@ describe('loadConfig', () => {
   it('produces actionable remote-bind guidance', () => {
     expect(() => loadConfig({ CFR_HOST: '10.0.0.5' })).toThrow(/CFR_ALLOW_REMOTE=1/);
   });
+
+  it('names the environment when a failure carries no field path', () => {
+    expect(() => loadConfig(null as never)).toThrow(/env:/);
+  });
 });

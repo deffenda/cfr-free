@@ -194,4 +194,92 @@ describe('MCP server (in-memory transport)', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain('Error:');
   });
+
+  it('exposes index metadata as MCP resources', async () => {
+    const resources = await client.listResources();
+    const uris = resources.resources.map((resource) => resource.uri).sort();
+    expect(uris).toEqual(['cfr://index/status', 'cfr://title38/parts']);
+
+    const status = await client.readResource({ uri: 'cfr://index/status' });
+    expect(status.contents[0]?.mimeType).toBe('application/json');
+    const parsed = JSON.parse((status.contents[0] as { text?: string }).text ?? '{}') as {
+      issueDate: string;
+      sections: number;
+    };
+    expect(parsed.issueDate).toBe('2026-10-09');
+    expect(parsed.sections).toBe(4);
+
+    const parts = await client.readResource({ uri: 'cfr://title38/parts' });
+    const parsedParts = JSON.parse((parts.contents[0] as { text?: string }).text ?? '{}') as {
+      parts: Array<Record<string, unknown>>;
+    };
+    expect(parsedParts.parts[0]).toMatchObject({
+      part: '4',
+      title: 'Schedule for Rating Disabilities',
+    });
+  });
+
+  it('rejects unknown resource URIs', async () => {
+    await expect(client.readResource({ uri: 'cfr://nope' })).rejects.toThrow();
+  });
+
+  it('offers a cfr_research prompt with validated arguments', async () => {
+    const prompts = await client.listPrompts();
+    expect(prompts.prompts.map((prompt) => prompt.name)).toEqual(['cfr_research']);
+
+    const result = await client.getPrompt({
+      name: 'cfr_research',
+      arguments: { topic: 'traumatic brain injury', part: '4' },
+    });
+    const text = (result.messages[0]?.content as { text?: string }).text ?? '';
+    expect(text).toContain('traumatic brain injury');
+    expect(text).toContain('CFR part 4');
+    expect(text).toContain('search_regulations');
+
+    const unscoped = await client.getPrompt({
+      name: 'cfr_research',
+      arguments: { topic: 'prosthetics' },
+    });
+    expect((unscoped.messages[0]?.content as { text?: string }).text ?? '').toContain(
+      'all of Title 38',
+    );
+
+    await expect(client.getPrompt({ name: 'cfr_research', arguments: {} })).rejects.toThrow();
+    await expect(
+      client.getPrompt({ name: 'cfr_research', arguments: { topic: 'x' } }),
+    ).rejects.toThrow();
+  });
+
+  it('search_regulations reports store failures as tool errors', async () => {
+    temp.store.close();
+    const result = (await client.callTool({
+      name: 'search_regulations',
+      arguments: { query: 'mental disorder' },
+    })) as ToolCallResult;
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('Error:');
+  });
+
+  it('reports non-Error failures as unknown error', async () => {
+    const badService = new Proxy({} as CFRService, {
+      get: () => () => {
+        throw 'boom';
+      },
+    });
+    const server = buildMcpServer(badService, createTestLogger());
+    const probe = new Client({ name: 'probe', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), probe.connect(clientTransport)]);
+    try {
+      const result = (await probe.callTool({
+        name: 'index_status',
+        arguments: {},
+      })) as ToolCallResult;
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain('unknown error');
+    } finally {
+      await probe.close();
+      await server.close();
+    }
+  });
 });
