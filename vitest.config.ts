@@ -6,15 +6,10 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      // cli.ts and the mcp/serve/sync command modules are process-boundary
-      // wiring (stdio, listeners, signals) exercised by the documented
-      // end-to-end smoke tests instead of unit tests.
-      exclude: [
-        'src/cli.ts',
-        'src/commands/mcp.ts',
-        'src/commands/serve.ts',
-        'src/commands/sync.ts',
-      ],
+      // The mcp/serve/sync command modules are process-boundary wiring
+      // (stdio, listeners, signals) exercised by the documented end-to-end
+      // smoke tests instead of unit tests; cli.ts is covered by test/cli.test.ts.
+      exclude: ['src/commands/mcp.ts', 'src/commands/serve.ts', 'src/commands/sync.ts'],
       reporter: ['text', 'json-summary', 'lcov'],
       thresholds: {
         lines: 90,
