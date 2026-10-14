@@ -241,3 +241,68 @@ describe('Store.open failures', () => {
     expect(StoreError).toBeDefined();
   });
 });
+
+function makeEcfr(fetchFn: FetchLike): EcfrApi {
+  return new EcfrApi(
+    new HttpClient({ fetchFn, sleep: async () => undefined, retryDelayMs: 0, retries: 0 }),
+  );
+}
+
+describe('syncIndex change reporting', () => {
+  it('records a baseline on the first sync', async () => {
+    const deps = makeDeps(makeFetch());
+    try {
+      const report = await syncIndex(deps);
+      expect(report.changes).toEqual({ changed: 0, added: 0, removed: 0 });
+      const changes = JSON.parse(deps.store.getMeta('last_changes') ?? '{}') as {
+        baseline: boolean;
+        changedCitations: string[];
+        fromIssueDate: string | null;
+      };
+      expect(changes.baseline).toBe(true);
+      expect(changes.changedCitations).toEqual([]);
+      expect(changes.fromIssueDate).toBeNull();
+    } finally {
+      deps.temp.cleanup();
+    }
+  });
+
+  it('diffs amended, added and removed provisions across syncs', async () => {
+    const temp = openTempStore({ seed: false });
+    const logger = createTestLogger();
+    const secondXml = FULL_XML.replace('<P>Body text.</P>', '<P>Body text, amended.</P>')
+      .replace(
+        '</DIV5>',
+        '<DIV8 N="4.126" TYPE="SECTION"><HEAD>§ 4.126 Newly added.</HEAD><P>New.</P></DIV8></DIV5>',
+      )
+      .replace(/<DIV9[\s\S]*?<\/DIV9>/, '');
+    try {
+      await syncIndex({ ecfr: makeEcfr(makeFetch()), store: temp.store, logger });
+      const report = await syncIndex({
+        ecfr: makeEcfr(makeFetch({ xml: secondXml })),
+        store: temp.store,
+        logger,
+      });
+      expect(report.changes).toEqual({ changed: 1, added: 1, removed: 1 });
+      const changes = JSON.parse(temp.store.getMeta('last_changes') ?? '{}') as {
+        baseline: boolean;
+        changed: number;
+        changedCitations: string[];
+        addedCitations: string[];
+        removedCitations: string[];
+        fromIssueDate: string | null;
+        toIssueDate: string;
+        parserChanged: boolean;
+      };
+      expect(changes.baseline).toBe(false);
+      expect(changes.changedCitations).toEqual(['4.125']);
+      expect(changes.addedCitations).toEqual(['4.126']);
+      expect(changes.removedCitations).toEqual(['Appendix A to Part 4']);
+      expect(changes.fromIssueDate).toBe(ISSUE_DATE);
+      expect(changes.toIssueDate).toBe(ISSUE_DATE);
+      expect(changes.parserChanged).toBe(false);
+    } finally {
+      temp.cleanup();
+    }
+  });
+});

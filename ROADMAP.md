@@ -56,7 +56,9 @@ citation?)` encodes the adjudicator workflow: locate criteria → read
 12. **Rate limiting for remote binding** (legacy #4) — token bucket keyed by
     peer address, active only when `CFR_ALLOW_REMOTE=1`. **Built.**
 13. **Sync-change report** — per-citation content hashes across syncs:
-    "N sections amended since your last sync" with the list.
+    "N sections amended since your last sync" with the list. **Built**
+    (schema-free: outgoing hashes captured before the wholesale rebuild;
+    `index_status`/`/health`/`cfr-free sync` report carry the diff).
 14. **Reserved / removed section clarity** — reads of reserved or vanished
     citations say so explicitly instead of `not_found`. **Built** (Title 38
     has no reserved placeholders in the XML, so vanished citations get
