@@ -215,4 +215,59 @@ describe('Titan HTTP API', () => {
       });
     }
   });
+
+  it('renders metrics for an index that was never synced', async () => {
+    const fresh = openTempStore({ seed: false });
+    const empty = createHttpServer(new CFRService(fresh.store, 7), createTestLogger());
+    await new Promise<void>((resolve) => empty.listen(0, '127.0.0.1', resolve));
+    const port = (empty.address() as AddressInfo).port;
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/metrics`);
+      const text = await response.text();
+      expect(response.status).toBe(200);
+      // Never synced: stale flag on, unknown timestamps zeroed.
+      expect(text).toContain('cfr_free_stale 1');
+      expect(text).toContain('cfr_free_issue_date_timestamp_seconds 0');
+      expect(text).toContain('cfr_free_synced_at_timestamp_seconds 0');
+    } finally {
+      await new Promise<void>((resolve) => {
+        empty.close(() => resolve());
+        empty.closeAllConnections();
+      });
+      fresh.cleanup();
+    }
+  });
+
+  it('renders an unparseable issue date as epoch 0', async () => {
+    temp.store.setMeta('issue_date', 'not-a-date');
+    const response = await fetch(`${base}/metrics`);
+    const text = await response.text();
+    expect(response.status).toBe(200);
+    expect(text).toContain('cfr_free_issue_date_timestamp_seconds 0');
+  });
+
+  it('logs non-Error dispatch failures with a stringified message', async () => {
+    const logger = createTestLogger();
+    const service = new CFRService(temp.store, 7);
+    service.search = () => {
+      throw 'boom';
+    };
+    const custom = createHttpServer(service, logger);
+    await new Promise<void>((resolve) => custom.listen(0, '127.0.0.1', resolve));
+    const port = (custom.address() as AddressInfo).port;
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/v1/search?q=anything`);
+      expect(response.status).toBe(500);
+      expect(
+        logger.records.some(
+          (record) => record.level === 'error' && record.fields?.['message'] === 'boom',
+        ),
+      ).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => {
+        custom.close(() => resolve());
+        custom.closeAllConnections();
+      });
+    }
+  });
 });

@@ -147,4 +147,50 @@ describe('parseTitleXml', () => {
     expect(section?.text).toContain('Direct loose text.');
     expect(section?.text).toContain('Paragraph.');
   });
+
+  it('keeps section headings that lack the section-sign prefix', () => {
+    const xml =
+      '<DIV8 N="1.5" TYPE="SECTION"><HEAD>Caption without citation.</HEAD><P>x</P></DIV8>';
+    const [section] = parseTitleXml(xml);
+    expect(section?.heading).toBe('Caption without citation.');
+  });
+
+  it('reports malformed XML as a parse failure', () => {
+    expect(() => parseTitleXml('<ECFR><DIV1')).toThrow(/XML parse failed/);
+  });
+
+  it('ignores stray text sitting directly inside a table body', () => {
+    const xml =
+      '<DIV8 N="1.6" TYPE="SECTION"><HEAD>§ 1.6 table.</HEAD><TABLE><TBODY>noise<TR><TD>1</TD></TR></TABLE></DIV8>';
+    const [section] = parseTitleXml(xml);
+    expect(section?.markdown).toContain('| 1 |');
+  });
+
+  it('renders a table without rows as empty', () => {
+    const xml =
+      '<DIV8 N="1.7" TYPE="SECTION"><HEAD>§ 1.7 table.</HEAD><TABLE><CAPTION>none</CAPTION></TABLE></DIV8>';
+    const [section] = parseTitleXml(xml);
+    expect(section?.markdown).not.toContain('|');
+    expect(section?.text).not.toContain('|');
+  });
+
+  it('keeps an appendix heading that is exactly its citation', () => {
+    const xml = '<DIV9 N="Appendix Q" TYPE="APPENDIX"><HEAD>Appendix Q</HEAD><P>x</P></DIV9>';
+    const [appendix] = parseTitleXml(xml);
+    expect(appendix?.kind).toBe('appendix');
+    expect(appendix?.heading).toBe('Appendix Q');
+  });
+
+  it('rejects division nesting deeper than the walk cap', () => {
+    const xml = `${'<DIV9 N="n" TYPE="OTHER">'.repeat(70)}${'</DIV9>'.repeat(70)}`;
+    expect(() => parseTitleXml(xml)).toThrow(/nesting exceeds 64 levels/);
+  });
+
+  it('parses divisions without an N attribute as empty stack ids', () => {
+    const xml =
+      '<DIV3 TYPE="CHAPTER"><DIV5 N="4" TYPE="PART"><DIV8 N="1.9" TYPE="SECTION"><HEAD>§ 1.9 x.</HEAD><P>b</P></DIV8></DIV5></DIV3>';
+    const [section] = parseTitleXml(xml);
+    expect(section?.chapter).toBeNull();
+    expect(section?.citation).toBe('1.9');
+  });
 });

@@ -95,6 +95,12 @@ disorders?"_ or _"Search Title 38 for traumatic brain injury compensation."_
 All tools are **read-only** and query only the local index — they never hit
 the network.
 
+Beyond tools, the server exposes two MCP **resources** that clients can read
+directly — `cfr://index/status` (freshness JSON: issue date, last sync, row
+counts, staleness, drift) and `cfr://title38/parts` (parts with titles and
+counts) — plus one **prompt**, `cfr_research` (`topic`, `part?`), which walks a
+model through the search → read → cite workflow before answering.
+
 ### HTTP API
 
 | Method         | Path                         | Query params                               |

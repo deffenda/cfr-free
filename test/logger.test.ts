@@ -41,4 +41,12 @@ describe('createLogger', () => {
     const record = JSON.parse(lines[0] ?? '{}') as Record<string, unknown>;
     expect(record['fieldsError']).toBe('unserializable');
   });
+
+  it('falls back to an empty object when serialization yields undefined', () => {
+    const { stream, lines } = captureStream();
+    const logger = createLogger('debug', stream);
+    // A field that hijacks toJSON can make JSON.stringify return undefined.
+    logger.info('custom toJSON', { toJSON: () => undefined });
+    expect(lines[0]?.trim()).toBe('{}');
+  });
 });

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -317,6 +317,93 @@ describe('Store search matches', () => {
       expect(matches).not.toContain('shall');
     } finally {
       temp.cleanup();
+    }
+  });
+});
+
+describe('Store transaction and integrity edge cases', () => {
+  it('propagates non-busy BEGIN failures raw', () => {
+    const temp = openTempStore();
+    try {
+      expect(() =>
+        temp.store.transaction(() => {
+          temp.store.transaction(() => undefined);
+        }),
+      ).toThrow(/within a transaction/);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('wraps busy errors raised mid-transaction', () => {
+    const temp = openTempStore();
+    try {
+      expect(() =>
+        temp.store.transaction(() => {
+          throw Object.assign(new Error('synthetic contention'), { errcode: 5 });
+        }),
+      ).toThrow(/interrupted by another cfr-free process/);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('rethrows non-object failures from the transaction body', () => {
+    const temp = openTempStore();
+    try {
+      let caught: unknown;
+      try {
+        temp.store.transaction(() => {
+          throw 'plain failure';
+        });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBe('plain failure');
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('opens an index in the current directory without mkdir', () => {
+    const relative = 'cfr-free-relative-open-test.sqlite';
+    try {
+      const store = Store.open(relative);
+      store.close();
+    } finally {
+      for (const suffix of ['', '-wal', '-shm']) {
+        rmSync(`${relative}${suffix}`, { force: true });
+      }
+    }
+  });
+
+  it('fails the integrity check on a database with corrupted pages', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-free-integrity-'));
+    const file = path.join(dir, 'index.sqlite');
+    const damaged = path.join(dir, 'damaged.sqlite');
+    try {
+      const source = Store.open(file);
+      source.replaceAll(FIXTURE_SECTIONS, '2026-10-09', {});
+      source.close();
+      // Find a btree root page that is not the schema page, then corrupt only
+      // it: the header and page 1 must stay valid so opening gets far enough
+      // for quick_check to report the damage (SPEC §12 #9 in spirit).
+      const raw = new DatabaseSync(file);
+      const roots = raw
+        .prepare("SELECT rootpage FROM sqlite_master WHERE type = 'table' AND rootpage > 1")
+        .all() as Array<{ rootpage: number }>;
+      raw.close();
+      const rootpage = roots[0]?.rootpage ?? 0;
+      expect(rootpage).toBeGreaterThan(1);
+      const bytes = readFileSync(file);
+      const pageSize = bytes.readUInt16BE(16) || 65_536;
+      const start = (rootpage - 1) * pageSize;
+      expect(bytes.length).toBeGreaterThan(start);
+      bytes.fill(0xab, start, start + pageSize);
+      writeFileSync(damaged, bytes);
+      expect(() => Store.open(damaged)).toThrow(/integrity check failed/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

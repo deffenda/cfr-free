@@ -205,4 +205,97 @@ describe('HttpClient', () => {
     });
     await expect(client.getText(URL_UNDER_TEST)).rejects.toThrow(HttpError);
   });
+
+  it('retries 429 responses', async () => {
+    let calls = 0;
+    const client = makeClient(async () => {
+      calls += 1;
+      return calls === 1 ? new Response('slow down', { status: 429 }) : okResponse('ok');
+    });
+    await expect(client.getText(URL_UNDER_TEST)).resolves.toBe('ok');
+    expect(calls).toBe(2);
+  });
+
+  it('retries AbortError rejections', async () => {
+    let calls = 0;
+    const client = makeClient(async () => {
+      calls += 1;
+      if (calls === 1) throw new DOMException('aborted', 'AbortError');
+      return okResponse('ok');
+    });
+    await expect(client.getText(URL_UNDER_TEST)).resolves.toBe('ok');
+    expect(calls).toBe(2);
+  });
+
+  it('treats status-less failures as retryable and survives broken error streams', async () => {
+    let calls = 0;
+    const brokenErrorBody = {
+      getReader: () => ({
+        read: async () => {
+          throw new Error('stream broke');
+        },
+        cancel: async () => undefined,
+      }),
+    };
+    const client = makeClient(async () => {
+      calls += 1;
+      if (calls === 1) {
+        // Odd fetch implementations may omit both `status` and a usable body.
+        return {
+          ok: false,
+          status: undefined,
+          headers: new Headers(),
+          body: brokenErrorBody,
+        } as unknown as Response;
+      }
+      return okResponse('ok');
+    });
+    await expect(client.getText(URL_UNDER_TEST)).resolves.toBe('ok');
+    expect(calls).toBe(2);
+  });
+
+  it('returns an empty body when the response has no body', async () => {
+    const client = makeClient(async () => new Response(null, { status: 200 }));
+    await expect(client.getText(URL_UNDER_TEST)).resolves.toBe('');
+  });
+
+  it('retries an error response with a null body', async () => {
+    let calls = 0;
+    const client = makeClient(async () => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          ok: false,
+          status: 500,
+          headers: new Headers(),
+          body: null,
+        } as unknown as Response;
+      }
+      return okResponse('ok');
+    });
+    await expect(client.getText(URL_UNDER_TEST)).resolves.toBe('ok');
+    expect(calls).toBe(2);
+  });
+
+  it('uses the default retry budget when none is configured', async () => {
+    let calls = 0;
+    const client = new HttpClient({
+      fetchFn: async () => {
+        calls += 1;
+        return new Response('boom', { status: 500 });
+      },
+      sleep: async () => undefined,
+      retryDelayMs: 0,
+      userAgent: 'cfr-free/test',
+    });
+    await expect(client.getText(URL_UNDER_TEST)).rejects.toThrow(HttpError);
+    expect(calls).toBeGreaterThan(1);
+  });
+
+  it('falls back to the global fetch when no fetchFn is configured', async () => {
+    const client = new HttpClient({ userAgent: 'cfr-free/test', retries: 0 });
+    await expect(client.getText(new URL('data:text/plain,global-fetch'))).resolves.toBe(
+      'global-fetch',
+    );
+  });
 });

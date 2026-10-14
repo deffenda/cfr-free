@@ -3,7 +3,7 @@ import { loadConfig } from '../src/config.js';
 import { HttpClient, type FetchLike } from '../src/core/http-client.js';
 import { EcfrApi } from '../src/core/ecfr.js';
 import { CommandError } from '../src/exit-codes.js';
-import { ensureIndex } from '../src/commands/ensure-index.js';
+import { createEcfrApi, ensureIndex } from '../src/commands/ensure-index.js';
 import { createTestLogger, FIXTURE_SECTIONS, openTempStore } from './helpers.js';
 
 const MINIMAL_XML = `<ECFR><DIV1 N="38" TYPE="TITLE"><HEAD>T</HEAD><DIV3 N="I" TYPE="CHAPTER"><HEAD>C</HEAD>
@@ -188,5 +188,9 @@ describe('ensureIndex', () => {
     } finally {
       temp.cleanup();
     }
+  });
+
+  it('builds a versioned eCFR client', () => {
+    expect(createEcfrApi()).toBeInstanceOf(EcfrApi);
   });
 });

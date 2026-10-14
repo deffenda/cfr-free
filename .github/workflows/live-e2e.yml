@@ -1,0 +1,31 @@
+name: Live E2E
+
+# Weekly tripwire against real eCFR drift: full sync + consistent reads
+# (LIVE_TESTS=1), plus manual dispatch. Never runs on pull requests —
+# PR CI stays hermetic (SPEC §12 #12).
+
+on:
+  schedule:
+    - cron: '23 5 * * 1' # Mondays 05:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-e2e
+  cancel-in-progress: false
+
+jobs:
+  live:
+    name: live sync (real eCFR)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Live sync and read-consistency smoke
+        run: LIVE_TESTS=1 npx vitest run test/live.test.ts
