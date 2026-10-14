@@ -1,5 +1,7 @@
-import { writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { Store, StoreError, MAX_TERMS, toFtsQuery } from '../src/core/store.js';
 import { FIXTURE_SECTIONS, makeSection, openTempStore } from './helpers.js';
@@ -210,6 +212,109 @@ describe('Store resilience', () => {
       writeFileSync(corruptPath, 'this is definitely not a sqlite database');
       expect(() => Store.open(corruptPath)).toThrow(StoreError);
       expect(() => Store.open(corruptPath)).toThrow(/cannot open index/);
+    } finally {
+      temp.cleanup();
+    }
+  });
+});
+
+describe('Store schema versioning', () => {
+  it('rejects indexes written by a newer schema version', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-free-version-'));
+    const file = path.join(dir, 'index.sqlite');
+    try {
+      const raw = new DatabaseSync(file);
+      raw.exec('CREATE TABLE dummy(x)');
+      raw.exec('PRAGMA user_version = 99');
+      raw.close();
+      expect(() => Store.open(file)).toThrow(/schema version 99/);
+      expect(() => Store.open(file)).toThrow(/cfr-free sync/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('adopts pre-versioning index files as schema v1', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-free-version-'));
+    const file = path.join(dir, 'index.sqlite');
+    try {
+      const raw = new DatabaseSync(file);
+      raw.exec('CREATE TABLE dummy(x)');
+      raw.close();
+      const store = Store.open(file);
+      store.close();
+      const check = new DatabaseSync(file);
+      expect(check.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: 1 });
+      check.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Store lock handling', () => {
+  it('surfaces a friendly error when another writer holds the lock', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-free-busy-'));
+    const file = path.join(dir, 'index.sqlite');
+    const store = Store.open(file, { busyTimeoutMs: 50 });
+    const blocker = new DatabaseSync(file);
+    blocker.exec('BEGIN IMMEDIATE');
+    try {
+      expect(() => store.transaction(() => {})).toThrow(/locked by another cfr-free process/);
+    } finally {
+      blocker.exec('ROLLBACK');
+      blocker.close();
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('still rolls back on inner failures', () => {
+    const temp = openTempStore({ seed: false });
+    try {
+      expect(() =>
+        temp.store.transaction(() => {
+          throw new Error('boom');
+        }),
+      ).toThrow('boom');
+      expect(temp.store.countSections()).toBe(0);
+    } finally {
+      temp.cleanup();
+    }
+  });
+});
+
+describe('Store.backupTo', () => {
+  it('fails cleanly when the export target is an existing database', () => {
+    const temp = openTempStore();
+    const target = path.join(temp.dir, 'taken.sqlite');
+    try {
+      const existing = new DatabaseSync(target);
+      existing.exec('CREATE TABLE z(y)');
+      existing.close();
+      expect(() => temp.store.backupTo(target)).toThrow(StoreError);
+      expect(() => temp.store.backupTo(target)).toThrow(/cannot export index/);
+    } finally {
+      temp.cleanup();
+    }
+  });
+});
+
+describe('Store search matches', () => {
+  it('caps and dedupes the visible query terms per hit', () => {
+    const temp = openTempStore();
+    try {
+      const result = temp.store.search({
+        query:
+          'the mental disorder the report the rating the agency the diagnosis conform shall return',
+        page: 1,
+        perPage: 5,
+      });
+      expect(result.hits[0]?.citation).toBe('4.125');
+      const matches = result.hits[0]?.matches ?? [];
+      expect(matches).toHaveLength(8); // capped: "shall"/"return" fall off
+      expect(new Set(matches).size).toBe(matches.length);
+      expect(matches).not.toContain('shall');
     } finally {
       temp.cleanup();
     }

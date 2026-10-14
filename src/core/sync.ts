@@ -44,7 +44,7 @@ function verifyAgainstStructure(
   sections: readonly RawSection[],
   structure: StructureNode,
   logger: Logger,
-): void {
+): { expectedSections: number; expectedAppendices: number } {
   const expectedSections = countNodes(structure, 'section');
   const expectedAppendices = countNodes(structure, 'appendix');
   const actual = countKinds(sections);
@@ -56,6 +56,8 @@ function verifyAgainstStructure(
       actualAppendices: actual.appendices,
     });
   }
+  // Expected counts are persisted so later readers can detect drift (SPEC §13).
+  return { expectedSections, expectedAppendices };
 }
 
 /** Build (or rebuild) the local index from live eCFR data. */
@@ -80,7 +82,7 @@ export async function syncIndex(deps: SyncDeps): Promise<SyncReport> {
       'parsed zero sections — eCFR XML format may have changed (see docs/SPEC.md §3)',
     );
   }
-  verifyAgainstStructure(sections, structure, logger);
+  const expected = verifyAgainstStructure(sections, structure, logger);
 
   const counts = countKinds(sections);
   store.replaceAll(sections, issueDate, {
@@ -90,6 +92,8 @@ export async function syncIndex(deps: SyncDeps): Promise<SyncReport> {
     synced_at: new Date().toISOString(),
     sections_count: String(counts.sections),
     appendices_count: String(counts.appendices),
+    structure_expected_sections: String(expected.expectedSections),
+    structure_expected_appendices: String(expected.expectedAppendices),
     structure_json: JSON.stringify(structureRaw),
     parser_version: PARSER_VERSION,
     source: 'ecfr.gov',

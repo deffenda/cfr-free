@@ -12,11 +12,13 @@ import type { Logger } from '../logger.js';
  */
 
 const JSON_HEADER = 'application/json; charset=utf-8';
+const TEXT_HEADER = 'text/plain; version=0.0.4; charset=utf-8';
 const NOSNIFF = 'X-Content-Type-Options';
 const SEARCH_PREFIX = '/api/v1/search';
 const SECTIONS_PREFIX = '/api/v1/sections/';
 const BROWSE_PATH = '/api/v1/browse';
 const HEALTH_PATH = '/health';
+const METRICS_PATH = '/metrics';
 
 type JsonBody = Record<string, unknown>;
 
@@ -37,6 +39,24 @@ function sendJson(
   res.writeHead(status, headers);
   if (req.method === 'HEAD') res.end();
   else res.end(payload);
+}
+
+function sendText(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  status: number,
+  body: string,
+  cacheControl?: string,
+): void {
+  const headers: http.OutgoingHttpHeaders = {
+    'content-type': TEXT_HEADER,
+    'content-length': Buffer.byteLength(body, 'utf8'),
+    [NOSNIFF]: 'nosniff',
+  };
+  if (cacheControl !== undefined) headers['cache-control'] = cacheControl;
+  res.writeHead(status, headers);
+  if (req.method === 'HEAD') res.end();
+  else res.end(body);
 }
 
 function errorBody(code: string, message: string, extra?: JsonBody): JsonBody {
@@ -108,6 +128,55 @@ function statusFor(error: ServiceError | StructureError): { status: number; code
     : { status: 400, code: 'invalid_input' };
 }
 
+function gauge(name: string, help: string, value: number): string {
+  return `# HELP ${name} ${help}\n# TYPE ${name} gauge\n${name} ${value}\n`;
+}
+
+function toEpochSeconds(iso: string | null): number {
+  if (iso === null) return 0;
+  const seconds = Math.floor(Date.parse(iso) / 1000);
+  return Number.isFinite(seconds) ? seconds : 0;
+}
+
+/**
+ * Prometheus exposition (SPEC §5: the only non-JSON route, kept for
+ * scrapability; everything else stays JSON-only).
+ */
+function renderMetrics(service: CFRService): string {
+  const status = service.status();
+  let out = '';
+  out += gauge('cfr_free_sections', 'Indexed sections in the local index.', status.sections);
+  out += gauge('cfr_free_appendices', 'Indexed appendices in the local index.', status.appendices);
+  out += gauge(
+    'cfr_free_stale',
+    '1 when the index is older than cfr_free_max_age_days, else 0.',
+    status.stale ? 1 : 0,
+  );
+  out += gauge(
+    'cfr_free_max_age_days',
+    'Configured staleness threshold in days.',
+    status.maxAgeDays,
+  );
+  out += gauge(
+    'cfr_free_issue_date_timestamp_seconds',
+    'eCFR issue date of the indexed title as Unix seconds (0 when unknown).',
+    toEpochSeconds(status.issueDate),
+  );
+  out += gauge(
+    'cfr_free_synced_at_timestamp_seconds',
+    'Last successful sync as Unix seconds (0 when unknown).',
+    toEpochSeconds(status.syncedAt),
+  );
+  if (status.structureDrift !== null) {
+    out += gauge(
+      'cfr_free_structure_drift',
+      '1 when parsed counts differ from the structure tree, else 0.',
+      status.structureDrift ? 1 : 0,
+    );
+  }
+  return out;
+}
+
 function dispatch(
   service: CFRService,
   req: http.IncomingMessage,
@@ -117,6 +186,10 @@ function dispatch(
   const pathname = url.pathname;
   if (pathname === HEALTH_PATH) {
     sendJson(req, res, 200, { status: 'ok', ...service.status() }, 'no-store');
+    return;
+  }
+  if (pathname === METRICS_PATH) {
+    sendText(req, res, 200, renderMetrics(service), 'no-store');
     return;
   }
   if (pathname === SEARCH_PREFIX) {

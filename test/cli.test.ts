@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CliError, main, parseArgs } from '../src/cli.js';
 import { VERSION } from '../src/version.js';
@@ -22,7 +25,7 @@ function makeIo(env: NodeJS.ProcessEnv = {}): {
 
 describe('parseArgs', () => {
   it('defaults to mcp', () => {
-    expect(parseArgs([])).toBe('mcp');
+    expect(parseArgs([])).toEqual({ command: 'mcp' });
   });
 
   it.each([
@@ -36,13 +39,26 @@ describe('parseArgs', () => {
     [['sync'], 'sync'],
     [['serve'], 'serve'],
   ])('parses %j', (argv, expected) => {
-    expect(parseArgs(argv)).toBe(expected);
+    expect(parseArgs(argv)).toEqual({ command: expected });
+  });
+
+  it('parses export with its target path', () => {
+    expect(parseArgs(['export', './backup.sqlite'])).toEqual({
+      command: 'export',
+      exportPath: './backup.sqlite',
+    });
   });
 
   it('rejects unknown commands and options', () => {
     expect(() => parseArgs(['bogus'])).toThrow(CliError);
     expect(() => parseArgs(['--frobnicate'])).toThrow(CliError);
     expect(() => parseArgs(['sync', 'extra'])).toThrow(/unexpected arguments/);
+  });
+
+  it('rejects export without exactly one target', () => {
+    expect(() => parseArgs(['export'])).toThrow(/exactly one target path/);
+    expect(() => parseArgs(['export', 'a', 'b'])).toThrow(/exactly one target path/);
+    expect(() => parseArgs(['export', '-o'])).toThrow(/exactly one target path/);
   });
 });
 
@@ -81,5 +97,21 @@ describe('main', () => {
     const code = await main(['sync', '--force'], io);
     expect(code).toBe(2);
     expect(err.join('')).toContain('unexpected arguments');
+  });
+
+  it('returns exit code 3 when the index is unavailable', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-cli-'));
+    const { err, io } = makeIo({
+      CFR_INDEX_PATH: path.join(dir, 'index.sqlite'),
+      CFR_AUTO_SYNC: '0',
+      CFR_LOG_LEVEL: 'error',
+    });
+    try {
+      const code = await main(['mcp'], io);
+      expect(code).toBe(3);
+      expect(err.join('')).toContain('cfr-free sync');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -14,13 +14,17 @@ keys, no telemetry — one Node process and one SQLite file.
 ## What you get
 
 - **Local full-text search** over every section and appendix of Title 38,
-  powered by SQLite FTS5 (BM25-ranked, with relevance snippets).
-- **MCP server** with four read-only tools any MCP client can use:
-  `search_regulations`, `get_section`, `browse_title38`, `index_status`.
+  powered by SQLite FTS5 (BM25-ranked with citation/heading weighting,
+  relevance snippets, and the matched terms shown per hit).
+- **MCP server** with five read-only tools any MCP client can use:
+  `search_regulations`, `get_section`, `browse_title38`, `index_status`,
+  `list_parts`.
 - **HTTP JSON API** for scripts and apps: search, read sections, browse the
-  CFR hierarchy, health check.
+  CFR hierarchy, health check, Prometheus metrics.
 - **Freshness tracking**: the index records the eCFR issue date it was built
-  from and warns when it goes stale.
+  from and warns when it goes stale or drifts from the structure tree.
+- **Backup-friendly**: `cfr-free export <path>` writes a consistent snapshot
+  of the index you can copy anywhere.
 
 ## Requirements
 
@@ -37,6 +41,8 @@ cfr-free sync              # build the local index (~2-3 MB download)
 cfr-free serve             # HTTP API on http://127.0.0.1:8787
 # or
 cfr-free mcp               # MCP server on stdio (default command)
+
+cfr-free export ./backup.sqlite   # consistent snapshot of the local index
 ```
 
 ### Use with Claude (MCP)
@@ -59,12 +65,13 @@ disorders?"_ or _"Search Title 38 for traumatic brain injury compensation."_
 
 ### MCP tools
 
-| Tool                 | Arguments                              | Returns                                        |
-| -------------------- | -------------------------------------- | ---------------------------------------------- |
-| `search_regulations` | `query`, `page?`, `per_page?`, `part?` | Ranked hits: citation, heading, snippet, score |
-| `get_section`        | `citation` (e.g. `38 CFR 4.125`)       | Full section text as markdown + ecfr.gov link  |
-| `browse_title38`     | `chapter?`, `part?`, `subpart?`        | Children of the requested hierarchy level      |
-| `index_status`       | —                                      | Issue date, last sync, row counts, staleness   |
+| Tool                 | Arguments                              | Returns                                                    |
+| -------------------- | -------------------------------------- | ---------------------------------------------------------- |
+| `search_regulations` | `query`, `page?`, `per_page?`, `part?` | Ranked hits: citation, heading, snippet, score, matches    |
+| `get_section`        | `citation` (e.g. `38 CFR 4.125`)       | Full section text as markdown + ecfr.gov link              |
+| `browse_title38`     | `chapter?`, `part?`, `subpart?`        | Children of the requested hierarchy level                  |
+| `index_status`       | —                                      | Issue date, last sync, row counts, staleness, drift flag   |
+| `list_parts`         | —                                      | Parts in the index with titles and section/appendix counts |
 
 All tools are **read-only** and query only the local index — they never hit
 the network.
@@ -74,6 +81,7 @@ the network.
 | Method         | Path                         | Query params                               |
 | -------------- | ---------------------------- | ------------------------------------------ |
 | `GET` / `HEAD` | `/health`                    | —                                          |
+| `GET` / `HEAD` | `/metrics`                   | — (Prometheus text format)                 |
 | `GET` / `HEAD` | `/api/v1/search`             | `q` (required), `page`, `per_page`, `part` |
 | `GET` / `HEAD` | `/api/v1/sections/:citation` | — (URL-encode citations with spaces)       |
 | `GET` / `HEAD` | `/api/v1/browse`             | `chapter`, `part`, `subpart`               |
@@ -82,13 +90,15 @@ the network.
 curl 'http://127.0.0.1:8787/api/v1/search?q=traumatic%20brain%20injury&part=4'
 curl 'http://127.0.0.1:8787/api/v1/sections/4.125'
 curl 'http://127.0.0.1:8787/api/v1/browse?chapter=I&part=17'
+curl 'http://127.0.0.1:8787/metrics'
 ```
 
 The API is intentionally minimal: **GET-only, JSON-only, no request bodies,
-no templating**, bound to `127.0.0.1` by default. There is **no
-authentication** — if you bind it to a non-loopback address you must put it
-behind your own reverse proxy/auth (`CFR_ALLOW_REMOTE=1` is required to
-allow that, as an explicit opt-in).
+no templating**, bound to `127.0.0.1` by default. The single deliberate
+exception is `/metrics`, which serves Prometheus exposition text for
+scrapers. There is **no authentication** — if you bind it to a non-loopback
+address you must put it behind your own reverse proxy/auth
+(`CFR_ALLOW_REMOTE=1` is required to allow that, as an explicit opt-in).
 
 ## Configuration
 
@@ -107,6 +117,19 @@ MCP client configs stay uniform):
 
 Logs are structured JSON lines on **stderr** only — stdout is reserved for
 MCP's JSON-RPC protocol.
+
+### Exit codes
+
+| Code | Meaning                                                    |
+| ---- | ---------------------------------------------------------- |
+| `0`  | Success                                                    |
+| `1`  | Generic error (sync failure, corrupt index, …)             |
+| `2`  | Usage or configuration error                               |
+| `3`  | Index unavailable (empty, and auto-sync disabled)          |
+| `4`  | HTTP port could not be bound (in use or permission denied) |
+
+Scripts can branch on these — e.g. retry later on `3`, pick another port
+on `4`.
 
 ## Development
 

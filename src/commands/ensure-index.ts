@@ -1,9 +1,10 @@
 import type { AppConfig } from '../config.js';
 import { HttpClient } from '../core/http-client.js';
 import { EcfrApi } from '../core/ecfr.js';
+import { CommandError, EXIT } from '../exit-codes.js';
 import type { Logger } from '../logger.js';
 import type { Store } from '../core/store.js';
-import { syncIndex, SyncError } from '../core/sync.js';
+import { syncIndex } from '../core/sync.js';
 import { CFRService } from '../core/service.js';
 import { VERSION } from '../version.js';
 
@@ -26,7 +27,8 @@ export interface EnsureIndexDeps {
  * exist, serve the stale index with a warning; if there are no rows at all,
  * fail with an actionable error.
  *
- * @throws {SyncError} when the index is empty and sync is unavailable/failed.
+ * @throws {CommandError} (exit 3) when the index is empty and auto-sync is
+ *   off; `SyncError` when a sync attempt itself fails.
  */
 export async function ensureIndex(
   store: Store,
@@ -40,7 +42,10 @@ export async function ensureIndex(
 
   if (status.sections === 0) {
     if (!config.autoSync) {
-      throw new SyncError(`index at ${config.indexPath} is empty — run \`cfr-free sync\` first`);
+      throw new CommandError(
+        `index at ${config.indexPath} is empty — run \`cfr-free sync\` first`,
+        EXIT.INDEX_UNAVAILABLE,
+      );
     }
     logger.info('index empty, running initial sync', { index: config.indexPath });
     await syncIndex({ ecfr: createEcfr(), store, logger });

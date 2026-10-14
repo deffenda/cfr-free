@@ -47,8 +47,56 @@ describe('Titan HTTP API', () => {
     expect(body['status']).toBe('ok');
     expect(body['sections']).toBe(4);
     expect(body['issueDate']).toBe('2026-10-09');
+    // Fixtures predate the expected-counts meta: drift unknown, not false.
+    expect(body['structureDrift']).toBeNull();
     expect(headers.get('cache-control')).toBe('no-store');
     expect(headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
+  it('exposes Prometheus metrics at /metrics', async () => {
+    const response = await fetch(`${base}/metrics`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/plain');
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const text = await response.text();
+    expect(text).toContain('# TYPE cfr_free_sections gauge');
+    expect(text).toContain('cfr_free_sections 4');
+    expect(text).toContain('cfr_free_appendices 1');
+    expect(text).toContain('cfr_free_stale 0');
+    expect(text).toContain('cfr_free_max_age_days 7');
+    // 2026-10-09T00:00:00Z as epoch seconds.
+    expect(text).toContain('cfr_free_issue_date_timestamp_seconds 1791504000');
+    // Fixtures predate the expectation meta: drift metric is absent, not 0.
+    expect(text).not.toContain('cfr_free_structure_drift');
+  });
+
+  it('emits the drift gauge in both states once expectations are recorded', async () => {
+    // Live rows (0 after an empty replaceAll) vs expectations 0+0: no drift.
+    temp.store.replaceAll([], '2026-10-09', {
+      synced_at: new Date().toISOString(),
+      appendices_count: '0',
+      structure_expected_sections: '0',
+      structure_expected_appendices: '0',
+    });
+    const clean = await (await fetch(`${base}/metrics`)).text();
+    expect(clean).toContain('cfr_free_structure_drift 0');
+
+    // Expectations 3+1 but zero live rows: drift is visible.
+    temp.store.replaceAll([], '2026-10-09', {
+      synced_at: new Date().toISOString(),
+      appendices_count: '1',
+      structure_expected_sections: '3',
+      structure_expected_appendices: '1',
+    });
+    const drifted = await (await fetch(`${base}/metrics`)).text();
+    expect(drifted).toContain('cfr_free_structure_drift 1');
+  });
+
+  it('serves /metrics for HEAD without a body', async () => {
+    const response = await fetch(`${base}/metrics`, { method: 'HEAD' });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/plain');
+    expect(await response.text()).toBe('');
   });
 
   it('searches with validated query params', async () => {

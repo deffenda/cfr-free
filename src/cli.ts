@@ -5,6 +5,8 @@ import { ConfigError, loadConfig } from './config.js';
 import { runMcpCommand } from './commands/mcp.js';
 import { runServeCommand } from './commands/serve.js';
 import { runSyncCommand } from './commands/sync.js';
+import { runExportCommand } from './commands/export.js';
+import { CommandError, EXIT } from './exit-codes.js';
 import { createLogger } from './logger.js';
 import { VERSION } from './version.js';
 
@@ -12,11 +14,12 @@ import { VERSION } from './version.js';
 export const USAGE = `cfr-free ${VERSION} — self-hosted Title 38 CFR data service
 
 Usage:
-  cfr-free [mcp]        Start the MCP server on stdio (default)
-  cfr-free sync         Rebuild the local index from eCFR
-  cfr-free serve        Start the Titan HTTP API (default http://127.0.0.1:8787)
-  cfr-free help         Show this help
-  cfr-free version      Show the version
+  cfr-free [mcp]          Start the MCP server on stdio (default)
+  cfr-free sync           Rebuild the local index from eCFR
+  cfr-free serve          Start the Titan HTTP API (default http://127.0.0.1:8787)
+  cfr-free export <path>  Save a consistent snapshot of the local index
+  cfr-free help           Show this help
+  cfr-free version        Show the version
 
 Environment:
   CFR_INDEX_PATH     SQLite index path      (default ~/.cfr-free/index.sqlite)
@@ -25,25 +28,48 @@ Environment:
   CFR_HOST/CFR_PORT  HTTP bind              (default 127.0.0.1:8787)
   CFR_ALLOW_REMOTE   Permit non-loopback: 1 (no auth built in)
   CFR_LOG_LEVEL      debug|info|warn|error  (default info)
+
+Exit codes:
+  0 success   1 error   2 usage/config   3 index unavailable   4 port in use
 `;
 
 /** Raised for bad CLI usage (exit code 2). */
-export class CliError extends Error {
+export class CliError extends CommandError {
   override readonly name = 'CliError';
+  constructor(message: string) {
+    super(message, EXIT.USAGE);
+  }
 }
 
-export type Command = 'mcp' | 'sync' | 'serve' | 'help' | 'version';
+export type Command = 'mcp' | 'sync' | 'serve' | 'export' | 'help' | 'version';
+
+/** Parsed argv: `export` additionally carries its required target path. */
+export type ParsedCommand =
+  | { readonly command: 'export'; readonly exportPath: string }
+  | { readonly command: Exclude<Command, 'export'> };
+
+/** Validate `export`'s required single target path. */
+function parseExportTarget(rest: readonly string[]): ParsedCommand {
+  const target = rest[0];
+  if (rest.length !== 1 || target === undefined || target.startsWith('-')) {
+    throw new CliError(
+      'export requires exactly one target path (e.g. `cfr-free export ./backup.sqlite`)',
+    );
+  }
+  return { command: 'export', exportPath: target };
+}
 
 /** Parse argv (without node/script) into a command. Default: `mcp`. */
-export function parseArgs(argv: readonly string[]): Command {
+export function parseArgs(argv: readonly string[]): ParsedCommand {
   const [first, ...rest] = argv;
-  if (first === undefined) return 'mcp';
-  if (first === '-h' || first === '--help' || first === 'help') return 'help';
-  if (first === '-v' || first === '--version' || first === 'version') return 'version';
+  if (first === undefined) return { command: 'mcp' };
+  if (first === '-h' || first === '--help' || first === 'help') return { command: 'help' };
+  if (first === '-v' || first === '--version' || first === 'version') return { command: 'version' };
+  if (first === 'export') return parseExportTarget(rest);
   if (first === 'mcp' || first === 'sync' || first === 'serve') {
     if (rest.length > 0)
       throw new CliError(`unexpected arguments after '${first}': ${rest.join(' ')}`);
-    return first;
+    return { command: first };
   }
   if (first.startsWith('-')) throw new CliError(`unknown option: ${first} (try --help)`);
   throw new CliError(`unknown command: ${first} (try --help)`);
@@ -58,7 +84,8 @@ export interface MainIO {
 /** CLI entry point. Returns the process exit code. */
 export async function main(argv: readonly string[], io: MainIO): Promise<number> {
   try {
-    const command = parseArgs(argv);
+    const parsed = parseArgs(argv);
+    const command = parsed.command;
     if (command === 'help') {
       io.out(USAGE);
       return 0;
@@ -79,13 +106,19 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
       );
       return 0;
     }
+    if (command === 'export') {
+      const report = runExportCommand(config, parsed.exportPath, logger);
+      io.out(`exported ${report.bytes} bytes to ${report.path}\n`);
+      return 0;
+    }
     if (command === 'serve') return await runServeCommand(config, logger);
     await runMcpCommand(config, logger);
     return 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     io.err(`cfr-free: ${message}\n`);
-    return error instanceof ConfigError || error instanceof CliError ? 2 : 1;
+    if (error instanceof CommandError) return error.exitCode;
+    return error instanceof ConfigError ? EXIT.USAGE : EXIT.ERROR;
   }
 }
 

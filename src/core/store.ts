@@ -43,6 +43,8 @@ export interface SearchHit {
   readonly snippet: string;
   /** bm25 score — lower is better (more negative = stronger match). */
   readonly score: number;
+  /** Query terms visible in this hit's citation, heading, or snippet. */
+  readonly matches: readonly string[];
 }
 
 export type MatchMode = 'and' | 'or';
@@ -130,9 +132,24 @@ const SNIPPET_TEXT = `snippet(sections_fts, 2, '', '', '…', 24)`;
 const SNIPPET_HEADING = `snippet(sections_fts, 1, '', '', '…', 24)`;
 const SNIPPET_EXPR = `CASE WHEN ${SNIPPET_TEXT} = '' THEN ${SNIPPET_HEADING} ELSE ${SNIPPET_TEXT} END`;
 
+/** Current schema version, stored in `PRAGMA user_version`. */
+const SCHEMA_VERSION = 1;
+
+/** How long a connection waits on a locked database before failing. */
+const DEFAULT_BUSY_TIMEOUT_MS = 5000;
+
+export interface StoreOpenOptions {
+  /** Override the busy-wait timeout (tests use a short one). */
+  readonly busyTimeoutMs?: number;
+}
+
+// Column weights (citation 10, heading 5, body 1): exact-citation and
+// heading matches must outrank body-only matches (SPEC §13).
+const SCORE_EXPR = 'bm25(sections_fts, 10.0, 5.0, 1.0) AS score';
+
 const SELECT_MATCHES_SQL = `
 SELECT s.citation, s.heading, s.part, s.path, ${SNIPPET_EXPR} AS snippet,
-       bm25(sections_fts) AS score
+       ${SCORE_EXPR}
 FROM sections_fts
 JOIN sections s ON s.id = sections_fts.rowid
 WHERE sections_fts MATCH ?
@@ -141,7 +158,7 @@ LIMIT ? OFFSET ?`;
 
 const SELECT_MATCHES_PART_SQL = `
 SELECT s.citation, s.heading, s.part, s.path, ${SNIPPET_EXPR} AS snippet,
-       bm25(sections_fts) AS score
+       ${SCORE_EXPR}
 FROM sections_fts
 JOIN sections s ON s.id = sections_fts.rowid
 WHERE sections_fts MATCH ? AND s.part = ?
@@ -175,6 +192,50 @@ export function toFtsQuery(raw: string, mode: MatchMode): string | null {
   if (tokens.length === 0) return null;
   const terms = tokens.map((token) => `"${token}"*`);
   return terms.join(mode === 'and' ? ' AND ' : ' OR ');
+}
+
+/** Ensure the on-disk schema version is compatible; adopt legacy files. */
+function ensureSchemaVersion(db: DatabaseSync): void {
+  const versionRow = db.prepare('PRAGMA user_version').get() as Record<string, unknown> | undefined;
+  const version = Number(versionRow?.['user_version'] ?? 0);
+  if (version !== 0 && version !== SCHEMA_VERSION) {
+    throw new StoreError(
+      `index schema version ${version} is not supported (expected ${SCHEMA_VERSION}) — rebuild it with \`cfr-free sync\``,
+    );
+  }
+  if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+
+/** True for SQLITE_BUSY/SQLITE_LOCKED failures (concurrent writer). */
+function isBusyError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const err = error as { errcode?: unknown; message?: unknown };
+  if (err.errcode === 5 || err.errcode === 6) return true;
+  return (
+    typeof err.message === 'string' &&
+    /database is locked|database table is locked|SQLITE_BUSY/i.test(err.message)
+  );
+}
+
+/** Query tokens that actually appear in a hit (citation/heading/snippet). */
+function visibleMatches(
+  tokens: readonly string[],
+  hit: {
+    citation: string;
+    heading: string;
+    snippet: string;
+  },
+): string[] {
+  const haystack = `${hit.citation}\n${hit.heading}\n${hit.snippet}`.toLowerCase();
+  const seen = new Set<string>();
+  const matches: string[] = [];
+  for (const token of tokens) {
+    if (matches.length >= 8) break;
+    if (seen.has(token)) continue;
+    seen.add(token);
+    if (haystack.includes(token)) matches.push(token);
+  }
+  return matches;
 }
 
 function nullableString(value: unknown): string | null {
@@ -213,7 +274,7 @@ export class Store {
    *
    * @throws {StoreError} when the file fails its integrity check.
    */
-  static open(filePath: string): Store {
+  static open(filePath: string, options: StoreOpenOptions = {}): Store {
     const directory = path.dirname(filePath);
     if (directory.length > 0 && directory !== '.') mkdirSync(directory, { recursive: true });
 
@@ -222,11 +283,18 @@ export class Store {
       db = new DatabaseSync(filePath);
       db.exec('PRAGMA journal_mode = WAL');
       db.exec('PRAGMA synchronous = NORMAL');
+      // Wait for a concurrent writer (e.g. a second sync) instead of failing
+      // instantly with a cryptic SQLITE_BUSY.
+      db.exec(`PRAGMA busy_timeout = ${options.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS}`);
       const check = db.prepare('PRAGMA quick_check').get() as Record<string, unknown> | undefined;
       const result = check ? String(Object.values(check)[0] ?? '') : '';
       if (result !== 'ok') throw new StoreError(`integrity check failed: ${result || 'no result'}`);
       db.exec(SCHEMA_SQL);
+      ensureSchemaVersion(db);
     } catch (error) {
+      if (error instanceof StoreError) {
+        throw new StoreError(`cannot open index at ${filePath}: ${error.message}`);
+      }
       throw new StoreError(
         `cannot open index at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -249,7 +317,16 @@ export class Store {
 
   /** Run `fn` inside a single IMMEDIATE transaction (rollback on throw). */
   transaction(fn: () => void): void {
-    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.exec('BEGIN IMMEDIATE');
+    } catch (error) {
+      if (isBusyError(error)) {
+        throw new StoreError(
+          'index is locked by another cfr-free process (a sync appears to be running) — wait for it to finish and retry',
+        );
+      }
+      throw error;
+    }
     try {
       fn();
       this.db.exec('COMMIT');
@@ -258,6 +335,11 @@ export class Store {
         this.db.exec('ROLLBACK');
       } catch {
         // Rollback is best-effort: the connection may already be clean.
+      }
+      if (isBusyError(error)) {
+        throw new StoreError(
+          'index write was interrupted by another cfr-free process — wait for it to finish and retry',
+        );
       }
       throw error;
     }
@@ -297,6 +379,20 @@ export class Store {
     const row = this.stmt('SELECT count(*) AS n FROM sections').get() as
       Record<string, unknown> | undefined;
     return row ? Number(row['n'] ?? 0) : 0;
+  }
+
+  /**
+   * Write a consistent snapshot of the index (including WAL content) to
+   * `target` via `VACUUM INTO`. The target must not already exist.
+   */
+  backupTo(target: string): void {
+    try {
+      this.db.prepare('VACUUM INTO ?').run(target);
+    } catch (error) {
+      throw new StoreError(
+        `cannot export index to ${target}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   getMeta(key: string): string | null {
@@ -360,9 +456,14 @@ export class Store {
         ? statement.all(ftsQuery, perPage, offset)
         : statement.all(ftsQuery, query.part, perPage, offset);
 
+    const queryTokens = query.query
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((token) => token.length > 0);
+
     const hits = rows.map((row) => {
       const record = row as Record<string, unknown>;
-      return {
+      const hit = {
         citation: String(record['citation']),
         heading: String(record['heading']),
         part: nullableString(record['part']),
@@ -370,8 +471,29 @@ export class Store {
         snippet: String(record['snippet'] ?? ''),
         score: Number(record['score'] ?? 0),
       };
+      return { ...hit, matches: visibleMatches(queryTokens, hit) };
     });
     return { hits, total, page: query.page, perPage, matchMode: mode };
+  }
+
+  /** Every part present in the index, with per-kind counts. */
+  listParts(): { part: string; sections: number; appendices: number }[] {
+    const rows = this.stmt(
+      `
+      SELECT part,
+             SUM(kind = 'section') AS sections,
+             SUM(kind = 'appendix') AS appendices
+      FROM sections
+      WHERE part IS NOT NULL AND part != ''
+      GROUP BY part
+      ORDER BY CAST(part AS INTEGER), part
+    `,
+    ).all() as Record<string, unknown>[];
+    return rows.map((row) => ({
+      part: String(row['part']),
+      sections: Number(row['sections'] ?? 0),
+      appendices: Number(row['appendices'] ?? 0),
+    }));
   }
 
   close(): void {

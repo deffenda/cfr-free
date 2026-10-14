@@ -97,6 +97,8 @@ describe('syncIndex', () => {
       expect(deps.store.getMeta('issue_date')).toBe(ISSUE_DATE);
       expect(deps.store.getMeta('parser_version')).toBe(PARSER_VERSION);
       expect(deps.store.getMeta('sections_count')).toBe('1');
+      expect(deps.store.getMeta('structure_expected_sections')).toBe('2');
+      expect(deps.store.getMeta('structure_expected_appendices')).toBe('1');
       expect(JSON.parse(deps.store.getMeta('structure_json') ?? '{}')).toMatchObject({
         type: 'title',
       });
@@ -140,6 +142,9 @@ describe('syncIndex', () => {
           (record) => record.level === 'warn' && record.message.includes('differ'),
         ),
       ).toBe(true);
+      // Expectations are persisted so drift stays visible after the sync.
+      expect(deps.store.getMeta('structure_expected_sections')).toBe('0');
+      expect(deps.store.getMeta('structure_expected_appendices')).toBe('0');
     } finally {
       deps.temp.cleanup();
     }

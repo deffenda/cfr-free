@@ -1,5 +1,6 @@
 import type { AppConfig } from '../config.js';
 import type { Logger } from '../logger.js';
+import { CommandError, EXIT } from '../exit-codes.js';
 import { CFRService } from '../core/service.js';
 import { Store } from '../core/store.js';
 import { createShutdownController } from '../process-utils.js';
@@ -12,6 +13,13 @@ function listenErrorMessage(error: unknown, config: AppConfig): string {
   if (code === 'EADDRINUSE') return `port ${config.port} is already in use`;
   if (code === 'EACCES') return `permission denied for ${config.host}:${config.port}`;
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Bind failures are environment issues: exit 4 so scripts can react. */
+function listenExitCode(error: unknown): number {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
+  return code === 'EADDRINUSE' || code === 'EACCES' ? EXIT.ADDRESS_IN_USE : EXIT.ERROR;
 }
 
 /**
@@ -27,7 +35,9 @@ export async function runServeCommand(config: AppConfig, logger: Logger): Promis
     const server = createHttpServer(service, logger);
 
     await new Promise<void>((resolve, reject) => {
-      server.once('error', (error) => reject(new Error(listenErrorMessage(error, config))));
+      server.once('error', (error) =>
+        reject(new CommandError(listenErrorMessage(error, config), listenExitCode(error))),
+      );
       server.listen(config.port, config.host, () => {
         server.removeListener('error', reject);
         resolve();
