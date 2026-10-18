@@ -7,6 +7,7 @@ describe('loadConfig', () => {
     expect(config.indexPath).toMatch(/\.cfr-free\/index\.sqlite$/);
     expect(config.maxAgeDays).toBe(7);
     expect(config.autoSync).toBe(true);
+    expect(config.refreshHours).toBe(0);
     expect(config.host).toBe('127.0.0.1');
     expect(config.port).toBe(8787);
     expect(config.allowRemote).toBe(false);
@@ -18,6 +19,7 @@ describe('loadConfig', () => {
       CFR_INDEX_PATH: '/tmp/custom.sqlite',
       CFR_MAX_AGE_DAYS: '0',
       CFR_AUTO_SYNC: '0',
+      CFR_REFRESH_HOURS: '24',
       CFR_HOST: 'localhost',
       CFR_PORT: '9999',
       CFR_LOG_LEVEL: 'debug',
@@ -25,6 +27,7 @@ describe('loadConfig', () => {
     expect(config.indexPath).toBe('/tmp/custom.sqlite');
     expect(config.maxAgeDays).toBe(0);
     expect(config.autoSync).toBe(false);
+    expect(config.refreshHours).toBe(24);
     expect(config.host).toBe('localhost');
     expect(config.port).toBe(9999);
     expect(config.logLevel).toBe('debug');
@@ -40,6 +43,8 @@ describe('loadConfig', () => {
     [{ CFR_PORT: '99999' }, 'CFR_PORT'],
     [{ CFR_MAX_AGE_DAYS: '999' }, 'CFR_MAX_AGE_DAYS'],
     [{ CFR_MAX_AGE_DAYS: 'soon' }, 'CFR_MAX_AGE_DAYS'],
+    [{ CFR_REFRESH_HOURS: '169' }, 'CFR_REFRESH_HOURS'],
+    [{ CFR_REFRESH_HOURS: 'abc' }, 'CFR_REFRESH_HOURS'],
     [{ CFR_AUTO_SYNC: 'yes' }, 'CFR_AUTO_SYNC'],
     [{ CFR_LOG_LEVEL: 'loud' }, 'CFR_LOG_LEVEL'],
     [{ CFR_INDEX_PATH: '' }, 'CFR_INDEX_PATH'],

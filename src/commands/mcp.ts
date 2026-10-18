@@ -3,9 +3,11 @@ import type { AppConfig } from '../config.js';
 import type { Logger } from '../logger.js';
 import { CFRService } from '../core/service.js';
 import { Store } from '../core/store.js';
+import { syncIndex } from '../core/sync.js';
 import { createShutdownController } from '../process-utils.js';
 import { buildMcpServer } from '../mcp/server.js';
-import { ensureIndex } from './ensure-index.js';
+import { ensureIndex, createEcfrApi } from './ensure-index.js';
+import { startRefreshScheduler, type RefreshScheduler } from './refresh-scheduler.js';
 
 /**
  * `cfr-free mcp` — serve MCP over stdio.
@@ -22,14 +24,29 @@ export async function runMcpCommand(config: AppConfig, logger: Logger): Promise<
       store.close();
     }
   };
+  let scheduler: RefreshScheduler | null = null;
 
   try {
     const freshness = await ensureIndex(store, config, logger);
     const service = new CFRService(store, config.maxAgeDays);
     const server = buildMcpServer(service, logger);
 
+    // Opt-in background refresh (CFR_REFRESH_HOURS); disposed on every
+    // shutdown path below so no timer outlives the process lifecycle.
+    if (config.refreshHours > 0) {
+      scheduler = startRefreshScheduler({
+        refreshHours: config.refreshHours,
+        logger,
+        refresh: async () => {
+          await syncIndex({ ecfr: createEcfrApi(), store, logger });
+        },
+      });
+      scheduler.schedule();
+    }
+
     const shutdown = createShutdownController(
       async () => {
+        scheduler?.dispose();
         await server.close();
         closeStore();
       },
@@ -42,6 +59,7 @@ export async function runMcpCommand(config: AppConfig, logger: Logger): Promise<
     await server.connect(new StdioServerTransport());
     logger.info('mcp server ready', { index: config.indexPath, freshness });
   } catch (error) {
+    scheduler?.dispose();
     closeStore();
     throw error;
   }

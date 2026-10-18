@@ -5,7 +5,9 @@ import { CFRService } from '../core/service.js';
 import { Store } from '../core/store.js';
 import { createShutdownController } from '../process-utils.js';
 import { createHttpServer } from '../titan/http-server.js';
-import { ensureIndex } from './ensure-index.js';
+import { syncIndex } from '../core/sync.js';
+import { ensureIndex, createEcfrApi } from './ensure-index.js';
+import { startRefreshScheduler } from './refresh-scheduler.js';
 
 function listenErrorMessage(error: unknown, config: AppConfig): string {
   const code =
@@ -50,10 +52,25 @@ export async function runServeCommand(config: AppConfig, logger: Logger): Promis
     });
     logger.info('http api listening', { url: `http://${config.host}:${config.port}`, freshness });
 
+    // Opt-in background refresh (CFR_REFRESH_HOURS): armed only after a
+    // successful bind, so a failed listen exits with no timer left behind.
+    const scheduler =
+      config.refreshHours > 0
+        ? startRefreshScheduler({
+            refreshHours: config.refreshHours,
+            logger,
+            refresh: async () => {
+              await syncIndex({ ecfr: createEcfrApi(), store, logger });
+            },
+          })
+        : null;
+    scheduler?.schedule();
+
     return await new Promise<number>((resolve) => {
       const shutdown = createShutdownController(
         () =>
           new Promise<void>((done) => {
+            scheduler?.dispose();
             server.close(() => {
               store.close();
               done();
