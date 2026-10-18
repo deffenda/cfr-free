@@ -49,6 +49,19 @@ export function registerResources(server: McpServer, service: CFRService, logger
     async (uri) => jsonContents(uri, { parts: service.listParts() }),
   );
 
+  server.registerResource(
+    'title38-definitions',
+    'cfr://title38/definitions',
+    {
+      title: 'Master definitions (§ 3.1)',
+      description:
+        'JSON section detail for 38 CFR § 3.1 — the master definitions section governing the ' +
+        'entire title — with full markdown text, source URL, cross-references and freshness flags.',
+      mimeType: 'application/json',
+    },
+    async (uri) => jsonContents(uri, service.getSection('3.1')),
+  );
+
   server.registerPrompt(
     'cfr_research',
     {
