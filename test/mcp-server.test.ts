@@ -3,7 +3,13 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CFRService } from '../src/core/service.js';
 import { buildMcpServer } from '../src/mcp/server.js';
-import { createTestLogger, openTempStore, type TempStore } from './helpers.js';
+import {
+  createTestLogger,
+  FIXTURE_SECTIONS,
+  makeSection,
+  openTempStore,
+  type TempStore,
+} from './helpers.js';
 
 interface ToolCallResult {
   content: Array<{ type: string; text?: string }>;
@@ -11,13 +17,28 @@ interface ToolCallResult {
   isError?: boolean;
 }
 
+/**
+ * §3.1 master definitions row, seeded only into this suite's store (the shared
+ * FIXTURE_SECTIONS stays untouched — other suites hard-code its row counts).
+ */
+const DEFINITIONS_SECTION = makeSection({
+  citation: '3.1',
+  part: '3',
+  subpart: null,
+  heading: 'Purposes and definitions.',
+  path: '/title:38/chapter:I/part:3',
+  text: 'For the purpose of the benefits laws administered by the Department of Veterans Affairs, Veteran means a person who served in the active military service.',
+  markdown:
+    '## Purposes and definitions.\n\nDefinitions of terms used throughout Title 38, including Veteran.',
+});
+
 describe('MCP server (in-memory transport)', () => {
   let temp: TempStore;
   let client: Client;
   let serverCleanup: () => void;
 
   beforeEach(async () => {
-    temp = openTempStore();
+    temp = openTempStore({ sections: [...FIXTURE_SECTIONS, DEFINITIONS_SECTION] });
     const logger = createTestLogger();
     const service = new CFRService(temp.store, 7);
     const server = buildMcpServer(service, logger);
@@ -128,7 +149,7 @@ describe('MCP server (in-memory transport)', () => {
       arguments: {},
     })) as ToolCallResult;
     expect(result.isError).toBeFalsy();
-    expect(result.structuredContent?.['sections']).toBe(4);
+    expect(result.structuredContent?.['sections']).toBe(5);
     expect(result.structuredContent?.['issueDate']).toBe('2026-10-09');
     expect(result.structuredContent?.['maxAgeDays']).toBe(7);
     // Fixtures predate the expected-counts meta: drift is unknown, not false.
@@ -148,6 +169,7 @@ describe('MCP server (in-memory transport)', () => {
       appendices: number;
     }>;
     expect(parts).toEqual([
+      { part: '3', title: null, sections: 1, appendices: 0 },
       { part: '4', title: 'Schedule for Rating Disabilities', sections: 2, appendices: 1 },
       { part: '17', title: 'Medical Care', sections: 1, appendices: 0 },
     ]);
@@ -199,7 +221,11 @@ describe('MCP server (in-memory transport)', () => {
   it('exposes index metadata as MCP resources', async () => {
     const resources = await client.listResources();
     const uris = resources.resources.map((resource) => resource.uri).sort();
-    expect(uris).toEqual(['cfr://index/status', 'cfr://title38/parts']);
+    expect(uris).toEqual([
+      'cfr://index/status',
+      'cfr://title38/definitions',
+      'cfr://title38/parts',
+    ]);
 
     const status = await client.readResource({ uri: 'cfr://index/status' });
     expect(status.contents[0]?.mimeType).toBe('application/json');
@@ -208,16 +234,32 @@ describe('MCP server (in-memory transport)', () => {
       sections: number;
     };
     expect(parsed.issueDate).toBe('2026-10-09');
-    expect(parsed.sections).toBe(4);
+    expect(parsed.sections).toBe(5);
 
     const parts = await client.readResource({ uri: 'cfr://title38/parts' });
     const parsedParts = JSON.parse((parts.contents[0] as { text?: string }).text ?? '{}') as {
       parts: Array<Record<string, unknown>>;
     };
-    expect(parsedParts.parts[0]).toMatchObject({
+    expect(parsedParts.parts.find((row) => row['part'] === '4')).toMatchObject({
       part: '4',
       title: 'Schedule for Rating Disabilities',
     });
+
+    const definitions = await client.readResource({ uri: 'cfr://title38/definitions' });
+    expect(definitions.contents[0]?.mimeType).toBe('application/json');
+    const parsedDefinitions = JSON.parse(
+      (definitions.contents[0] as { text?: string }).text ?? '{}',
+    ) as { citation: string; markdown: string };
+    expect(parsedDefinitions.citation).toBe('3.1');
+    expect(parsedDefinitions.markdown).toContain('Veteran');
+  });
+
+  it('serves the § 3.1 master definitions from the definitions resource', async () => {
+    const definitions = await client.readResource({ uri: 'cfr://title38/definitions' });
+    const parsed = JSON.parse((definitions.contents[0] as { text?: string }).text ?? '{}') as {
+      citation: string;
+    };
+    expect(parsed.citation).toBe('3.1');
   });
 
   it('rejects unknown resource URIs', async () => {
