@@ -92,7 +92,9 @@ All of:
 - All required GitHub checks green — per branch protection on `main`:
   `quality (22)`, `quality (24)`, `security`. (`docker` runs in CI and its
   tail must still be green evidence in the PR body, but it is not a
-  required check; `sonar` is conditional on `vars.SONAR_TOKEN`.)
+  required check. There is no hosted-scanner job: the operator withdrew
+  hosted code-scanning gates permanently — the local gates are the
+  repo's scanning floor.)
 - **No new commit since the review was issued — any new commit = fresh
   review.** Orchestrator-authored edits (SPEC/ROADMAP status text) must
   be either named in the review packet or get their own review round;
