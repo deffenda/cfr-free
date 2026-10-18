@@ -36,6 +36,7 @@ const searchOutputSchema = z.object({
       snippet: z.string(),
       score: z.number(),
       matches: z.array(z.string()),
+      inResults: z.boolean(),
     }),
   ),
 });
@@ -140,7 +141,12 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
         'Returns section citations, headings, relevance snippets, bm25 scores (lower is better) ' +
         'and the query terms visible in each hit. ' +
         'Use `part` to scope results to a single CFR part (e.g. "4" for ratings, "17" for prosthetics). ' +
-        'Follow up with get_section to read a hit in full.',
+        'Follow up with get_section to read a hit in full. ' +
+        'If the query itself is a citation (e.g. "4.130" or "38 CFR 4.16"), that exact ' +
+        'section is pinned to the top of page 1 (totals include the pin on every page) ' +
+        "and marked `direct: true` — the reliable client signal; the pinned hit's " +
+        '`inResults` flag reports whether it also matched the ranked results. ' +
+        'Quoted spans (e.g. "exact regulatory language") are emitted as FTS5 phrase queries — the last token gets a prefix wildcard (so "language" also matches "languages"); earlier tokens are matched exactly.',
       inputSchema: {
         query: z
           .string()
