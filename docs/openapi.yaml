@@ -274,6 +274,7 @@ components:
           description: 'One of invalid_input, not_found, method_not_allowed, uri_too_long, rate_limited, internal_error.'
         message: { type: string }
         available: { type: array, items: { type: string } }
+      additionalProperties: false
     Health:
       type: object
       description: Index freshness report — the literal `"ok"` plus `service.status()`.
@@ -308,6 +309,7 @@ components:
           oneOf:
             - $ref: '#/components/schemas/SyncChanges'
             - type: 'null'
+      additionalProperties: false
     SyncChanges:
       type: object
       description: What the most recent sync amended (per-citation sha256 diff).
@@ -335,6 +337,7 @@ components:
         baseline: { type: boolean, description: First sync (no previous index). }
         parserChanged: { type: boolean }
         recordedAt: { type: string }
+      additionalProperties: false
     SearchResponse:
       type: object
       required: [query, page, perPage, total, matchMode, hits, indexIssueDate, indexStale, notice]
@@ -350,6 +353,7 @@ components:
         indexIssueDate: { type: [string, 'null'] }
         indexStale: { type: boolean }
         notice: { type: [string, 'null'], description: Stale-index warning. }
+      additionalProperties: false
     SearchHit:
       type: object
       required:
@@ -374,6 +378,7 @@ components:
         citationDisplay: { type: string, description: 'Paste-ready form, e.g. 38 C.F.R. § 4.130.' }
         sourceUrl: { type: string, format: uri }
         direct: { type: boolean, description: Pinned hit (query was this citation). }
+      additionalProperties: false
     SectionDetail:
       type: object
       required:
@@ -411,8 +416,10 @@ components:
             properties:
               citation: { type: string }
               available: { type: boolean, description: Whether the cited provision is indexed. }
+              additionalProperties: false
         indexStale: { type: boolean }
         notice: { type: [string, 'null'] }
+      additionalProperties: false
     BrowseResult:
       type: object
       required: [node, path, children]
@@ -425,6 +432,7 @@ components:
         children:
           type: array
           items: { $ref: '#/components/schemas/StructureEntry' }
+      additionalProperties: false
     StructureEntry:
       type: object
       required: [type, identifier, label]
@@ -432,3 +440,4 @@ components:
         type: { type: string, description: 'e.g. title, chapter, part, subpart, section.' }
         identifier: { type: string }
         label: { type: string }
+      additionalProperties: false
