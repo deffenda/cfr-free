@@ -73,8 +73,10 @@ All of:
 - The base branch is current with `main` (strict protection): when
   `gh pr view` reports `BLOCKED`, run `gh pr update-branch` first and
   wait for checks rather than retrying the merge.
-- All required GitHub checks green (`quality (22)`, `quality (24)`,
-  `security`, `docker`; `sonar` is conditional on `vars.SONAR_TOKEN`).
+- All required GitHub checks green — per branch protection on `main`:
+  `quality (22)`, `quality (24)`, `security`. (`docker` runs in CI and its
+  tail must still be green evidence in the PR body, but it is not a
+  required check; `sonar` is conditional on `vars.SONAR_TOKEN`.)
 - **No new commit since the review was issued — any new commit = fresh
   review.** Orchestrator-authored edits (SPEC/ROADMAP status text) must
   be either named in the review packet or get their own review round;
@@ -82,9 +84,19 @@ All of:
 - The diff is small enough to summarize in one screen (default budget:
   ~300 net lines). Bigger diffs need operator sign-off and may be split.
 
-The merge is **squash** into `main`. The subject is quoted verbatim from a
-source-of-truth file or the PR title — never retyped by hand (a typo once
-landed on `main`'s commit title because it was typed inline).
+### Merge execution checklist (post-review, pre-merge)
+
+- The squash subject is the **PR title, quoted programmatically** — pulled
+  from `gh pr view`, never retyped by hand (a typo once landed on
+  `main`'s commit title). The post-merge verification step checks the
+  merge commit's subject against the PR title; any deviation is logged
+  as a process incident.
+- The base branch is current with `main` (strict protection): when
+  `gh pr view` reports `BLOCKED`, run `gh pr update-branch` and wait for
+  checks rather than retrying the merge.
+- After merging, verify the squash commit on `origin/main` (subject and
+  content), delete/confirm auto-delete of the remote branch, and record
+  the merge SHA in the learning journal.
 
 ## Evidence rules (hard)
 
@@ -121,17 +133,28 @@ landed on `main`'s commit title because it was typed inline).
 
 ## Rubber-stamp tripwire
 
-Two consecutive rounds in which the SAME reviewer model returns zero
-findings is a process fault, not a success:
+A zero-finding round that satisfies the effort floor (substantive
+candidate-findings list, strongest-case-for-blocking argument) is a
+**clean round, not a fault**. The tripwire exists for a different
+signature: low-effort validation-shaped verdicts.
 
-1. The next round switches reviewer variant (e.g.
-   `opencode/nemotron-3.5-super-vl-free`) and uses the elevated rubric.
-2. The orchestrator re-checks its packets for anchoring (adjudication
+Two consecutive rounds by the SAME reviewer model in which the verdict
+platform shows weak effort — a missing or filler candidate-findings
+list, no strongest-case-for-blocking argument, or evidence-free
+assertions — is a process fault:
+
+1. The next round switches reviewer variant (from the mirror roster, see
+   `claude/rules/cross-model-review.md`) and applies the elevated
+   rubric.
+2. The orchestrator re-checks its own packets for anchoring (adjudication
    text, do-not-re-raise clauses, disclosed attack plans) and strips
-   them.
-3. A third consecutive zero-finding round goes to the operator.
+   them — the fault may be upstream of the reviewer.
+3. A third consecutive weak-effort round goes to the operator.
 
-Recorded per round in the learning journal's model-performance log.
+Recorded per round in the learning journal's model-performance log. The
+effort floor is defined in
+[`claude/rules/cross-model-review.md`](claude/rules/cross-model-review.md)
+("Effort floor").
 
 ## Escalation
 

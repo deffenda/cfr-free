@@ -61,6 +61,13 @@ The reviewer receives, in a fresh subagent context:
   …" phrasing). State the _observed behavior to verify against_, not
   the expected conclusion.
 
+**Enforcement (audit trail, not trust):** the packet is an audit
+artifact. The exact packet text is retained in the learning journal's
+round record, and any agent (operator, future reviewer) may audit a
+packet against this banned-content list. A packet found in violation
+voids the reviewer round it produced: the review is re-run from a clean
+packet at the same SHA.
+
 ## When a review is required
 
 **Every change that reaches `main` via PR gets a reviewer round.** The
@@ -74,14 +81,19 @@ verdict is the paper trail the operator audits. Gate rounding:
 
 ## Reviewer model and availability ladder
 
-- Primary: `opencode/nemotron-3-ultra-free` (fresh subagent context,
-  model passed explicitly).
+- Primary reviewer role: a Nemotron-family free variant, **never the
+  orchestrator's model, never the coder's model**. Fresh subagent
+  context, model passed explicitly per round.
+- **Model roster** (operator-maintained; current values, 2026-10-18):
+  primary `opencode/nemotron-3-ultra-free`; mirror variants
+  `opencode/nemotron-3.5-super-vl-free`,
+  `opencode/nemotron-3.5-lightning-free`. The rules bind ROLES, not IDs:
+  if an ID is unavailable or renamed, the operator updates the roster
+  and the ladder logic still holds.
 - Transient upstream 5xx (e.g. 503): retry the same model once, then
-  fall to a sibling free variant (`opencode/nemotron-3.5-super-vl-free`,
-  `opencode/nemotron-3.5-lightning-free`) with the IDENTICAL packet.
-- Rubber-stamp tripwire (see AGENTS.md): two consecutive zero-finding
-  rounds by the same reviewer model → next round uses a sibling variant.
-- Never the orchestrator's model; never the coder's model.
+  fall to any mirror variant with the IDENTICAL packet.
+- Rubber-stamp tripwire (see AGENTS.md): two consecutive weak-effort
+  rounds by the same reviewer model → next round uses a mirror variant.
 
 ## Verdict format (mandatory)
 
@@ -115,7 +127,7 @@ Notes:         <one paragraph: what the orchestrator should do next>
 The orchestrator pastes the verdict verbatim into the PR description. It
 does not paraphrase, summarize, or re-interpret it — and it adjudicates
 each finding against the code before acting on it (the reviewer can also
-be wrong; that is why findings are evidence-prof, countable, and
+be wrong; that is why findings are evidence-proof, countable, and
 spot-checked).
 
 ## Fresh review on every commit
