@@ -115,6 +115,21 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 3, maxLength: 200 }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 10000, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 20, default: 10 }
+        - name: part
+          in: query
+          description: Restrict to one CFR part.
+          schema: { type: string, pattern: '^\d{1,3}$' }
   /api/v1/sections/{citation}:
     # source: src/titan/http-server.ts:249
     get:
@@ -148,6 +163,12 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+      parameters:
+        - name: citation
+          in: path
+          required: true
+          description: 'Citation or appendix name — 4.125, § 4.125, or 38 CFR 4.125 — URL-encoded (≤ 120 chars).'
+          schema: { type: string, maxLength: 120 }
   /api/v1/browse:
     # source: src/titan/http-server.ts:253
     get:
@@ -171,7 +192,7 @@ paths:
           schema: { type: string, minLength: 1, maxLength: 20 }
         - name: part
           in: query
-          description: Part identifier (1–20 chars).
+          description: 'Part identifier (1–20 chars); requires `chapter` (404 when absent or unresolvable).'
           schema: { type: string, minLength: 1, maxLength: 20 }
         - name: subpart
           in: query
@@ -188,6 +209,19 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+      parameters:
+        - name: chapter
+          in: query
+          description: Chapter identifier (1–20 chars).
+          schema: { type: string, minLength: 1, maxLength: 20 }
+        - name: part
+          in: query
+          description: 'Part identifier (1–20 chars); requires `chapter` (404 when absent or unresolvable).'
+          schema: { type: string, minLength: 1, maxLength: 20 }
+        - name: subpart
+          in: query
+          description: Subpart identifier (1–20 chars); requires `part`.
+          schema: { type: string, minLength: 1, maxLength: 20 }
 components:
   responses:
     BadRequest:
