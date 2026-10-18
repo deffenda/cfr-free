@@ -44,6 +44,7 @@ function sendJson(
     [NOSNIFF]: 'nosniff',
   };
   if (cacheControl !== undefined) headers['cache-control'] = cacheControl;
+  res.setHeader('cross-origin-resource-policy', 'same-origin');
   res.writeHead(status, headers);
   if (req.method === 'HEAD') res.end();
   else res.end(payload);
@@ -62,6 +63,7 @@ function sendText(
     [NOSNIFF]: 'nosniff',
   };
   if (cacheControl !== undefined) headers['cache-control'] = cacheControl;
+  res.setHeader('cross-origin-resource-policy', 'same-origin');
   res.writeHead(status, headers);
   if (req.method === 'HEAD') res.end();
   else res.end(body);

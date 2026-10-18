@@ -423,3 +423,73 @@ describe('Titan HTTP rate limiting', () => {
     }
   });
 });
+
+describe('Cross-Origin-Resource-Policy', () => {
+  let temp: TempStore;
+  let server: http.Server;
+  let base: string;
+
+  beforeEach(async () => {
+    temp = openTempStore();
+    server = createHttpServer(new CFRService(temp.store, 7), createTestLogger());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      server.closeAllConnections();
+    });
+    temp.cleanup();
+  });
+
+  /** Fetch `pathname`, drain the body, return status + the CORP header. */
+  async function corpOf(
+    pathname: string,
+    init?: RequestInit,
+  ): Promise<{ status: number; corp: string | null }> {
+    const response = await fetch(`${base}${pathname}`, init);
+    await response.arrayBuffer();
+    return {
+      status: response.status,
+      corp: response.headers.get('cross-origin-resource-policy'),
+    };
+  }
+
+  it('sends same-origin CORP on GET /health', async () => {
+    const { status, corp } = await corpOf('/health');
+    expect(status).toBe(200);
+    expect(corp).toBe('same-origin');
+  });
+
+  it('sends same-origin CORP on GET /metrics', async () => {
+    const { status, corp } = await corpOf('/metrics');
+    expect(status).toBe(200);
+    expect(corp).toBe('same-origin');
+  });
+
+  it('sends same-origin CORP on a successful search', async () => {
+    const { status, corp } = await corpOf('/api/v1/search?q=mental+disorder');
+    expect(status).toBe(200);
+    expect(corp).toBe('same-origin');
+  });
+
+  it('sends same-origin CORP on validation errors', async () => {
+    const { status, corp } = await corpOf('/api/v1/search');
+    expect(status).toBe(400);
+    expect(corp).toBe('same-origin');
+  });
+
+  it('sends same-origin CORP on HEAD responses', async () => {
+    const { status, corp } = await corpOf('/health', { method: 'HEAD' });
+    expect(status).toBe(200);
+    expect(corp).toBe('same-origin');
+  });
+
+  it('sends same-origin CORP on 404s for unknown routes', async () => {
+    const { status, corp } = await corpOf('/nope');
+    expect(status).toBe(404);
+    expect(corp).toBe('same-origin');
+  });
+});

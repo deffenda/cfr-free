@@ -35,6 +35,14 @@ Design choices that keep the attack surface small:
   non-loopback addresses unless `CFR_ALLOW_REMOTE=1` is explicitly set.
   There is no authentication built in — put your own auth in front before
   exposing it.
+- **Deliberate container exposure.** The published Docker image sets
+  `CFR_HOST=0.0.0.0` and `CFR_ALLOW_REMOTE=1` intentionally: the published
+  port (`-p 8787:8787`) is the explicit exposure gate — a loopback bind
+  inside the container would make that port unreachable. `/metrics` and
+  `/health` are unauthenticated by design; coarse 429 rate limiting guards
+  non-loopback binds when the remote opt-in is set. Every HTTP response
+  carries `Cross-Origin-Resource-Policy: same-origin`, so browsers refuse
+  to load these endpoints from foreign origins.
 - **Protocol hygiene.** MCP stdout carries JSON-RPC only; all logging goes to
   stderr as JSON lines. Error messages returned to HTTP clients are
   sanitized (no stack traces, no raw upstream bodies, no query strings).
@@ -47,3 +55,13 @@ Design choices that keep the attack surface small:
 Every PR runs `npm audit` (high+), gitleaks (secret scan over full git
 history) and osv-scanner in CI. Locally, `npm run scan` additionally runs
 trivy and semgrep when installed.
+
+## Operator-run local scans
+
+The operator MAY run throwaway-instance scans locally: Schemathesis
+against a running HTTP API, ZAP, Trivy/Grype on the built image, Gitleaks
+over history, and OSV-Scanner on the lockfile. These tools are NOT
+dependencies or services of this repository — they never run in CI or in
+tests, and they run only on localhost instances the operator spins up. A
+scan run that analyzes zero packages or uses a stale vulnerability
+database must be treated as a FAILURE, not a pass.

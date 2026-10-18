@@ -27,6 +27,9 @@ COPY --from=build --chown=cfr:cfr /app/package.json ./package.json
 RUN mkdir -p /data && chown cfr:cfr /data
 USER cfr
 
+# Liveness probe; mirrors the healthcheck in docker-compose.yml exactly.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD node -e "fetch('http://127.0.0.1:8787/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+
 VOLUME /data
 EXPOSE 8787
 
