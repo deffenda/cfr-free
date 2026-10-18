@@ -367,6 +367,7 @@ components:
         - citationDisplay
         - sourceUrl
         - direct
+        - inResults
       properties:
         citation: { type: string }
         heading: { type: string }
@@ -378,6 +379,11 @@ components:
         citationDisplay: { type: string, description: 'Paste-ready form, e.g. 38 C.F.R. § 4.130.' }
         sourceUrl: { type: string, format: uri }
         direct: { type: boolean, description: Pinned hit (query was this citation). }
+        inResults:
+          {
+            type: boolean,
+            description: 'True when the section matched the ranked search. Always true for non-pin hits; for a pin (`direct: true`) it reports whether the pin also appeared in the ranked results.',
+          }
       additionalProperties: false
     SectionDetail:
       type: object

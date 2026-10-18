@@ -36,6 +36,7 @@ const searchOutputSchema = z.object({
       snippet: z.string(),
       score: z.number(),
       matches: z.array(z.string()),
+      inResults: z.boolean(),
     }),
   ),
 });
@@ -145,7 +146,7 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
         'section is pinned to the top of page 1 (totals include the pin on every page) ' +
         "and marked `direct: true` — the reliable client signal; the pinned hit's " +
         '`inResults` flag reports whether it also matched the ranked results. ' +
-        'Quoted spans (e.g. "exact regulatory language") search as exact phrases.',
+        'Quoted spans (e.g. "exact regulatory language") are emitted as FTS5 phrase queries — the last token gets a prefix wildcard (so "language" also matches "languages"); earlier tokens are matched exactly.',
       inputSchema: {
         query: z
           .string()
