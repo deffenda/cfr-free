@@ -129,11 +129,17 @@ function specSchemas(): Record<string, Record<string, unknown>> {
 
 function resolvePointer(doc: unknown, ref: string): unknown {
   if (!ref.startsWith('#/')) return undefined;
+  const FORBIDDEN = new Set<string>(['__proto__', 'constructor', 'prototype']);
   let node: unknown = doc;
   for (const rawSegment of ref.slice(2).split('/')) {
     if (node === null || typeof node !== 'object') return undefined;
     const segment = rawSegment.replace(/~1/g, '/').replace(/~0/g, '~');
-    node = (node as Record<string, unknown>)[segment];
+    // Own-property lookups only: a `$ref` must never traverse Object.prototype
+    // (a path hitting `__proto__`/`constructor` resolves to nothing — the right
+    // answer, since this repo's spec points only at `#/components/...`).
+    const holder = node as Record<string, unknown>;
+    if (!Object.hasOwn(holder, segment) || FORBIDDEN.has(segment)) return undefined;
+    node = holder[segment];
     if (node === undefined) return undefined;
   }
   return node;
