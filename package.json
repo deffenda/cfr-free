@@ -34,6 +34,7 @@
     "test:coverage": "vitest run --coverage",
     "scan": "bash tools/security-scan.sh",
     "scan:audit": "npm audit --audit-level=high",
+    "validate": "bash scripts/validate.sh",
     "review": "node tools/llm-review.mjs",
     "review:spec": "node tools/llm-review.mjs docs/SPEC.md",
     "ci": "npm run format:check && npm run lint && npm run typecheck && npm run test:coverage && npm run build && npm run scan:audit"
