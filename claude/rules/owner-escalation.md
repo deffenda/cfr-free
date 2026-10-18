@@ -2,7 +2,10 @@
 
 What sends work to the operator even when every gate is green, and how
 the escalation is delivered. The operator holds merge, tag, money, and
-"human-only action" authority; the orchestrator never assumes it.
+"human-only action" authority — exercised by the orchestrator only
+within the standing merge delegation in [`AGENTS.md`](../../AGENTS.md)
+(LOW/MEDIUM auto-merge once the full gate passes; HIGH risk needs chat
+sign-off first).
 
 ## Escalate in chat (interrupt, wait)
 

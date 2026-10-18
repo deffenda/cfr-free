@@ -101,8 +101,14 @@ artifact. Its exact text is retained, append-only, in the orchestrator
 journal at `~/.orchestrator/JOURNAL.md` (home-relative path; the
 absolute per-machine location is recorded in each round record), and
 additionally as a standalone file under `~/.orchestrator/packets/` —
-named `<round-id>-<verdict-sha>.md`, written by the orchestrator at
-round close. Retention: entries are never rewritten or deleted.
+named `<round-id>-<head-sha>.md` (the HEAD SHA under review — known at
+packet creation), written by the orchestrator at round close. Retention:
+entries are never rewritten or deleted. **Canonicality:** the journal
+round record is the canonical audit artifact; files under
+`~/.orchestrator/packets/` are convenience mirrors — absence or
+divergence of a mirror never invalidates the journal record. Disk
+retention is best-effort; record integrity is attested by the
+append-only journal itself.
 
 **Audits are operator-owned.** The operator may read any retained
 packet at any time and void the round it produced. A reviewer audits a
@@ -128,9 +134,19 @@ concretely:
 3. **Disagreement rule (mechanical):** compare only the verdict class
    (BLOCK vs non-BLOCK) and the P0 counts of the two rounds. A
    different class, or differing P0 counts, escalates to the operator
-   with both verdicts attached. Identical class AND P0 count → proceed
-   to the merge gate on the better-evidenced verdict.
-4. The orchestrator records both verdicts, the packet identity, and the
+   with both verdicts attached. Identical class and P0 count but P1
+   counts differing by 2 or more also escalate; small P1 discrepancies
+   are adjudicated by the orchestrator and disclosed. Identical class,
+   P0 count, and compatible P1 counts → proceed to the merge gate on
+   the **better-evidenced verdict**: the one whose candidate findings
+   all carry the effort floor's file:line citation standard; if both
+   qualify, the one with more file:line-cited candidates.
+4. **Verdict capture:** the mirror reviewer returns its verdict as its
+   final message; the orchestrator captures that message verbatim into
+   the journal round record and the packet directory (`~/.orchestrator/
+packets/`) — the same capture path as every other round. The record
+   names the packet, both reviewer models, and the comparison result.
+5. The orchestrator records both verdicts, the packet identity, and the
    comparison in the journal round record (and `~/.orchestrator/packets/`
    per the audit-trail rule).
 
@@ -171,11 +187,11 @@ The subagent returns **all** of these fields, in this order, in plain
 text:
 
 ```
-SHA:           <exact base SHA + note: uncommitted on <branch>>
+SHA:           <head sha (base <base sha>), <n> commits on <branch>>
 Scope:         <one line: what was reviewed>
 Verdict:       APPROVE | APPROVE_WITH_NITS | BLOCK
 Required:      P0: <count>  P1: <count>  P2: <count>
-Blockers:      <numbered list, or "none">
+Blockers:      <numbered list, each with its one-sentence harm-test answer, or "none">
 Candidate-findings-considered: <two or more, each with the evidence that ruled it out>
 Strongest-case-for-blocking: <one paragraph; required unless BLOCK>
 Nits:          <numbered list, or "none">
@@ -185,13 +201,51 @@ Notes:         <one paragraph: what the orchestrator should do next>
 - **Candidate-findings-considered:** entries must be file:line-cited per
   the effort floor's citation standard; more than one uncited entry
   classifies the verdict as mechanically weak-effort.
+
+## Severity definitions and calibration
+
 - **P0** = breaks a gate or a documented invariant; crashes/hangs the
   process; corrupts data. Blocks merge.
 - **P1** = real defect requiring correction before merge (missing
   shutdown path, flaky test, doc-behavior drift).
 - **P2** = style, naming, future cleanup. Does not block.
-- **BLOCK** if any P0 or unresolved P1.
+- **BLOCK** if any P0 or unresolved P1 — _after_ the harm test below.
 - **APPROVE_WITH_NITS** only if zero P0 and zero P1.
+
+## Severity calibration (harm test — anti-inflation)
+
+Severity tracks harm, not fix effort. Every P0 or P1 finding must answer
+the **harm test** in one sentence: _"If this merged and nobody ever
+fixed it, what specific bad thing happens, to whom, and when is it
+observable?"_
+
+- A finding whose honest answer is "nothing observable" is P2,
+  regardless of how trivial or how deep the fix is. Fix size decides
+  nothing on its own.
+- A one-line fix CAN be a genuine P0 (a wrong required-checks list, a
+  broken command, a wrong safety instruction) — the harm decides, not
+  the line count.
+- Factually false or self-contradicting statements in a governed doc
+  are at least P1 (every future agent is misled), and P0 only when an
+  actor following them takes a materially wrong action (bypasses a real
+  gate, blocks a legitimate merge, merges unreviewed behavior).
+  "Unenforceable", "ambiguous", and "theater" criticisms are P1 at
+  most — and only when the missing enforcement would change an outcome
+  that matters; otherwise P2.
+
+**Adjudication rights (symmetric check):** the orchestrator may
+reclassify a finding's severity downward or upward, with the
+justification recorded in the PR body beside the verbatim verdict; it
+may never dismiss the finding itself. Every reclassification is
+audit-visible and feeds the reviewer model's calibration record in the
+journal's model-performance log.
+
+**Verdict discipline:** a BLOCK verdict in which any blocker fails the
+harm test is itself classified as mechanically weak-effort (a severity
+that cannot be defended in one evidence sentence is an evidence-free
+assertion) — it feeds the rubber-stamp tripwire like any other
+low-effort round, in either severity direction.
+
 - **APPROVE** is clean — and audited: the orchestrator checks the effort
   floor against the mechanical classification before acting on it; a
   mechanically weak-effort verdict (even a "clean-looking" APPROVE) is

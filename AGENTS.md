@@ -12,7 +12,7 @@ in the round report, never silently absorbed). This is a process-vs-
 design split, not a takeover: `docs/SPEC.md` remains the sole **design**
 authority. Operator instructions
 given in chat supersede all files for the current run and are logged to
-the learning journal. None of this redefines _what_ the project does.
+the learning journal. None of this redefines what the project does.
 
 ## Roles
 
@@ -66,11 +66,21 @@ Paid models are an operator-approved escalation only, made in chat.
 5. **Hostile review.** Per
    [`claude/rules/cross-model-review.md`](claude/rules/cross-model-review.md).
    The reviewer gets the diff, the task intent, and the gates — never the
-   orchestrator's adjudications or pre-answers.
+   orchestrator's adjudications or pre-answers. Findings are graded by
+   the harm test, not by fix size; the orchestrator reclassifies
+   severity only with recorded justification and never dismisses a
+   finding itself.
 6. **Merge gate** (below), then squash, push, PR, required checks, merge,
    verify on `origin/main`, and update the journal.
 
 ## Merge gate
+
+Merge authority is the operator's. **Standing delegation** (operator
+directive, 2026-10-18, recorded in the learning journal): the
+orchestrator executes squash merges for LOW/MEDIUM-risk PRs once this
+full gate passes; HIGH-risk merges require the operator's explicit
+sign-off in chat first. The delegation is revocable in chat at any
+time.
 
 All of:
 
@@ -157,10 +167,12 @@ classify as mechanically weak-effort is a process fault:
    and P0 counts — a different class or differing P0 counts escalate
    to the operator with both verdicts attached; agreement proceeds to
    the merge gate on the better-evidenced verdict.
-2. The orchestrator re-checks its own packets for anchoring (adjudication
-   text, do-not-re-raise clauses, disclosed attack plans) under the
-   packet-audit procedure in `claude/rules/cross-model-review.md` — the
-   fault may be upstream of the reviewer.
+2. The orchestrator re-examines its own packets against the
+   banned-content list and annotates the round record with the result —
+   a **self-check**, not the formal audit (which stays operator-owned
+   per `claude/rules/cross-model-review.md`). A packet the self-check
+   finds defective voids its round and is re-issued clean; the fault
+   may be upstream of the reviewer.
 3. A third consecutive weak-effort round goes to the operator.
 
 Recorded per round in the learning journal's model-performance log. The
