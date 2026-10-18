@@ -1,6 +1,7 @@
 # Multi-title support — decision brief (SPEC §13 row 24)
 
-**Date:** 2026-10-18 · **Status:** recommendation, pending operator decision
+**Date:** 2026-10-18 · **Status:** decision recorded — single-title kept;
+SPEC §13 row 24 → **Rejected (speculative)** (merged as `6e64329`)
 **Evidence:** probed live (titles.json) + code inventory at `01fdb5b`
 
 ## The question

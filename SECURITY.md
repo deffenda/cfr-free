@@ -49,6 +49,9 @@ Design choices that keep the attack surface small:
 - **Dependency discipline.** Three runtime dependencies, all pinned to
   audited ranges; `npm audit` gates CI; Dependabot opens weekly update PRs;
   supply-chain install scripts are allowlisted explicitly (`allowScripts`).
+  The Docker base image (`node:22-alpine`) deliberately tracks the rolling
+  Node 22 LTS maintenance line (supported through April 2027) rather than
+  digest-pinning — action pins get SHAs, base images track the LTS minor.
 
 ## Continuous scanning
 
