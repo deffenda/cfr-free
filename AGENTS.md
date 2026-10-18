@@ -1,12 +1,16 @@
 # AGENTS.md — operating contract for AI work on cfr-free
 
 This file is the contract between the human owner (`@deffenda`, sole
-CODEOWNER) and any AI agent operating in this repo. The repo's other rules
-(`docs/SPEC.md`, `CONTRIBUTING.md`, `ROADMAP.md`, `.github/workflows/`, the
-`ci` script in `package.json`) **win** over this file on any conflict.
-Operator instructions given in chat supersede this file for the current
-run and are logged to the learning journal. This file only governs _how_
-AI work happens; it does not redefine _what_ the project does.
+CODEOWNER) and any AI agent operating in this repo. On conflicts: the
+repo's **technical** rules (`docs/SPEC.md` build/test/CI content,
+`CONTRIBUTING.md` contributor workflow, `.github/workflows/`, `ci`
+scripts) win. For the **AI review process**, this file and
+`claude/rules/` are the governing authority — where other repo docs
+still describe an older process, that stale text gets fixed in a
+reviewed PR rather than obeyed (conflicts found anywhere are surfaced
+in the round report, never silently absorbed). Operator instructions
+given in chat supersede all files for the current run and are logged to
+the learning journal. None of this redefines _what_ the project does.
 
 ## Roles
 
@@ -89,7 +93,7 @@ All of:
 - The squash subject is the **PR title, quoted programmatically** — pulled
   from `gh pr view`, never retyped by hand (a typo once landed on
   `main`'s commit title). The post-merge verification step checks the
-  merge commit's subject against the PR title; any deviation is logged
+  squash commit's subject against the PR title; any deviation is logged
   as a process incident.
 - The base branch is current with `main` (strict protection): when
   `gh pr view` reports `BLOCKED`, run `gh pr update-branch` and wait for
@@ -133,22 +137,29 @@ All of:
 
 ## Rubber-stamp tripwire
 
-A zero-finding round that satisfies the effort floor (substantive
-candidate-findings list, strongest-case-for-blocking argument) is a
-**clean round, not a fault**. The tripwire exists for a different
-signature: low-effort validation-shaped verdicts.
+A zero-finding round that satisfies the effort floor (each
+candidate-finding file:line-cited, ≥4 attack axes observed,
+diff-anchored strongest-case) is a **clean round, not a fault**. The
+tripwire exists for a different signature: validation-shaped low-effort
+verdicts, classified mechanically per the rules in
+`claude/rules/cross-model-review.md` ("Mechanical weak-effort
+classification").
 
-Two consecutive rounds by the SAME reviewer model in which the verdict
-platform shows weak effort — a missing or filler candidate-findings
-list, no strongest-case-for-blocking argument, or evidence-free
-assertions — is a process fault:
+Two consecutive rounds by the SAME reviewer model whose verdicts
+classify as mechanically weak-effort is a process fault:
 
-1. The next round switches reviewer variant (from the mirror roster, see
-   `claude/rules/cross-model-review.md`) and applies the elevated
-   rubric.
+1. The next round switches reviewer variant (from the mirror roster in
+   `claude/rules/cross-model-review.md`) and runs the **elevated
+   rubric**: the packet requires the full attack on every listed axis
+   with a named observation each, at least three file:line-cited
+   candidate findings, and a second, mirror-variant reviewer pass
+   cross-checking the first verdict on the same packet — disagreement
+   between the two rounds goes to the operator; agreement proceeds to
+   the merge gate.
 2. The orchestrator re-checks its own packets for anchoring (adjudication
-   text, do-not-re-raise clauses, disclosed attack plans) and strips
-   them — the fault may be upstream of the reviewer.
+   text, do-not-re-raise clauses, disclosed attack plans) under the
+   packet-audit procedure in `claude/rules/cross-model-review.md` — the
+   fault may be upstream of the reviewer.
 3. A third consecutive weak-effort round goes to the operator.
 
 Recorded per round in the learning journal's model-performance log. The

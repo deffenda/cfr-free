@@ -32,12 +32,32 @@ Required attack axes — the reviewer must genuinely work, not walk:
 
 ## Effort floor (mandatory in every verdict)
 
-- At least **two candidate findings the reviewer considered and
-  discarded, with the evidence that ruled each out**. "None found" is not
-  an acceptable filling of this requirement.
-- If the verdict is APPROVE or APPROVE_WITH_NITS: a named paragraph,
-  **"Strongest case for blocking"** — the reviewer's best argument for
-  BLOCK and what evidence would flip the verdict.
+**What counts as substantive** (this is the tripwire's measurement —
+"filler" is decided by these tests, not by feel):
+
+1. Every candidate finding cites a specific **file:line** (or exact
+   command/output) it was checked against. Entries without a citation
+   are mechanically classified as filler.
+2. At least **four of the required attack axes** carry a named
+   observation each (what was probed, and the one strongest fact found
+   or the fact that nothing was found there).
+3. "Strongest case for blocking" must reference a **specific location in
+   the diff** (file:line) it would attack and the evidence that would
+   have to exist to flip the verdict — a vacuous paragraph fails this.
+4. For trivial, mechanically-verifiable changes (e.g. a one-line version
+   bump), axes 2 and 3 may be shortened, but the citations requirement
+   (axis 1) never relaxes.
+
+- Minimum **two candidate findings considered and discarded** with the
+  above citation standard.
+- If the verdict is APPROVE or APPROVE_WITH_NITS: the named
+  **"Strongest case for blocking"** paragraph per test 3.
+
+**Mechanical weak-effort classification** (fires the tripwire when it
+appears in two consecutive rounds by the same reviewer model): any
+required verdict field missing; more than one candidate finding lacking
+a citation; a strongest-case paragraph with no diff-location reference;
+evidence-free assertions anywhere in the verdict.
 
 ## Packet rules (what the reviewer receives)
 
@@ -62,11 +82,14 @@ The reviewer receives, in a fresh subagent context:
   the expected conclusion.
 
 **Enforcement (audit trail, not trust):** the packet is an audit
-artifact. The exact packet text is retained in the learning journal's
-round record, and any agent (operator, future reviewer) may audit a
-packet against this banned-content list. A packet found in violation
-voids the reviewer round it produced: the review is re-run from a clean
-packet at the same SHA.
+artifact. Its exact text is retained, append-only, in the orchestrator
+journal at `~/.orchestrator/JOURNAL.md` (the documented location and
+retention policy: entries are never rewritten or deleted; each round's
+record carries the packet's file list, the banned-content check
+statement, and the verdict). Audits are performed by the **operator** or
+the REVIEWER OF THE NEXT round — never solely by the person who wrote
+the packet. A packet found in violation voids the reviewer round it
+produced: the review is re-run from a clean packet at the same SHA.
 
 ## When a review is required
 
@@ -84,16 +107,20 @@ verdict is the paper trail the operator audits. Gate rounding:
 - Primary reviewer role: a Nemotron-family free variant, **never the
   orchestrator's model, never the coder's model**. Fresh subagent
   context, model passed explicitly per round.
-- **Model roster** (operator-maintained; current values, 2026-10-18):
-  primary `opencode/nemotron-3-ultra-free`; mirror variants
+- **Model roster** (operator-maintained; current values are visible in
+  this file's git history — the roster is updated by a one-line PR
+  whenever a model ID changes): primary
+  `opencode/nemotron-3-ultra-free`; mirror variants
   `opencode/nemotron-3.5-super-vl-free`,
   `opencode/nemotron-3.5-lightning-free`. The rules bind ROLES, not IDs:
   if an ID is unavailable or renamed, the operator updates the roster
   and the ladder logic still holds.
 - Transient upstream 5xx (e.g. 503): retry the same model once, then
   fall to any mirror variant with the IDENTICAL packet.
-- Rubber-stamp tripwire (see AGENTS.md): two consecutive weak-effort
-  rounds by the same reviewer model → next round uses a mirror variant.
+- Rubber-stamp tripwire (see AGENTS.md, "Rubber-stamp tripwire"):
+  two consecutive mechanically weak-effort rounds by the same reviewer
+  model → next round uses a mirror variant, the elevated rubric, and a
+  mirror-variant cross-check pass.
 
 ## Verdict format (mandatory)
 
@@ -112,6 +139,9 @@ Nits:          <numbered list, or "none">
 Notes:         <one paragraph: what the orchestrator should do next>
 ```
 
+- **Candidate-findings-considered:** entries must be file:line-cited per
+  the effort floor's citation standard; more than one uncited entry
+  classifies the verdict as mechanically weak-effort.
 - **P0** = breaks a gate or a documented invariant; crashes/hangs the
   process; corrupts data. Blocks merge.
 - **P1** = real defect requiring correction before merge (missing
@@ -119,9 +149,10 @@ Notes:         <one paragraph: what the orchestrator should do next>
 - **P2** = style, naming, future cleanup. Does not block.
 - **BLOCK** if any P0 or unresolved P1.
 - **APPROVE_WITH_NITS** only if zero P0 and zero P1.
-- **APPROVE** is clean — and audited: the orchestrator checks that the
-  effort floor was actually met before acting on it. An APPROVE with an
-  empty candidate-findings list is returned for re-review under the
+- **APPROVE** is clean — and audited: the orchestrator checks the effort
+  floor against the mechanical classification before acting on it; a
+  mechanically weak-effort verdict (even a "clean-looking" APPROVE) is
+  returned for re-review under the
   elevated rubric.
 
 The orchestrator pastes the verdict verbatim into the PR description. It

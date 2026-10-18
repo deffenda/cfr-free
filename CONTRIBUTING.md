@@ -51,6 +51,12 @@ Requires Node ≥ 22.5.
 
 ## Reviews
 
-PRs get an automated review pass from local models (Gemma via LM Studio,
-Nemotron) before merge; findings are triaged into the SPEC review log when
-they change the design.
+## Reviews
+
+Human PR reviews are not required (solo maintainer). Every PR gets an
+independent multi-model review round before merge — see the
+`AGENTS.md` and `claude/rules/cross-model-review.md` files at the repo
+root for the standing process (hostile-stance reviewer, effort floor,
+verdict format). Gemma/LM-Studio passes were part of earlier rounds and
+are recorded in the SPEC review log when their findings changed the
+design.
