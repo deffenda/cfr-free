@@ -8,7 +8,9 @@ scripts) win. For the **AI review process**, this file and
 `claude/rules/` are the governing authority — where other repo docs
 still describe an older process, that stale text gets fixed in a
 reviewed PR rather than obeyed (conflicts found anywhere are surfaced
-in the round report, never silently absorbed). Operator instructions
+in the round report, never silently absorbed). This is a process-vs-
+design split, not a takeover: `docs/SPEC.md` remains the sole **design**
+authority. Operator instructions
 given in chat supersede all files for the current run and are logged to
 the learning journal. None of this redefines _what_ the project does.
 
@@ -148,14 +150,13 @@ classification").
 Two consecutive rounds by the SAME reviewer model whose verdicts
 classify as mechanically weak-effort is a process fault:
 
-1. The next round switches reviewer variant (from the mirror roster in
-   `claude/rules/cross-model-review.md`) and runs the **elevated
-   rubric**: the packet requires the full attack on every listed axis
-   with a named observation each, at least three file:line-cited
-   candidate findings, and a second, mirror-variant reviewer pass
-   cross-checking the first verdict on the same packet — disagreement
-   between the two rounds goes to the operator; agreement proceeds to
-   the merge gate.
+1. The next round executes the **cross-check round protocol** in
+   `claude/rules/cross-model-review.md` ("Elevated rubric"): the
+   mirror-variant reviewer re-runs the SAME packet, never having seen
+   the first verdict; the adjudicator compares only the verdict class
+   and P0 counts — a different class or differing P0 counts escalate
+   to the operator with both verdicts attached; agreement proceeds to
+   the merge gate on the better-evidenced verdict.
 2. The orchestrator re-checks its own packets for anchoring (adjudication
    text, do-not-re-raise clauses, disclosed attack plans) under the
    packet-audit procedure in `claude/rules/cross-model-review.md` — the
@@ -163,9 +164,9 @@ classify as mechanically weak-effort is a process fault:
 3. A third consecutive weak-effort round goes to the operator.
 
 Recorded per round in the learning journal's model-performance log. The
-effort floor is defined in
-[`claude/rules/cross-model-review.md`](claude/rules/cross-model-review.md)
-("Effort floor").
+effort floor and its mechanical weak-effort classification are defined
+in [`claude/rules/cross-model-review.md`](claude/rules/cross-model-review.md)
+("Effort floor (mandatory in every verdict)").
 
 ## Escalation
 

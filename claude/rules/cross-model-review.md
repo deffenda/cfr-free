@@ -59,6 +59,21 @@ required verdict field missing; more than one candidate finding lacking
 a citation; a strongest-case paragraph with no diff-location reference;
 evidence-free assertions anywhere in the verdict.
 
+Every axis observation must also name the **specific artifact probed**
+(file:line, hunk, or command) — not the axis label alone. An observation
+of "Axis 1: probed scope creep; found nothing" without an artifact
+reference fails the mechanical test.
+
+**Known limitation (write this down, don't paper over it):** the
+mechanical classification is a _floor_, not a proof of substance. A
+determined bad-faith reviewer can pass every mechanical test with
+vacuous-but-cited filler. What catches that: (a) operator packet/verdict
+audit (below), and (b) the cross-check round under the elevated rubric,
+where a second reviewer model works the same packet independently. The
+mechanical check exists so at least SOME dodges fail cheaply; it is not
+the substance judge, and auditors must not treat "mechanically
+compliant" as "substantively investigated".
+
 ## Packet rules (what the reviewer receives)
 
 The reviewer receives, in a fresh subagent context:
@@ -83,13 +98,41 @@ The reviewer receives, in a fresh subagent context:
 
 **Enforcement (audit trail, not trust):** the packet is an audit
 artifact. Its exact text is retained, append-only, in the orchestrator
-journal at `~/.orchestrator/JOURNAL.md` (the documented location and
-retention policy: entries are never rewritten or deleted; each round's
-record carries the packet's file list, the banned-content check
-statement, and the verdict). Audits are performed by the **operator** or
-the REVIEWER OF THE NEXT round — never solely by the person who wrote
-the packet. A packet found in violation voids the reviewer round it
-produced: the review is re-run from a clean packet at the same SHA.
+journal at `~/.orchestrator/JOURNAL.md` (home-relative path; the
+absolute per-machine location is recorded in each round record), and
+additionally as a standalone file under `~/.orchestrator/packets/` —
+named `<round-id>-<verdict-sha>.md`, written by the orchestrator at
+round close. Retention: entries are never rewritten or deleted.
+
+**Audits are operator-owned.** The operator may read any retained
+packet at any time and void the round it produced. A reviewer audits a
+past packet only when the operator explicitly forwards it — an explicit
+delivery mechanism, never an implied standing duty. A packet found in
+violation voids the reviewer round it produced: the review is re-run
+from a clean packet at the same SHA.
+
+## Elevated rubric (cross-check round)
+
+**Trigger:** two consecutive mechanically weak-effort rounds by the same
+reviewer model. The escalation is a **cross-check round**, executed
+concretely:
+
+1. The SAME original packet — unchanged, or re-issued with only
+   verbatim fixes if the packet itself was audited and found
+   defective — is re-sent to a **mirror-variant reviewer model** (see
+   the model roster above).
+2. The mirror reviewer has NEVER seen the first verdict (packet rules
+   apply in full; providing the first verdict to the mirror reviewer is
+   itself an anchoring violation). It returns the standard mandate
+   format verbatim.
+3. **Disagreement rule (mechanical):** compare only the verdict class
+   (BLOCK vs non-BLOCK) and the P0 counts of the two rounds. A
+   different class, or differing P0 counts, escalates to the operator
+   with both verdicts attached. Identical class AND P0 count → proceed
+   to the merge gate on the better-evidenced verdict.
+4. The orchestrator records both verdicts, the packet identity, and the
+   comparison in the journal round record (and `~/.orchestrator/packets/`
+   per the audit-trail rule).
 
 ## When a review is required
 
@@ -119,8 +162,8 @@ verdict is the paper trail the operator audits. Gate rounding:
   fall to any mirror variant with the IDENTICAL packet.
 - Rubber-stamp tripwire (see AGENTS.md, "Rubber-stamp tripwire"):
   two consecutive mechanically weak-effort rounds by the same reviewer
-  model → next round uses a mirror variant, the elevated rubric, and a
-  mirror-variant cross-check pass.
+  model → the next round executes the "Elevated rubric (cross-check
+  round)" section above.
 
 ## Verdict format (mandatory)
 
@@ -152,8 +195,8 @@ Notes:         <one paragraph: what the orchestrator should do next>
 - **APPROVE** is clean — and audited: the orchestrator checks the effort
   floor against the mechanical classification before acting on it; a
   mechanically weak-effort verdict (even a "clean-looking" APPROVE) is
-  returned for re-review under the
-  elevated rubric.
+  returned for re-review under the "Elevated rubric (cross-check
+  round)" section above.
 
 The orchestrator pastes the verdict verbatim into the PR description. It
 does not paraphrase, summarize, or re-interpret it — and it adjudicates

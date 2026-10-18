@@ -51,8 +51,6 @@ Requires Node ≥ 22.5.
 
 ## Reviews
 
-## Reviews
-
 Human PR reviews are not required (solo maintainer). Every PR gets an
 independent multi-model review round before merge — see the
 `AGENTS.md` and `claude/rules/cross-model-review.md` files at the repo
