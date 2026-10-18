@@ -78,7 +78,16 @@ citation?)` encodes the adjudicator workflow: locate criteria → read
 18. **Per-section amendment dates** — research eCFR's amendment metadata
     feed; if derivable, attach `amendedAt` to sections (gold for date-of-claim
     analysis).
+    **Researched — not bulk-derivable** (2026-10-18, see
+    docs/research/amendment-dates.md): no section-level amendment feed exists;
+    per-section `starts_on` is available but at ~1 request/section per sync.
+    Date-of-claim path remains the point-in-time URL links shipped in §4.
 19. **Definitions quick access** — dedicated path to §3.1 master definitions
     (e.g. "established profession of medicine") from tools/resources.
+    **Built** (MCP resource `cfr://title38/definitions`, PR #24).
 20. **Appendix parity in browse** — verify appendices appear in `browse` and
     `list_parts` navigation consistently with sections.
+    **Verified** (2026-10-18): browse returns all children unfiltered (appendix
+    entries included, `type: 'appendix'`); fixtures pin appendix children in
+    part-level browse and per-part counts; live corpus confirms part 4 ships 3
+    appendix structure entries + 3 indexed appendix rows. No code change.
