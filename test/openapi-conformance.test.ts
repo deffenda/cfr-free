@@ -1,0 +1,868 @@
+/**
+ * OpenAPI conformance: `docs/openapi.yaml` protecting itself.
+ *
+ * The spec is static (nothing serves it), so this file enforces both halves
+ * of the contract — the document's own structure, and the live server's
+ * responses against the document:
+ *
+ * 1. Spec well-formedness — parses the real YAML through a python3 bridge
+ *    (no YAML parser exists in node_modules; the lockfile's only `yaml` entry
+ *    is an uninstalled vitest optional peer) and checks the structural rules
+ *    an outside scan tripped on: path templates declared, HEAD twins
+ *    mirroring GET parameters, every `$ref` resolvable under
+ *    `#/components/`, response statuses bound to Response Objects,
+ *    `required ⊆ properties`, and only documented conditionals left
+ *    optional.
+ *
+ * 2. Response conformance — boots the real HTTP server in-process over a
+ *    seeded temp store (test/http-server.test.ts bootstrap) and, for EVERY
+ *    path × method the spec declares, asserts the live status is declared,
+ *    the live 200 body validates against the spec's own response schema
+ *    (Ajv2020 + ajv-formats, `$ref`s resolved locally), and HEAD answers
+ *    with an empty body. Documented error statuses are probed the same way.
+ *    A second server seeded through the real `syncIndex` path exercises the
+ *    non-null SyncChanges branch of Health.lastChanges (the fixture store
+ *    has no sync history, so it exercises the null branch).
+ *
+ * Deterministic by construction: in-process server, injected fetch, no
+ * sleeps. The only external process is the python3 YAML bridge reading
+ * docs/openapi.yaml — if it cannot run, these tests fail loudly (a silent
+ * skip would disable the contract).
+ */
+import { spawnSync } from 'node:child_process';
+import type { AddressInfo } from 'node:net';
+import { fileURLToPath } from 'node:url';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type http from 'node:http';
+import addFormats from 'ajv-formats';
+import { Ajv2020 } from 'ajv/dist/2020.js';
+import type { AnySchema } from 'ajv';
+import { EcfrApi } from '../src/core/ecfr.js';
+import { HttpClient } from '../src/core/http-client.js';
+import type { FetchLike } from '../src/core/http-client.js';
+import { CFRService } from '../src/core/service.js';
+import { syncIndex } from '../src/core/sync.js';
+import { createHttpServer } from '../src/titan/http-server.js';
+import { FIXTURE_STRUCTURE, createTestLogger, openTempStore, type TempStore } from './helpers.js';
+
+// ---------------------------------------------------------------------------
+// Spec loading: python3 + PyYAML → JSON (preinstalled on macOS and on
+// GitHub-hosted runners). Failure to spawn or to import yaml must fail the
+// suite with an actionable message — never skip: a silently missing spec
+// would disable every contract check below.
+// ---------------------------------------------------------------------------
+
+const SPEC_PATH = fileURLToPath(new URL('../docs/openapi.yaml', import.meta.url));
+
+const YAML_TO_JSON_BRIDGE = [
+  'import json, sys, yaml',
+  'doc = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))',
+  'json.dump(doc, sys.stdout)',
+].join('\n');
+
+interface SpecParameter {
+  readonly name: string;
+  readonly in: string;
+}
+
+interface SpecOperation {
+  readonly responses?: Record<string, unknown> | undefined;
+  readonly parameters?: readonly unknown[] | undefined;
+}
+
+interface SpecPathItem {
+  readonly parameters?: readonly unknown[] | undefined;
+  readonly [member: string]: unknown;
+}
+
+interface SpecDocument {
+  readonly openapi?: unknown;
+  readonly paths?: Record<string, SpecPathItem> | undefined;
+  readonly components?:
+    | {
+        readonly responses?: Record<string, unknown> | undefined;
+        readonly schemas?: Record<string, Record<string, unknown>> | undefined;
+      }
+    | undefined;
+}
+
+function loadSpec(): SpecDocument {
+  const result = spawnSync('python3', ['-c', YAML_TO_JSON_BRIDGE, SPEC_PATH], {
+    encoding: 'utf8',
+  });
+  const bridge = (detail: string): never => {
+    throw new Error(
+      `openapi YAML bridge failed: ${detail} — this suite requires python3 with PyYAML ` +
+        'preinstalled (e.g. `pip install pyyaml`; macOS python3 and GitHub ubuntu runners ' +
+        'ship it). The OpenAPI contract cannot be checked without it, so the test fails ' +
+        'instead of skipping.',
+    );
+  };
+  if (result.error !== undefined) bridge(`cannot spawn python3 (${result.error.message})`);
+  if (result.status !== 0) {
+    bridge(`python3 exited ${String(result.status)} (${result.stderr.trim() || 'no stderr'})`);
+  }
+  try {
+    return JSON.parse(result.stdout) as SpecDocument;
+  } catch (error) {
+    return bridge(
+      `bridge emitted invalid JSON (${error instanceof Error ? error.message : String(error)})`,
+    );
+  }
+}
+
+const SPEC = loadSpec();
+
+function specPaths(): Record<string, SpecPathItem> {
+  return SPEC.paths ?? {};
+}
+
+function specSchemas(): Record<string, Record<string, unknown>> {
+  return SPEC.components?.schemas ?? {};
+}
+
+// ---------------------------------------------------------------------------
+// Local $ref tooling: pointer resolution, whole-document ref collection, and
+// a deep resolver that inlines `#/components/...` references so Ajv compiles
+// a self-contained schema.
+// ---------------------------------------------------------------------------
+
+function resolvePointer(doc: unknown, ref: string): unknown {
+  if (!ref.startsWith('#/')) return undefined;
+  let node: unknown = doc;
+  for (const rawSegment of ref.slice(2).split('/')) {
+    if (node === null || typeof node !== 'object') return undefined;
+    const segment = rawSegment.replace(/~1/g, '/').replace(/~0/g, '~');
+    node = (node as Record<string, unknown>)[segment];
+    if (node === undefined) return undefined;
+  }
+  return node;
+}
+
+function collectRefs(node: unknown, out: string[]): void {
+  if (Array.isArray(node)) {
+    for (const item of node) collectRefs(item, out);
+    return;
+  }
+  if (node === null || typeof node !== 'object') return;
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    if (key === '$ref' && typeof value === 'string') out.push(value);
+    else collectRefs(value, out);
+  }
+}
+
+function resolveSchemaRefs(node: unknown, doc: unknown, stack: readonly string[]): unknown {
+  if (Array.isArray(node)) return node.map((item) => resolveSchemaRefs(item, doc, stack));
+  if (node === null || typeof node !== 'object') return node;
+  const record = node as Record<string, unknown>;
+  const ref = record['$ref'];
+  if (typeof ref === 'string') {
+    if (stack.includes(ref))
+      throw new Error(`circular $ref chain: ${[...stack, ref].join(' -> ')}`);
+    const target = resolvePointer(doc, ref);
+    if (target === undefined) throw new Error(`unresolvable $ref: ${ref}`);
+    return resolveSchemaRefs(target, doc, [...stack, ref]);
+  }
+  const resolved: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    resolved[key] = resolveSchemaRefs(value, doc, stack);
+  }
+  return resolved;
+}
+
+// ---------------------------------------------------------------------------
+// Ajv (OAS 3.1 dialect) for live-body validation.
+// ---------------------------------------------------------------------------
+
+const ajv = new Ajv2020({ strict: false, allErrors: true });
+// ajv-formats ships CJS whose exports object doubles as the plugin and
+// self-references it as `.default` — reachable from every module interop.
+addFormats.default(ajv);
+
+function schemaLabel(schema: unknown): string {
+  if (schema !== null && typeof schema === 'object') {
+    const ref = (schema as Record<string, unknown>)['$ref'];
+    if (typeof ref === 'string') return ref.slice(ref.lastIndexOf('/') + 1) || ref;
+  }
+  return 'declared schema';
+}
+
+function parseJsonBody(label: string, text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new Error(
+      `${label}: body is not valid JSON (${error instanceof Error ? error.message : String(error)})`,
+      { cause: error },
+    );
+  }
+}
+
+function mediaTypeOf(headers: Headers): string {
+  const raw = headers.get('content-type');
+  if (raw === null) return '';
+  return (raw.split(';')[0] ?? '').trim();
+}
+
+function declaredResponseHeaders(response: Record<string, unknown>): string[] {
+  const headers = response['headers'];
+  return headers !== null && typeof headers === 'object' ? Object.keys(headers as object) : [];
+}
+
+/** Assert the live content-type is one the spec declares; returns it. */
+function assertMediaDeclared(
+  label: string,
+  response: Record<string, unknown>,
+  headers: Headers,
+): string {
+  const content = response['content'];
+  const declared =
+    content !== null && typeof content === 'object' ? Object.keys(content as object) : [];
+  const actual = mediaTypeOf(headers);
+  if (!declared.includes(actual)) {
+    throw new Error(
+      `${label}: content-type "${actual}" is not declared (spec declares: ${declared.join(', ') || 'no content'})`,
+    );
+  }
+  return actual;
+}
+
+/**
+ * Assert a live response body matches the spec: declared headers present,
+ * actual media type declared, and the body valid against the locally
+ * resolved response schema.
+ */
+function assertBodyConforms(
+  label: string,
+  response: Record<string, unknown>,
+  headers: Headers,
+  text: string,
+): void {
+  for (const name of declaredResponseHeaders(response)) {
+    if (!headers.has(name))
+      throw new Error(`${label}: declared header "${name}" missing from the live response`);
+  }
+  const media = assertMediaDeclared(label, response, headers);
+  const content = response['content'];
+  if (content === null || typeof content !== 'object')
+    throw new Error(`${label}: response declares no content`);
+  const mediaEntry = (content as Record<string, unknown>)[media];
+  if (mediaEntry === null || typeof mediaEntry !== 'object')
+    throw new Error(`${label}: no entry for ${media}`);
+  const schema = (mediaEntry as Record<string, unknown>)['schema'];
+  if (schema === undefined) throw new Error(`${label}: no schema declared for ${media}`);
+  const resolved = resolveSchemaRefs(schema, SPEC, []);
+  if (resolved === null || typeof resolved !== 'object')
+    throw new Error(`${label}: resolved schema is not an object`);
+  const validate = ajv.compile(resolved as AnySchema);
+  const body = media.startsWith('application/json') ? parseJsonBody(label, text) : text;
+  if (!validate(body)) {
+    throw new Error(
+      `${label}: body violates ${schemaLabel(schema)} — ${ajv.errorsText(validate.errors)}`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Spec navigation helpers.
+// ---------------------------------------------------------------------------
+
+const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'] as const;
+
+const KNOWN_PATHS = [
+  '/health',
+  '/metrics',
+  '/api/v1/search',
+  '/api/v1/sections/{citation}',
+  '/api/v1/browse',
+] as const;
+
+interface OperationEntry {
+  readonly method: (typeof HTTP_METHODS)[number];
+  readonly operation: SpecOperation;
+}
+
+function operationsOf(pathItem: SpecPathItem): OperationEntry[] {
+  const entries: OperationEntry[] = [];
+  for (const method of HTTP_METHODS) {
+    const value = pathItem[method];
+    if (value !== null && typeof value === 'object')
+      entries.push({ method, operation: value as SpecOperation });
+  }
+  return entries;
+}
+
+function parametersOf(raw: readonly unknown[] | undefined): SpecParameter[] {
+  if (raw === undefined) return [];
+  const params: SpecParameter[] = [];
+  for (const value of raw) {
+    if (value === null || typeof value !== 'object') continue;
+    const record = value as Record<string, unknown>;
+    if (typeof record['name'] === 'string' && typeof record['in'] === 'string') {
+      params.push({ name: record['name'], in: record['in'] });
+    }
+  }
+  return params;
+}
+
+function operationOf(specPath: string, method: 'get' | 'head'): SpecOperation {
+  const pathItem = specPaths()[specPath];
+  if (pathItem === undefined) throw new Error(`docs/openapi.yaml no longer documents ${specPath}`);
+  const operation = pathItem[method];
+  if (operation === null || typeof operation !== 'object') {
+    throw new Error(`${specPath} no longer documents a ${method.toUpperCase()} operation`);
+  }
+  return operation as SpecOperation;
+}
+
+function declaredStatuses(operation: SpecOperation): string[] {
+  return operation.responses === undefined ? [] : Object.keys(operation.responses);
+}
+
+/** The Response Object for a status, following a `#/components/responses/` $ref. */
+function responseFor(
+  operation: SpecOperation,
+  status: string,
+): Record<string, unknown> | undefined {
+  const entry = operation.responses === undefined ? undefined : operation.responses[status];
+  if (entry === null || typeof entry !== 'object') return undefined;
+  const record = entry as Record<string, unknown>;
+  const ref = record['$ref'];
+  if (typeof ref === 'string') {
+    const target = resolvePointer(SPEC, ref);
+    if (target === null || typeof target !== 'object') return undefined;
+    return target as Record<string, unknown>;
+  }
+  return record;
+}
+
+function responseDescriptionViolations(label: string, response: Record<string, unknown>): string[] {
+  const description = response['description'];
+  return typeof description === 'string' && description.length > 0
+    ? []
+    : [`${label}: Response Object has no description`];
+}
+
+function responseBindingViolations(label: string, entry: unknown): string[] {
+  if (entry === null || typeof entry !== 'object') return [`${label}: response is not an object`];
+  const record = entry as Record<string, unknown>;
+  const ref = record['$ref'];
+  if (typeof ref !== 'string') return responseDescriptionViolations(label, record);
+  if (!ref.startsWith('#/components/responses/')) {
+    return [`${label}: $ref ${ref} must point into #/components/responses/`];
+  }
+  const resolved = resolvePointer(SPEC, ref);
+  if (resolved === undefined || resolved === null || typeof resolved !== 'object') {
+    return [`${label}: $ref ${ref} does not resolve`];
+  }
+  return responseDescriptionViolations(label, resolved as Record<string, unknown>);
+}
+
+// ---------------------------------------------------------------------------
+// Suite 1 — spec well-formedness.
+// ---------------------------------------------------------------------------
+
+// docs/openapi.yaml info.description: "All schema fields listed under
+// required are always present (the optional Health.diskFree/diskTotal are
+// the deliberate exception)"; NotFound documents browse's `available` the
+// same way. Every other declared property is an always-present field:
+// dropping one from `required` (or declaring a new optional property)
+// silently widens the contract while the server keeps emitting the field.
+const CONDITIONAL_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  Error: ['available'],
+  Health: ['diskFree', 'diskTotal'],
+};
+
+describe('OpenAPI spec well-formedness (docs/openapi.yaml)', () => {
+  it('declares an OpenAPI 3.1.x document', () => {
+    const version = SPEC.openapi;
+    expect(typeof version, 'openapi: header is missing').toBe('string');
+    expect(
+      String(version).startsWith('3.1'),
+      `openapi: ${String(version)} must be 3.1.x — the nullable type-array syntax (type: [string, "null"]) depends on it`,
+    ).toBe(true);
+  });
+
+  it('documents a non-empty paths object including every known API path', () => {
+    const paths = Object.keys(specPaths());
+    expect(paths.length, 'paths: must not be empty').toBeGreaterThan(0);
+    expect(
+      KNOWN_PATHS.filter((known) => !paths.includes(known)),
+      'known API paths missing from docs/openapi.yaml',
+    ).toEqual([]);
+  });
+
+  it('declares each path template variable at the path-item or in every operation', () => {
+    const violations: string[] = [];
+    for (const [path, pathItem] of Object.entries(specPaths())) {
+      const variables = [...path.matchAll(/\{([^}]+)\}/g)].map((match) => match[1] ?? '');
+      for (const variable of variables) {
+        const atPathItem = parametersOf(pathItem.parameters).some(
+          (param) => param.name === variable && param.in === 'path',
+        );
+        if (atPathItem) continue;
+        const operations = operationsOf(pathItem);
+        if (operations.length === 0) {
+          violations.push(`${path}: template {${variable}} has no operation to declare it`);
+          continue;
+        }
+        for (const { method, operation } of operations) {
+          const declared = parametersOf(operation.parameters).some(
+            (param) => param.name === variable && param.in === 'path',
+          );
+          if (!declared) {
+            violations.push(
+              `${path}: template {${variable}} is not declared by the ${method.toUpperCase()} operation ` +
+                '(declare it there or at the path-item level)',
+            );
+          }
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('mirrors every GET parameter in the HEAD twin (name + in)', () => {
+    const violations: string[] = [];
+    for (const [path, pathItem] of Object.entries(specPaths())) {
+      const operations = operationsOf(pathItem);
+      const get = operations.find((entry) => entry.method === 'get');
+      const head = operations.find((entry) => entry.method === 'head');
+      if (get === undefined || head === undefined) continue;
+      const headParams = parametersOf(head.operation.parameters);
+      for (const param of parametersOf(get.operation.parameters)) {
+        const mirrored = headParams.some(
+          (other) => other.name === param.name && other.in === param.in,
+        );
+        if (!mirrored) {
+          violations.push(`${path}: HEAD is missing {${param.in}} ${param.name} declared by GET`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('resolves every $ref to a #/components/... target in this document', () => {
+    const refs: string[] = [];
+    collectRefs(SPEC, refs);
+    expect(refs.length, 'spec contains no $ref at all').toBeGreaterThan(0);
+    const broken = [...new Set(refs)].filter(
+      (ref) => !ref.startsWith('#/components/') || resolvePointer(SPEC, ref) === undefined,
+    );
+    expect(broken, 'unresolvable or non-#/components $ref').toEqual([]);
+  });
+
+  it('binds every operation response status to a resolvable Response Object', () => {
+    const violations: string[] = [];
+    for (const [path, pathItem] of Object.entries(specPaths())) {
+      for (const { method, operation } of operationsOf(pathItem)) {
+        const label = `${path} ${method.toUpperCase()}`;
+        const responses = operation.responses;
+        if (responses === undefined || Object.keys(responses).length === 0) {
+          violations.push(`${label}: operation declares no responses`);
+          continue;
+        }
+        for (const [status, entry] of Object.entries(responses)) {
+          violations.push(...responseBindingViolations(`${label} ${status}`, entry));
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('keeps every schema required list inside its properties', () => {
+    const violations: string[] = [];
+    for (const [name, schema] of Object.entries(specSchemas())) {
+      const properties = schema['properties'];
+      const keys =
+        properties !== null && typeof properties === 'object'
+          ? Object.keys(properties as object)
+          : [];
+      const required = schema['required'];
+      if (required === undefined) continue;
+      if (!Array.isArray(required)) {
+        violations.push(`${name}: required is not an array`);
+        continue;
+      }
+      for (const field of required) {
+        if (typeof field !== 'string')
+          violations.push(`${name}: required contains a non-string entry`);
+        else if (!keys.includes(field))
+          violations.push(`${name}: required field "${field}" is not in properties`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('requires every always-present property (only documented conditionals stay optional)', () => {
+    const violations: string[] = [];
+    for (const [name, schema] of Object.entries(specSchemas())) {
+      const properties = schema['properties'];
+      const keys =
+        properties !== null && typeof properties === 'object'
+          ? Object.keys(properties as object)
+          : [];
+      const required = Array.isArray(schema['required'])
+        ? schema['required'].filter((field): field is string => typeof field === 'string')
+        : [];
+      const conditional = CONDITIONAL_FIELDS[name] ?? [];
+      const undocumentedOptional = keys.filter(
+        (key) => !required.includes(key) && !conditional.includes(key),
+      );
+      const staleConditional = conditional.filter(
+        (key) => !keys.includes(key) || required.includes(key),
+      );
+      for (const key of undocumentedOptional) {
+        violations.push(
+          `${name}: property "${key}" is optional but not documented as conditional — ` +
+            'restore it under required (the server emits it on every response)',
+        );
+      }
+      for (const key of staleConditional) {
+        violations.push(
+          `${name}: "${key}" is listed as conditional but is not a plain optional property — update CONDITIONAL_FIELDS`,
+        );
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Suite 2 — response conformance against the live in-process server.
+// ---------------------------------------------------------------------------
+
+// One concrete request per spec path. Every enumerated spec path MUST have
+// an entry: a newly documented path fails test collection until its probe
+// exists, so the matrix cannot silently lag the spec.
+const ROUTE_PROBES: Readonly<
+  Record<string, { readonly requestPath: string; readonly query?: string }>
+> = {
+  '/health': { requestPath: '/health' },
+  '/metrics': { requestPath: '/metrics' },
+  '/api/v1/search': { requestPath: '/api/v1/search', query: 'q=veteran&per_page=1' },
+  '/api/v1/sections/{citation}': { requestPath: '/api/v1/sections/4.125' },
+  '/api/v1/browse': { requestPath: '/api/v1/browse' },
+};
+
+interface HappyProbeRow {
+  readonly label: string;
+  readonly specPath: string;
+  readonly operation: 'get' | 'head';
+  readonly method: 'GET' | 'HEAD';
+  readonly url: string;
+}
+
+function buildHappyProbeRows(): HappyProbeRow[] {
+  const rows: HappyProbeRow[] = [];
+  for (const specPath of Object.keys(specPaths())) {
+    const probe = ROUTE_PROBES[specPath];
+    if (probe === undefined) {
+      throw new Error(
+        `docs/openapi.yaml now documents ${specPath} — add a probe for it to ROUTE_PROBES in test/openapi-conformance.test.ts`,
+      );
+    }
+    const url =
+      probe.query === undefined ? probe.requestPath : `${probe.requestPath}?${probe.query}`;
+    for (const method of ['GET', 'HEAD'] as const) {
+      rows.push({
+        label: `${method} ${url}`,
+        specPath,
+        operation: method.toLowerCase() as 'get' | 'head',
+        method,
+        url,
+      });
+    }
+  }
+  return rows;
+}
+
+interface ErrorProbeRow {
+  readonly label: string;
+  readonly specPath: string;
+  /** Operation whose declared responses document this status. */
+  readonly operation: 'get' | 'head';
+  readonly method: 'GET' | 'HEAD' | 'POST';
+  readonly url: string;
+  readonly expectedStatus: number;
+}
+
+const ERROR_PROBES: readonly ErrorProbeRow[] = [
+  {
+    label: 'search HEAD without required q',
+    specPath: '/api/v1/search',
+    operation: 'head',
+    method: 'HEAD',
+    url: '/api/v1/search',
+    expectedStatus: 400,
+  },
+  {
+    label: 'sections HEAD with an invalid citation',
+    specPath: '/api/v1/sections/{citation}',
+    operation: 'head',
+    method: 'HEAD',
+    url: '/api/v1/sections/zz',
+    expectedStatus: 400,
+  },
+  {
+    label: 'browse GET subpart without part',
+    specPath: '/api/v1/browse',
+    operation: 'get',
+    method: 'GET',
+    url: '/api/v1/browse?subpart=A',
+    expectedStatus: 400,
+  },
+  {
+    label: 'sections GET unknown citation',
+    specPath: '/api/v1/sections/{citation}',
+    operation: 'get',
+    method: 'GET',
+    url: '/api/v1/sections/99.999',
+    expectedStatus: 404,
+  },
+  {
+    label: 'POST /health (non-GET/HEAD method)',
+    specPath: '/health',
+    operation: 'get',
+    method: 'POST',
+    url: '/health',
+    expectedStatus: 405,
+  },
+  {
+    label: 'search URL over 2048 bytes',
+    specPath: '/api/v1/search',
+    operation: 'get',
+    method: 'GET',
+    url: `/api/v1/search?q=${'x'.repeat(3000)}`,
+    expectedStatus: 414,
+  },
+];
+
+describe('OpenAPI response conformance (in-process server vs spec)', () => {
+  let temp: TempStore;
+  let server: http.Server;
+  let base: string;
+
+  const rows = buildHappyProbeRows();
+
+  beforeAll(async () => {
+    temp = openTempStore();
+    server = createHttpServer(new CFRService(temp.store, 7), createTestLogger());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      server.closeAllConnections();
+    });
+    temp.cleanup();
+  });
+
+  for (const row of rows) {
+    it(`${row.label}: status declared${row.method === 'HEAD' ? ', empty body' : ', 200 body schema-valid'}`, async () => {
+      const operation = operationOf(row.specPath, row.operation);
+      const response = await fetch(`${base}${row.url}`, { method: row.method });
+      const text = await response.text();
+      expect(
+        declaredStatuses(operation),
+        `${row.label}: live status ${response.status} is not declared by the spec`,
+      ).toContain(String(response.status));
+      expect(response.status, `${row.label}: happy-path probe expected 200`).toBe(200);
+      const ok200 = responseFor(operation, '200');
+      if (ok200 === undefined) throw new Error(`${row.label}: spec 200 response does not resolve`);
+      if (row.method === 'HEAD') {
+        expect(text, `${row.label}: HEAD must not carry a body`).toBe('');
+        return;
+      }
+      assertBodyConforms(row.label, ok200, response.headers, text);
+    });
+  }
+
+  for (const probe of ERROR_PROBES) {
+    it(`${probe.label} → ${probe.expectedStatus} as documented`, async () => {
+      const operation = operationOf(probe.specPath, probe.operation);
+      const response = await fetch(`${base}${probe.url}`, { method: probe.method });
+      const text = await response.text();
+      expect(
+        declaredStatuses(operation),
+        `${probe.label}: live status ${response.status} is not declared by the spec`,
+      ).toContain(String(response.status));
+      expect(
+        response.status,
+        `${probe.label}: expected the documented ${probe.expectedStatus}`,
+      ).toBe(probe.expectedStatus);
+      const documented = responseFor(operation, String(probe.expectedStatus));
+      if (documented === undefined) {
+        throw new Error(`${probe.label}: spec response ${probe.expectedStatus} does not resolve`);
+      }
+      if (probe.method === 'HEAD') {
+        expect(text, `${probe.label}: HEAD must not carry a body`).toBe('');
+        return;
+      }
+      assertBodyConforms(probe.label, documented, response.headers, text);
+    });
+  }
+
+  it('sends HEAD with the same content headers as its GET twin', async () => {
+    const violations: string[] = [];
+    for (const row of rows) {
+      if (row.method !== 'GET') continue;
+      const get = await fetch(`${base}${row.url}`);
+      const head = await fetch(`${base}${row.url}`, { method: 'HEAD' });
+      for (const header of ['content-type', 'cache-control']) {
+        const getValue = get.headers.get(header);
+        const headValue = head.headers.get(header);
+        if (getValue !== headValue) {
+          violations.push(
+            `${row.url}: GET ${header}=${String(getValue)} vs HEAD ${header}=${String(headValue)}`,
+          );
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('/health covers every schema-required field after fixture seeding', async () => {
+    const response = await fetch(`${base}/health`);
+    const text = await response.text();
+    expect(response.status).toBe(200);
+    const body = parseJsonBody('GET /health', text) as Record<string, unknown>;
+    const healthSchema = specSchemas()['Health'];
+    if (healthSchema === undefined) throw new Error('components.schemas.Health missing');
+    const required = healthSchema['required'];
+    expect(Array.isArray(required), 'Health.required must be an array').toBe(true);
+    const missing = (required as string[]).filter((field) => !(field in body));
+    expect(missing, '/health body is missing schema-required fields').toEqual([]);
+    // No sync history and no statfs accessor in this store: the nullable
+    // branches must be exactly what the schema allows (null), and the
+    // documented conditional fields must stay absent.
+    expect(
+      body['lastChanges'],
+      'fixture store has no sync — lastChanges must take the null branch',
+    ).toBeNull();
+    expect(body['structureDrift'], 'fixtures predate the expectations meta').toBeNull();
+    expect(body).not.toHaveProperty('diskFree');
+  });
+
+  it('serves hit items that conform to the SearchHit schema (fixture query)', async () => {
+    const response = await fetch(`${base}/api/v1/search?q=mental+disorder&per_page=1`);
+    const text = await response.text();
+    expect(response.status).toBe(200);
+    const body = parseJsonBody('GET /api/v1/search?q=mental+disorder', text) as Record<
+      string,
+      unknown
+    >;
+    const hits = body['hits'];
+    expect(
+      Array.isArray(hits) && hits.length > 0,
+      'fixture index must yield at least one hit',
+    ).toBe(true);
+    const operation = operationOf('/api/v1/search', 'get');
+    const ok200 = responseFor(operation, '200');
+    if (ok200 === undefined) throw new Error('search 200 response does not resolve');
+    assertBodyConforms('GET /api/v1/search?q=mental+disorder', ok200, response.headers, text);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Suite 2b — /health.lastChanges through the real sync path: the fixture
+// store above never synced (null branch); this one exercises the recorded
+// SyncChanges branch. Deterministic fake eCFR, mirrored from test/sync.test.ts.
+// ---------------------------------------------------------------------------
+
+const SYNC_ISSUE_DATE = '2026-10-09';
+
+const SYNC_FULL_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<ECFR>
+<DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD>
+<DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD>
+<DIV5 N="4" TYPE="PART"><HEAD>Part 4</HEAD>
+<DIV8 N="4.125" TYPE="SECTION"><HEAD>§ 4.125 Diagnosis of mental disorders.</HEAD><P>Body text.</P></DIV8>
+</DIV5>
+<DIV9 N="Appendix A to Part 4" TYPE="APPENDIX"><HEAD>Appendix A to Part 4—Table</HEAD><P>Appendix text.</P></DIV9>
+</DIV3>
+</ECFR>`;
+
+function jsonResponse(value: unknown): Response {
+  return new Response(JSON.stringify(value), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function makeSyncFetch(): FetchLike {
+  return async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/titles.json')) {
+      return jsonResponse({
+        titles: [
+          {
+            number: 35,
+            name: 'Reserved',
+            latest_issue_date: null,
+            up_to_date_as_of: null,
+            latest_amended_on: null,
+          },
+          {
+            number: 38,
+            name: 'Pensions, Bonuses, and Veterans’ Relief',
+            latest_issue_date: '2026-08-27',
+            up_to_date_as_of: SYNC_ISSUE_DATE,
+            latest_amended_on: '2026-08-27',
+          },
+        ],
+      });
+    }
+    if (url.pathname.includes('/structure/')) return jsonResponse(FIXTURE_STRUCTURE);
+    if (url.pathname.includes('/full/')) {
+      return new Response(SYNC_FULL_XML, {
+        status: 200,
+        headers: { 'content-type': 'application/xml' },
+      });
+    }
+    return new Response('not found', { status: 404 });
+  };
+}
+
+describe('OpenAPI conformance: sync-seeded /health (lastChanges non-null branch)', () => {
+  it('validates the recorded SyncChanges against the Health schema', async () => {
+    const temp = openTempStore({ seed: false });
+    const logger = createTestLogger();
+    const http = new HttpClient({
+      fetchFn: makeSyncFetch(),
+      sleep: async () => undefined,
+      retryDelayMs: 0,
+      retries: 0,
+    });
+    await syncIndex({ ecfr: new EcfrApi(http), store: temp.store, logger });
+    expect(
+      temp.store.getMeta('last_changes'),
+      'syncIndex must record last_changes meta',
+    ).not.toBeNull();
+    const server = createHttpServer(new CFRService(temp.store, 7), logger);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const response = await fetch(`${base}/health`);
+      const text = await response.text();
+      expect(response.status).toBe(200);
+      const body = parseJsonBody('GET /health (sync-seeded)', text) as Record<string, unknown>;
+      expect(
+        body['lastChanges'],
+        'the SyncChanges branch must actually be exercised',
+      ).not.toBeNull();
+      const operation = operationOf('/health', 'get');
+      const ok200 = responseFor(operation, '200');
+      if (ok200 === undefined) throw new Error('/health 200 response does not resolve');
+      assertBodyConforms('GET /health (sync-seeded)', ok200, response.headers, text);
+    } finally {
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      });
+      temp.cleanup();
+    }
+  });
+});

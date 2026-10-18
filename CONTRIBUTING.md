@@ -33,6 +33,14 @@ Requires Node ≥ 22.5.
 6. Squash-merged PRs only; keep commit messages meaningful in the squash
    title.
 
+**Before you finish:**
+
+- Changed a route? Update `docs/openapi.yaml` in the same commit.
+- Added or changed a field? Confirm `test/openapi-conformance.test.ts` still passes.
+- Run `npm test`, then `npm run ci`, before pushing (full suite, coverage floors).
+- `/health` should still match its schema — the conformance test asserts it live.
+- Want to see the served shape? `cfr-free serve`, then `GET /health` in a browser.
+
 ## Style
 
 - TypeScript strict mode, ESM, `.js` import extensions (NodeNext).
