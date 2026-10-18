@@ -166,10 +166,13 @@ classify as mechanically weak-effort is a process fault:
 1. The next round executes the **cross-check round protocol** in
    `claude/rules/cross-model-review.md` ("Elevated rubric"): the
    mirror-variant reviewer re-runs the SAME packet, never having seen
-   the first verdict; the adjudicator compares only the verdict class
-   and P0 counts — a different class or differing P0 counts escalate
-   to the operator with both verdicts attached; agreement proceeds to
-   the merge gate on the better-evidenced verdict.
+   the first verdict; the adjudicator compares the verdict class, the
+   P0 counts, and the P1 counts — a different class, differing P0
+   counts, or P1 counts differing by 2 or more escalate to the
+   operator with both verdicts attached, as does a pair where neither
+   verdict meets the citation standard; agreement or a difference of
+   at most 1 in P1 counts proceeds to the merge gate on the
+   better-evidenced verdict.
 2. The orchestrator re-examines its own packets against the
    banned-content list and annotates the round record with the result —
    a **self-check**, not the formal audit (which stays operator-owned

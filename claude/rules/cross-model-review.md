@@ -199,7 +199,10 @@ verdict is the paper trail the operator audits. Gate rounding:
 - Rubber-stamp tripwire (see AGENTS.md, "Rubber-stamp tripwire"):
   two consecutive mechanically weak-effort rounds by the same reviewer
   model → the next round executes the "Elevated rubric (cross-check
-  round)" section above.
+  round)" section above. A single weak-effort verdict is never acted
+  on — it is returned to the same reviewer model for correction at
+  the same SHA (deficiency named), before any pattern strike is
+  counted.
 
 ## Verdict format (mandatory)
 
@@ -297,11 +300,15 @@ directions — real adjacent harms stay graded, distant speculation is
 preserved but not weaponized into blockers, and the reviewer is never
 forced to choose between inflating and silencing.
 
-- **APPROVE** is clean — and audited: the orchestrator checks the effort
-  floor against the mechanical classification before acting on it; a
-  mechanically weak-effort verdict (even a "clean-looking" APPROVE) is
-  returned for re-review under the "Elevated rubric (cross-check
-  round)" section above.
+- **APPROVE** is clean — and audited: the orchestrator checks the
+  effort floor against the mechanical classification before acting on
+  it. A single mechanically weak-effort verdict (even a "clean-looking"
+  APPROVE) is **never acted on**: it is returned to the SAME reviewer
+  model for a corrected verdict at the same SHA, with the mechanical
+  deficiency named. The "Elevated rubric (cross-check round)" section
+  is the PATTERN escalation — reserved for two consecutive weak-effort
+  rounds by the same reviewer per the tripwire; it does not fire on
+  the first defective verdict.
 
 The orchestrator pastes the verdict verbatim into the PR description. It
 does not paraphrase, summarize, or re-interpret it — and it adjudicates
