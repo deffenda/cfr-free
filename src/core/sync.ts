@@ -96,20 +96,12 @@ export async function syncIndex(deps: SyncDeps): Promise<SyncReport> {
     store.countSections() > 0 ? store.captureTextHashes() : new Map<string, string>();
 
   const counts = countKinds(sections);
-  store.replaceAll(sections, issueDate, {
-    issue_date: issueDate,
-    up_to_date_as_of: schedule.upToDateAsOf,
-    title_name: schedule.name,
-    synced_at: new Date().toISOString(),
-    sections_count: String(counts.sections),
-    appendices_count: String(counts.appendices),
-    structure_expected_sections: String(expected.expectedSections),
-    structure_expected_appendices: String(expected.expectedAppendices),
-    structure_json: JSON.stringify(structureRaw),
-    parser_version: PARSER_VERSION,
-    source: 'ecfr.gov',
-  });
 
+  // Build the change report BEFORE the rebuild so it rides the SAME
+  // transaction as the new index: a crash between the two writes used to
+  // leave a fresh index presenting the PREVIOUS sync's report (scout #3).
+  // Every input here (oldHashes/previousIssueDate/previousParser above) is
+  // captured pre-commit — nothing is read after the wipe.
   const newHashes = new Map<string, string>();
   for (const section of sections) newHashes.set(section.citation, hashText(section.text));
   const baseline = oldHashes.size === 0;
@@ -141,7 +133,22 @@ export async function syncIndex(deps: SyncDeps): Promise<SyncReport> {
         parserChanged: previousParser !== PARSER_VERSION,
         recordedAt: new Date().toISOString(),
       };
-  store.setMeta('last_changes', JSON.stringify(changes));
+
+  store.replaceAll(sections, issueDate, {
+    issue_date: issueDate,
+    up_to_date_as_of: schedule.upToDateAsOf,
+    title_name: schedule.name,
+    synced_at: new Date().toISOString(),
+    sections_count: String(counts.sections),
+    appendices_count: String(counts.appendices),
+    structure_expected_sections: String(expected.expectedSections),
+    structure_expected_appendices: String(expected.expectedAppendices),
+    structure_json: JSON.stringify(structureRaw),
+    parser_version: PARSER_VERSION,
+    source: 'ecfr.gov',
+    // The report commits atomically with the index it describes.
+    last_changes: JSON.stringify(changes),
+  });
 
   const report: SyncReport = {
     issueDate,
