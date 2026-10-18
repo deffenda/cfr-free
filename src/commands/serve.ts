@@ -1,10 +1,12 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import type { AppConfig } from '../config.js';
 import type { Logger } from '../logger.js';
 import { CommandError, EXIT } from '../exit-codes.js';
 import { CFRService } from '../core/service.js';
 import { Store } from '../core/store.js';
 import { createShutdownController } from '../process-utils.js';
-import { createHttpServer } from '../titan/http-server.js';
+import { createHttpServer, type DiskSnapshot } from '../titan/http-server.js';
 import { syncIndex } from '../core/sync.js';
 import { ensureIndex, createEcfrApi } from './ensure-index.js';
 import { startRefreshScheduler } from './refresh-scheduler.js';
@@ -34,11 +36,34 @@ export async function runServeCommand(config: AppConfig, logger: Logger): Promis
   try {
     const freshness = await ensureIndex(store, config, logger);
     const service = new CFRService(store, config.maxAgeDays);
+
+    // Disk capacity for /health and /metrics (SPEC §13 #22): probed once at
+    // boot and re-probed after every refresh attempt — success or failure,
+    // because the capacity signal must not depend on sync health. The HTTP
+    // layer reads this cell per request through an accessor, so it never
+    // serves a value older than the last probe. A failed probe keeps the
+    // last known snapshot (null only if none was ever captured): an honest
+    // stale reading beats an erased one.
+    let diskSnapshot: DiskSnapshot | null = null;
+    const probeDisk = async (): Promise<void> => {
+      try {
+        const stats = await fs.statfs(path.dirname(config.indexPath));
+        diskSnapshot = {
+          freeBytes: stats.bavail * stats.bsize,
+          totalBytes: stats.blocks * stats.bsize,
+        };
+      } catch {
+        // Keep whatever was last captured — see the note above.
+      }
+    };
+    await probeDisk();
+
     const server = createHttpServer(service, logger, {
       // A per-peer budget only for deliberately exposed deployments: the
       // unauthenticated API needs a coarse DoS guard when it leaves
       // loopback, while local tooling must never throttle itself.
       ...(config.allowRemote ? { rateLimit: { capacity: 60, refillPerSec: 10 } } : {}),
+      disk: () => diskSnapshot,
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -60,7 +85,14 @@ export async function runServeCommand(config: AppConfig, logger: Logger): Promis
             refreshHours: config.refreshHours,
             logger,
             refresh: async () => {
-              await syncIndex({ ecfr: createEcfrApi(), store, logger });
+              try {
+                await syncIndex({ ecfr: createEcfrApi(), store, logger });
+              } finally {
+                // Re-stat the volume regardless of the sync outcome: capacity
+                // visibility must not hinge on sync success. probeDisk never
+                // rejects, so the original sync error still propagates.
+                await probeDisk();
+              }
             },
           })
         : null;

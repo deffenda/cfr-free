@@ -125,6 +125,10 @@ follow cross-references → paste-ready citations with source URLs.
 | `GET` / `HEAD` | `/api/v1/sections/:citation` | — (URL-encode citations with spaces)       |
 | `GET` / `HEAD` | `/api/v1/browse`             | `chapter`, `part`, `subpart`               |
 
+`/health` and `/metrics` additionally expose `diskFree`/`diskTotal` and the
+`cfr_free_disk_free_bytes`/`cfr_free_disk_total_bytes` gauges when the platform
+provides `fs.statfs` (as of boot or last refresh round); omitted otherwise.
+
 ```bash
 curl 'http://127.0.0.1:8787/api/v1/search?q=traumatic%20brain%20injury&part=4'
 curl 'http://127.0.0.1:8787/api/v1/sections/4.125'
