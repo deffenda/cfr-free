@@ -25,6 +25,7 @@ Environment:
   CFR_INDEX_PATH     SQLite index path      (default ~/.cfr-free/index.sqlite)
   CFR_MAX_AGE_DAYS   Staleness threshold    (default 7)
   CFR_AUTO_SYNC      Sync at startup: 1|0   (default 1)
+  CFR_REFRESH_HOURS  Hours between background refreshes while serving (default 0 = off)
   CFR_HOST/CFR_PORT  HTTP bind              (default 127.0.0.1:8787)
   CFR_ALLOW_REMOTE   Permit non-loopback: 1 (no auth built in)
   CFR_LOG_LEVEL      debug|info|warn|error  (default info)

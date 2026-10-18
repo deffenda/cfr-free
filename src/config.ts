@@ -16,6 +16,8 @@ export interface AppConfig {
   readonly maxAgeDays: number;
   /** Sync automatically at startup when the index is missing or stale. */
   readonly autoSync: boolean;
+  /** Hours between background index refreshes while serving; 0 disables background refresh. */
+  readonly refreshHours: number;
   /** Bind address for the HTTP API. */
   readonly host: string;
   /** Bind port for the HTTP API. */
@@ -38,6 +40,10 @@ const envSchema = z.object({
     .regex(/^\d{1,3}$/)
     .optional(),
   CFR_AUTO_SYNC: z.enum(['0', '1']).optional(),
+  CFR_REFRESH_HOURS: z
+    .string()
+    .regex(/^\d{1,3}$/)
+    .optional(),
   CFR_HOST: z.string().min(1).optional(),
   CFR_PORT: z
     .string()
@@ -96,6 +102,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       'CFR_MAX_AGE_DAYS',
     ),
     autoSync: e.CFR_AUTO_SYNC !== '0',
+    refreshHours: parseBoundedInt(e.CFR_REFRESH_HOURS, 0, 0, 168, 'CFR_REFRESH_HOURS'),
     host,
     port: parseBoundedInt(e.CFR_PORT, DEFAULT_PORT, 1, 65_535, 'CFR_PORT'),
     allowRemote,
