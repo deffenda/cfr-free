@@ -266,7 +266,7 @@ components:
         structureDrift: { type: [boolean, 'null'], description: Null on older indexes. }
         diskFree:
           type: integer
-          description: 'Free bytes on the volume hosting the index; present only when the platform exposes fs.statfs (as of boot or the last refresh round).'
+          description: 'Bytes available to unprivileged users (bavail × bsize), as of boot or the last refresh round; omitted when no snapshot exists.'
         diskTotal:
           type: integer
           description: 'Total bytes on the volume hosting the index; present only when the platform exposes fs.statfs (as of boot or the last refresh round).'

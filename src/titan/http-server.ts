@@ -199,7 +199,7 @@ function renderMetrics(service: CFRService, disk?: () => DiskSnapshot | null): s
   if (diskSnapshot !== null) {
     out += gauge(
       'cfr_free_disk_free_bytes',
-      'Free bytes on the volume hosting the index, as of boot or the last refresh round.',
+      'Bytes available to unprivileged users on the volume hosting the index, as of boot or the last refresh round.',
       diskSnapshot.freeBytes,
     );
     out += gauge(
