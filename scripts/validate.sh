@@ -38,6 +38,7 @@ upstream is configured. An empty set exits 0 ("no changed files detected").
   --base <ref>  diff against <ref> instead of the local changed set
   --all         every check on the whole tree (npm run ci minus coverage/build)
 Budget: routine checks target < 30 s; types (tsc) and tests dominate — expected.
+Types runs project-wide: tsc has no sound per-file mode against this repo's tsconfig — a pre-existing type error anywhere FAILs the gate (loudly, with the file) and that is the accepted trade-off.
 Exit: 0 = pass (skips/warnings don't fail), 1 = a check FAILED, 2 = usage error.
 EOF
 }
@@ -71,6 +72,9 @@ fail_reason() {
   fi
   printf '%s' "$line"
 }
+
+# tool_ok <cmd> — shared availability probe for the UNAVAILABLE checks.
+tool_ok() { command -v "$1" >/dev/null 2>&1; }
 
 fix=0
 base=''
@@ -138,7 +142,7 @@ else
   collect < <(
     git diff --name-only HEAD
     git diff --name-only --cached
-    git ls-files -o --exclude-standard | grep -v '^node_modules'
+    git ls-files -o --exclude-standard | grep -v '^node_modules\(/.*\)\?$'
   )
   if [ "${#changed[@]}" -eq 0 ]; then
     if git rev-parse --abbrev-ref '@{upstream}' >/dev/null 2>&1; then
@@ -212,7 +216,7 @@ fi
 
 section 'format (prettier)'
 start=$SECONDS
-if ! command -v npx >/dev/null 2>&1; then
+if ! tool_ok npx; then
   finish format UNAVAILABLE "$((SECONDS - start))" 'npx not found'
 elif [ "$all" -eq 1 ]; then
   if npx prettier --check . >"$tmp/format.log" 2>&1; then
@@ -232,7 +236,7 @@ fi
 
 section 'lint (eslint)'
 start=$SECONDS
-if ! command -v npx >/dev/null 2>&1; then
+if ! tool_ok npx; then
   finish lint UNAVAILABLE "$((SECONDS - start))" 'npx not found'
 elif [ "$all" -eq 1 ]; then
   if npx eslint . >"$tmp/lint.log" 2>&1; then
@@ -241,7 +245,7 @@ elif [ "$all" -eq 1 ]; then
     finish lint FAIL "$((SECONDS - start))" "$(fail_reason "$tmp/lint.log")"
   fi
 elif [ "${#lint_files[@]}" -eq 0 ]; then
-  finish lint skip "$((SECONDS - start))" 'no TypeScript files changed'
+  finish lint skip "$((SECONDS - start))" 'no eligible TypeScript files in the changed set'
 else
   if npx eslint "${lint_files[@]}" >"$tmp/lint.log" 2>&1; then
     finish lint pass "$((SECONDS - start))"
@@ -250,9 +254,9 @@ else
   fi
 fi
 
-section 'types (npm run typecheck — project-wide by necessity)'
+section 'types (npm run typecheck — project-wide by DESIGN: per-file tsc would ignore the repo tsconfig)'
 start=$SECONDS
-if ! command -v npm >/dev/null 2>&1; then
+if ! tool_ok npm; then
   finish types UNAVAILABLE "$((SECONDS - start))" 'npm not found'
 elif bash -c 'npm run -s typecheck' >"$tmp/types.log" 2>&1; then
   finish types pass "$((SECONDS - start))"
@@ -262,7 +266,7 @@ fi
 
 section 'tests (vitest related/run — no coverage, no build, no live)'
 start=$SECONDS
-if ! command -v npx >/dev/null 2>&1; then
+if ! tool_ok npx; then
   finish tests UNAVAILABLE "$((SECONDS - start))" 'npx not found'
 elif [ "$all" -eq 1 ]; then
   printf 'note: test/live.test.ts excluded (network-dependent live test)\n'
