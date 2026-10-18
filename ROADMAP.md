@@ -71,8 +71,10 @@ citation?)` encodes the adjudicator workflow: locate criteria → read
 
 ## Later
 
-16. **OpenAPI 3.1 document** (§13 #17) for third-party API consumers.
+16. **OpenAPI 3.1 document** (§13 #17) for third-party API consumers. **Built**
+    (v0.2.0, PR #21).
 17. **Auto-refresh stale index at startup** (§13 #14) beyond `CFR_AUTO_SYNC`.
+    **Built** (opt-in CFR_REFRESH_HOURS, PR #22).
 18. **Per-section amendment dates** — research eCFR's amendment metadata
     feed; if derivable, attach `amendedAt` to sections (gold for date-of-claim
     analysis).
