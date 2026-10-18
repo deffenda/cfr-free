@@ -112,7 +112,11 @@ All of:
   checks rather than retrying the merge.
 - After merging, verify the squash commit on `origin/main` (subject and
   content), delete/confirm auto-delete of the remote branch, and record
-  the merge SHA in the learning journal.
+  the merge SHA in the learning journal. The subject audit queries the
+  commit itself —
+  `gh api repos/<owner>/<repo>/commits/<sha> --jq .commit.message` —
+  because `gh pr view mergeCommit.messageHeadline` has been observed to
+  return empty post-merge; the commit API is the authority.
 - **No orchestrator-authored SPEC/ROADMAP edits postdate the reviewed
   SHA.** Any that do are either named in the review packet or get their
   own review round before the merge executes.

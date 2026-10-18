@@ -209,7 +209,7 @@ verdict is the paper trail the operator audits. Gate rounding:
 The subagent returns **all** of these fields, in this order, in plain
 text:
 
-```
+```text
 SHA:           <head sha (base <base sha>), <n> commits on <branch>>
 Scope:         <one line: what was reviewed>
 Verdict:       APPROVE | APPROVE_WITH_NITS | BLOCK
