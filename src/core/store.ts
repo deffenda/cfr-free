@@ -469,6 +469,10 @@ export class Store {
     return row ? String(row['value']) : null;
   }
 
+  /**
+   * @deprecated Production code should pass meta via `replaceAll(sections, issueDate, meta)`.
+   * Retained as a public method for test fixtures only. Will be removed in a future major.
+   */
   setMeta(key: string, value: string): void {
     this.stmt(UPSERT_META_SQL).run(key, value);
   }
