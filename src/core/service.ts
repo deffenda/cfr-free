@@ -280,13 +280,14 @@ export class CFRService {
     if (row === null) return null;
     if (part !== undefined && row.part !== part) return null;
     const inResults = this.store.hasSearchMatch(matchMode, query, row.citation);
+    const snippet = excerpt(row.text);
     const hit = this.presentHit(
       {
         citation: row.citation,
         heading: row.heading,
         part: row.part,
         path: row.path,
-        snippet: excerpt(row.text),
+        snippet,
         // Fabricated bm25, strictly better than any real score, so array order
         // and score order agree; `direct: true` is the reliable client signal.
         score: -1_000_000,
@@ -298,7 +299,7 @@ export class CFRService {
           {
             citation: row.citation,
             heading: row.heading,
-            snippet: row.text,
+            snippet,
           },
         ),
       },
