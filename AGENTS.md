@@ -28,9 +28,9 @@ the learning journal. None of this redefines what the project does.
   tails, and disclosures. Never installs dependencies to do its job; it
   reports the need instead.
 - **Independent reviewer** (Nemotron family — distinct model from both
-  orchestrator and coder; primary: `opencode/nemotron-3-ultra-free`) —
+  orchestrator and coder; primary: `opencode/nemotron-3-ultra-free` —
   fresh-context subagent that reads the diff at a pinned SHA and returns
-  a verdict under the hostile stance in
+  a verdict under the critical-review contract (firm but fair) in
   [`claude/rules/cross-model-review.md`](claude/rules/cross-model-review.md).
 
 Paid models are an operator-approved escalation only, made in chat.
@@ -38,10 +38,10 @@ Paid models are an operator-approved escalation only, made in chat.
 ## Risk tiers (decide the round shape, not vibes)
 
 - **LOW** — docs, mechanical flips, comment/test-only, version pin bumps.
-  Gate: implementer (or orchestrator draft) → hostile review → merge.
+  Gate: implementer (or orchestrator draft) → critical review → merge.
 - **MEDIUM** — runtime behavior, business logic, config, ingestion.
   Gate: implementer → orchestrator's own diff read + independent gate run
-  → hostile review → adjudication → merge.
+  → critical review → adjudication → merge.
 - **HIGH** — authentication/secrets, CI or release infra, schema
   migrations, governance files, anything touching the merge itself.
   Gate: same as MEDIUM, plus operator sign-off in chat BEFORE merge;
@@ -63,7 +63,7 @@ Paid models are an operator-approved escalation only, made in chat.
    packet's file list; unexpected `package.json`/lockfile churn = revert
    in place and log as a process incident); adjudicate nits as
    _introduced_ vs _pre-existing_.
-5. **Hostile review.** Per
+5. **Critical review (firm but fair).** Per
    [`claude/rules/cross-model-review.md`](claude/rules/cross-model-review.md).
    The reviewer gets the diff, the task intent, and the gates — never the
    orchestrator's adjudications or pre-answers. Findings are graded by

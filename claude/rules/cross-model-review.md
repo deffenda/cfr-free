@@ -4,11 +4,19 @@ Defines how the orchestrator hands work to the **independent reviewer**
 (NEVER the orchestrator's own model; coder and reviewer are always
 different models) and how the verdict flows back.
 
-## Reviewer stance: hostile, by default
+## Reviewer stance: critical and impartial (firm but fair)
 
-The reviewer's job is to find reasons to **block**, not to confirm
-correctness. An APPROVE verdict carries the burden of proof; a zero-finding
-APPROVE is a process warning (see AGENTS.md's tripwire), not a compliment.
+The reviewer operates as a **senior staff engineer performing the
+pre-merge due diligence whose name the operator ships**: skeptical,
+exhaustive, and accountable for proportion. **Firm** means the required
+attack axes and the citation floor are worked in full — every axis,
+every load-bearing claim. **Fair** means every finding is stated at
+its true strength and graded by the harm test and the blast-radius
+boundary (below) — never exaggerated into a scarier label, never
+softened into silence. An APPROVE must have earned its way past real
+hunting; a BLOCK must keep the harm test on every blocker. Severity
+inflation and deflation are the same defect (an untruth about
+magnitude) and both feed the reviewer's calibration record.
 
 Required attack axes — the reviewer must genuinely work, not walk:
 
@@ -54,12 +62,19 @@ Required attack axes — the reviewer must genuinely work, not walk:
   **"Strongest case for blocking"** paragraph per test 3.
 
 **Mechanical weak-effort classification** (fires the tripwire when it
-appears in two consecutive rounds by the same reviewer model): any
-required verdict field missing; more than one candidate finding lacking
-a citation; a strongest-case paragraph with no diff-location reference;
-evidence-free assertions anywhere in the verdict; and a BLOCK verdict
-in which any blocker fails the harm test (per Verdict discipline,
-below).
+appears in two consecutive rounds by the same reviewer model) —
+restricted to what a checklist can verify without judgment: a required
+verdict field missing; fewer than two candidate findings carrying a
+citation (mirrors the effort floor's minimum); a blocker carrying no
+harm-test sentence; a strongest-case paragraph with no diff-location
+reference.
+
+**Semantic checks (auditor-owned; never claimed as mechanical):**
+evidence-free or vacuous assertions anywhere in the verdict, harm-test
+sentences present but hollow, axis observations present but
+substantively empty. These require judgment and are caught by operator
+audit and the cross-check round — the mechanical floor's limitation
+(above) applies to them by design.
 
 Every axis observation must also name the **specific artifact probed**
 (file:line, hunk, or command) — not the axis label alone. An observation
@@ -133,18 +148,18 @@ concretely:
    apply in full; providing the first verdict to the mirror reviewer is
    itself an anchoring violation). It returns the standard mandate
    format verbatim.
-3. **Disagreement rule (mechanical):** compare only the verdict class
-   (BLOCK vs non-BLOCK) and the P0 counts of the two rounds. A
-   different class, or differing P0 counts, escalates to the operator
-   with both verdicts attached. Identical class and P0 count but P1
-   counts differing by 2 or more also escalate; small P1 discrepancies
-   (difference of exactly 1) are adjudicated by the orchestrator and
-   disclosed. Identical class, P0 count, and compatible P1 counts →
-   proceed to the merge gate on the **better-evidenced verdict**: the
-   one whose candidate findings all carry the effort floor's file:line
-   citation standard; if both qualify, the one with more file:line-
-   cited candidates; if NEITHER qualifies, escalate to the operator —
-   never pick between two verdicts the instrument cannot read.
+3. **Disagreement rule (mechanical):** compare the verdict class
+   (BLOCK vs non-BLOCK), the P0 counts, and the P1 counts. A different
+   class, differing P0 counts, or P1 counts differing by 2 or more →
+   escalate to the operator with both verdicts attached. Identical
+   class and P0 count with P1 counts differing by 0 or 1 → proceed to
+   the merge gate on the **better-evidenced verdict**: the one whose
+   candidate findings all carry the effort floor's file:line citation
+   standard; if both qualify, the one with more file:line-cited
+   candidates; if NEITHER qualifies, escalate to the operator — never
+   pick between two verdicts the instrument cannot read. Any P1
+   discrepancy adjudicated rather than escalated is disclosed in the
+   PR body.
 4. **Verdict capture:** the mirror reviewer returns its verdict as its
    final message; the orchestrator captures that message verbatim into
    the journal round record and the packet directory
@@ -200,6 +215,7 @@ Blockers:      <numbered list, each with its one-sentence harm-test answer, or "
 Candidate-findings-considered: <two or more, each with the evidence that ruled it out>
 Strongest-case-for-blocking: <one paragraph; required unless BLOCK>
 Nits:          <numbered list, or "none">
+Risks:         <second-order impacts beyond the blast-radius boundary: one sentence each, ungraded, or "none">
 Notes:         <one paragraph: what the orchestrator should do next>
 ```
 
@@ -245,11 +261,41 @@ may never dismiss the finding itself. Every reclassification is
 audit-visible and feeds the reviewer model's calibration record in the
 journal's model-performance log.
 
-**Verdict discipline:** a BLOCK verdict in which any blocker fails the
-harm test is itself classified as mechanically weak-effort (a severity
-that cannot be defended in one evidence sentence is an evidence-free
-assertion) — it feeds the rubber-stamp tripwire like any other
-low-effort round, in either severity direction.
+**Verdict discipline:** a BLOCK verdict in which any blocker carries no
+harm-test sentence is mechanically weak-effort (it feeds the tripwire
+like any other low-effort round); a blocker whose harm sentence is
+present but hollow is a semantic-check item — auditor-owned, and
+escalated under the same tripwire machinery when audit catches it.
+
+## Scope by blast radius
+
+Findings and Risks are separated by causal distance from the diff:
+
+- **First order — graded findings, ordinary severity range.** The diff
+  itself and its directly adjacent surfaces: files touched, their
+  immediate callers and consumers, tests that pin the changed
+  behavior, CI/gate surfaces it affects, docs that describe it.
+  Anything here that passes the harm test may be graded P0/P1/P2.
+- **Second order — Risks, ungraded.** Effects mediated through
+  speculation ("future agents might ...", "a downstream consumer
+  could eventually ..."). Each Risk is one sentence, carries no P
+  grade and no blocking power, but is recorded in the PR body and the
+  backlog register. If a Risk later materializes, it becomes a finding
+  in the round that owns the triggering change — never silently
+  dropped.
+
+**Reclassification moves both ways, with recorded justification**
+(verdict verbatim + adjudication note in the PR body): the
+orchestrator may demote an inflated finding to a Risk and may promote
+a Risk whose first-order evidence was understated — a reviewer
+softening real adjacent harms into Risks to make a verdict look clean
+is severity deflation and feeds the same calibration record as
+inflation.
+
+**Why this boundary exists:** it keeps reviews honest in both
+directions — real adjacent harms stay graded, distant speculation is
+preserved but not weaponized into blockers, and the reviewer is never
+forced to choose between inflating and silencing.
 
 - **APPROVE** is clean — and audited: the orchestrator checks the effort
   floor against the mechanical classification before acting on it; a
