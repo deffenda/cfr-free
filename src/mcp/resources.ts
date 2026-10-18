@@ -1,3 +1,4 @@
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Logger } from '../logger.js';
@@ -8,6 +9,10 @@ import type { CFRService } from '../core/service.js';
  * metadata as the tools (freshness, parts) so clients can pull it without
  * inventing tool arguments; the prompt encodes the canonical
  * search → read → cite workflow. No network access happens in any handler.
+ * Resource read failures follow the tools' convention: log the sanitized
+ * message, then rethrow as `McpError(InternalError, …)` — the SDK's request
+ * layer serializes only `code` + `message` onto the wire (never a stack or
+ * raw store body), so the client sees exactly the sanitized text.
  */
 
 function jsonContents(
@@ -19,6 +24,11 @@ function jsonContents(
       { uri: uri.href, mimeType: 'application/json', text: JSON.stringify(payload, null, 2) },
     ],
   };
+}
+
+function toClientMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return 'unknown error';
 }
 
 /** Register the read-only resources and the research prompt. */
@@ -33,7 +43,14 @@ export function registerResources(server: McpServer, service: CFRService, logger
         'row counts, staleness and structure-drift flag.',
       mimeType: 'application/json',
     },
-    async (uri) => jsonContents(uri, service.status()),
+    async (uri) => {
+      try {
+        return jsonContents(uri, service.status());
+      } catch (error) {
+        logger.error('resource index-status failed', { message: toClientMessage(error) });
+        throw new McpError(ErrorCode.InternalError, toClientMessage(error));
+      }
+    },
   );
 
   server.registerResource(
@@ -46,7 +63,14 @@ export function registerResources(server: McpServer, service: CFRService, logger
         'titles and section/appendix counts.',
       mimeType: 'application/json',
     },
-    async (uri) => jsonContents(uri, { parts: service.listParts() }),
+    async (uri) => {
+      try {
+        return jsonContents(uri, { parts: service.listParts() });
+      } catch (error) {
+        logger.error('resource title38-parts failed', { message: toClientMessage(error) });
+        throw new McpError(ErrorCode.InternalError, toClientMessage(error));
+      }
+    },
   );
 
   server.registerResource(
@@ -59,7 +83,23 @@ export function registerResources(server: McpServer, service: CFRService, logger
         'entire title — with full markdown text, source URL, cross-references and freshness flags.',
       mimeType: 'application/json',
     },
-    async (uri) => jsonContents(uri, service.getSection('3.1')),
+    async (uri) => {
+      try {
+        const section = service.getSection('3.1');
+        // Defense-in-depth: CFRService.getSection throws on a miss today, but
+        // a null must never serialize as JSON `null` content — that reads as
+        // an indistinguishable-from-success response.
+        if (section === null) {
+          throw new Error(
+            'Section 3.1 is not in the local index (no sync yet or not yet parsed); run `cfr-free sync` first',
+          );
+        }
+        return jsonContents(uri, section);
+      } catch (error) {
+        logger.error('resource title38-definitions failed', { message: toClientMessage(error) });
+        throw new McpError(ErrorCode.InternalError, toClientMessage(error));
+      }
+    },
   );
 
   server.registerPrompt(
