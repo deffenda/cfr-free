@@ -17,19 +17,21 @@ info:
     and the one non-JSON route is `GET /metrics` (Prometheus exposition).
     Errors are JSON `{ error, message }`; paths not listed under `paths` return
     404, and any method other than `GET`/`HEAD` returns 405 with
-    `allow: GET, HEAD`. All schema fields are always present; nullable ones use
+    `allow: GET, HEAD`. All schema fields listed under `required` are always
+    present (the optional `Health.diskFree`/`diskTotal` are the deliberate
+    exception); nullable ones use
     OpenAPI 3.1 `type: [string, "null"]` (never `nullable: true`).
 servers:
   - url: http://127.0.0.1:8787
     description: Default loopback bind (CFR_HOST/CFR_PORT may override deliberately).
 paths:
   /health:
-    # source: src/titan/http-server.ts:208
+    # source: src/titan/http-server.ts:222
     get:
       summary: Index freshness report
       responses:
         '200':
-          description: '{ status: "ok", ...service.status() } — issue date, counts, staleness, drift, last sync changes. Cache-Control: no-store.'
+          description: '{ status: "ok", ...service.status() } — issue date, counts, staleness, drift, last sync changes; diskFree/diskTotal present when the platform exposes fs.statfs (as of boot or last refresh round). Cache-Control: no-store.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Health' }
@@ -49,12 +51,12 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /metrics:
-    # source: src/titan/http-server.ts:212
+    # source: src/titan/http-server.ts:241
     get:
       summary: Prometheus exposition
       responses:
         '200':
-          description: 'cfr_free_* gauges (see SPEC §5); served as text/plain; version=0.0.4. Cache-Control: no-store.'
+          description: 'cfr_free_* gauges — including cfr_free_disk_free_bytes and cfr_free_disk_total_bytes when a statfs snapshot exists (see SPEC §5); served as text/plain; version=0.0.4. Cache-Control: no-store.'
           content:
             text/plain:
               schema: { type: string }
@@ -74,7 +76,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/search:
-    # source: src/titan/http-server.ts:216
+    # source: src/titan/http-server.ts:245
     get:
       summary: Full-text search over the local index
       responses:
@@ -114,7 +116,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/sections/{citation}:
-    # source: src/titan/http-server.ts:220
+    # source: src/titan/http-server.ts:249
     get:
       summary: Full text of one section or appendix
       responses:
@@ -147,7 +149,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/browse:
-    # source: src/titan/http-server.ts:224
+    # source: src/titan/http-server.ts:253
     get:
       summary: Structure-tree navigation
       responses:
@@ -189,19 +191,19 @@ paths:
 components:
   responses:
     BadRequest:
-      # source: src/titan/http-server.ts:118,272,277 (encoding, URL parse, byte caps) + :149 (service input)
+      # source: src/titan/http-server.ts:118,320,324 (encoding, URL parse, byte caps) + :149 (service input)
       description: '{ error: "invalid_input", message } — malformed URL or citation encoding, oversized q (800 bytes) or part (10 bytes), or a service-level input rejection.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     NotFound:
-      # source: src/titan/http-server.ts:228 (no route), :146 (structure/service miss)
+      # source: src/titan/http-server.ts:257 (no route), :146 (structure/service miss)
       description: '{ error: "not_found", message } — any path not listed here, a citation absent from the index, or a nonexistent browse node (browse adds `available`: the identifiers that do exist).'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     MethodNotAllowed:
-      # source: src/titan/http-server.ts:248
+      # source: src/titan/http-server.ts:296
       description: '{ error: "method_not_allowed", message } — any method other than GET/HEAD, on any path.'
       headers:
         allow: { description: 'Always GET, HEAD.', schema: { type: string } }
@@ -209,13 +211,13 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     UriTooLong:
-      # source: src/titan/http-server.ts:262
+      # source: src/titan/http-server.ts:312
       description: '{ error: "uri_too_long", message } — request URL over 2048 bytes.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     RateLimited:
-      # source: src/titan/http-server.ts:255
+      # source: src/titan/http-server.ts:303
       description: '{ error: "rate_limited", message } — per-peer token bucket exhausted (armed only when CFR_ALLOW_REMOTE=1; loopback never throttles).'
       headers:
         retry-after: { description: Seconds to wait., schema: { type: integer } }
@@ -223,7 +225,7 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     InternalError:
-      # source: src/titan/http-server.ts:314
+      # source: src/titan/http-server.ts:362
       description: '{ error: "internal_error", message } — unexpected failure; details are logged server-side only.'
       content:
         application/json:
@@ -262,6 +264,12 @@ components:
         maxAgeDays: { type: integer }
         parserVersion: { type: [string, 'null'] }
         structureDrift: { type: [boolean, 'null'], description: Null on older indexes. }
+        diskFree:
+          type: integer
+          description: 'Free bytes on the volume hosting the index; present only when the platform exposes fs.statfs (as of boot or the last refresh round).'
+        diskTotal:
+          type: integer
+          description: 'Total bytes on the volume hosting the index; present only when the platform exposes fs.statfs (as of boot or the last refresh round).'
         lastChanges:
           oneOf:
             - $ref: '#/components/schemas/SyncChanges'

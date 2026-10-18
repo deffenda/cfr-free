@@ -2,7 +2,7 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type http from 'node:http';
 import { CFRService } from '../src/core/service.js';
-import { createHttpServer } from '../src/titan/http-server.js';
+import { createHttpServer, type HttpServerOptions } from '../src/titan/http-server.js';
 import { createTestLogger, openTempStore, type TempStore } from './helpers.js';
 
 interface Json {
@@ -68,6 +68,67 @@ describe('Titan HTTP API', () => {
     expect(text).toContain('cfr_free_issue_date_timestamp_seconds 1791504000');
     // Fixtures predate the expectation meta: drift metric is absent, not 0.
     expect(text).not.toContain('cfr_free_structure_drift');
+  });
+
+  /** Start an ad-hoc server with `options`; returns status + raw body text. */
+  async function fetchWith(
+    options: HttpServerOptions,
+    pathname: string,
+  ): Promise<{ status: number; text: string }> {
+    const custom = createHttpServer(new CFRService(temp.store, 7), createTestLogger(), options);
+    await new Promise<void>((resolve) => custom.listen(0, '127.0.0.1', resolve));
+    const port = (custom.address() as AddressInfo).port;
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}${pathname}`);
+      return { status: response.status, text: await response.text() };
+    } finally {
+      await new Promise<void>((resolve) => {
+        custom.close(() => resolve());
+        custom.closeAllConnections();
+      });
+    }
+  }
+
+  const DISK_SNAPSHOT = { freeBytes: 123_456_789, totalBytes: 987_654_321 } as const;
+
+  it('adds diskFree/diskTotal to /health when the disk accessor yields a snapshot', async () => {
+    const { status, text } = await fetchWith({ disk: () => DISK_SNAPSHOT }, '/health');
+    expect(status).toBe(200);
+    const body = JSON.parse(text) as Json;
+    expect(body['diskFree']).toBe(123_456_789);
+    expect(body['diskTotal']).toBe(987_654_321);
+  });
+
+  it('omits the disk fields from /health when no accessor is configured', async () => {
+    const { body } = await get('/health');
+    expect(body).not.toHaveProperty('diskFree');
+    expect(body).not.toHaveProperty('diskTotal');
+  });
+
+  it('omits the disk fields from /health when the accessor returns null', async () => {
+    const { status, text } = await fetchWith({ disk: () => null }, '/health');
+    expect(status).toBe(200);
+    const body = JSON.parse(text) as Json;
+    expect(body).not.toHaveProperty('diskFree');
+    expect(body).not.toHaveProperty('diskTotal');
+  });
+
+  it('renders disk gauges with injected values when a snapshot is available', async () => {
+    const { status, text } = await fetchWith({ disk: () => DISK_SNAPSHOT }, '/metrics');
+    expect(status).toBe(200);
+    expect(text).toContain('# HELP cfr_free_disk_free_bytes');
+    expect(text).toContain('# TYPE cfr_free_disk_free_bytes gauge');
+    expect(text).toContain('cfr_free_disk_free_bytes 123456789');
+    expect(text).toContain('# HELP cfr_free_disk_total_bytes');
+    expect(text).toContain('cfr_free_disk_total_bytes 987654321');
+  });
+
+  it('omits every cfr_free_disk line when no snapshot is available', async () => {
+    // Accessor absent (default server) and accessor present but null.
+    const absent = await (await fetch(`${base}/metrics`)).text();
+    expect(absent).not.toContain('cfr_free_disk');
+    const nulled = await fetchWith({ disk: () => null }, '/metrics');
+    expect(nulled.text).not.toContain('cfr_free_disk');
   });
 
   it('emits the drift gauge in both states once expectations are recorded', async () => {

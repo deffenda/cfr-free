@@ -163,7 +163,7 @@ function toEpochSeconds(iso: string | null): number {
  * Prometheus exposition (SPEC §5: the only non-JSON route, kept for
  * scrapability; everything else stays JSON-only).
  */
-function renderMetrics(service: CFRService): string {
+function renderMetrics(service: CFRService, disk?: () => DiskSnapshot | null): string {
   const status = service.status();
   let out = '';
   out += gauge('cfr_free_sections', 'Indexed sections in the local index.', status.sections);
@@ -195,6 +195,19 @@ function renderMetrics(service: CFRService): string {
       status.structureDrift ? 1 : 0,
     );
   }
+  const diskSnapshot = disk?.() ?? null;
+  if (diskSnapshot !== null) {
+    out += gauge(
+      'cfr_free_disk_free_bytes',
+      'Free bytes on the volume hosting the index, as of boot or the last refresh round.',
+      diskSnapshot.freeBytes,
+    );
+    out += gauge(
+      'cfr_free_disk_total_bytes',
+      'Total bytes on the volume hosting the index, as of boot or the last refresh round.',
+      diskSnapshot.totalBytes,
+    );
+  }
   return out;
 }
 
@@ -203,14 +216,30 @@ function dispatch(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   url: URL,
+  disk?: () => DiskSnapshot | null,
 ): void {
   const pathname = url.pathname;
   if (pathname === HEALTH_PATH) {
-    sendJson(req, res, 200, { status: 'ok', ...service.status() }, 'no-store');
+    const diskSnapshot = disk?.() ?? null;
+    sendJson(
+      req,
+      res,
+      200,
+      {
+        status: 'ok',
+        ...service.status(),
+        // Additive conditionals: absent entirely (never fabricated as 0)
+        // when the platform has no statfs snapshot to offer.
+        ...(diskSnapshot === null
+          ? {}
+          : { diskFree: diskSnapshot.freeBytes, diskTotal: diskSnapshot.totalBytes }),
+      },
+      'no-store',
+    );
     return;
   }
   if (pathname === METRICS_PATH) {
-    sendText(req, res, 200, renderMetrics(service), 'no-store');
+    sendText(req, res, 200, renderMetrics(service, disk), 'no-store');
     return;
   }
   if (pathname === SEARCH_PREFIX) {
@@ -232,6 +261,25 @@ function dispatch(
 export interface HttpServerOptions {
   /** Per-peer request budget — enabled only when the bind is deliberately remote. */
   readonly rateLimit?: { readonly capacity: number; readonly refillPerSec: number };
+  /**
+   * Disk-capacity accessor (SPEC §13 #22), read per request so `/health` and
+   * `/metrics` reflect the caller's own moment, not a boot-time freeze; the
+   * serve-side refresh callback owns the cell it reads. `null` (or absent)
+   * omits the fields/gauges entirely rather than fabricating zeros.
+   */
+  readonly disk?: () => DiskSnapshot | null;
+}
+
+/**
+ * Filesystem capacity of the volume hosting the index, as sampled by
+ * `fs.promises.statfs` — a snapshot ("as of boot or the last refresh
+ * round"), not a live reading.
+ */
+export interface DiskSnapshot {
+  /** Bytes available to unprivileged users — `bavail × bsize`. */
+  readonly freeBytes: number;
+  /** Total bytes on the volume — `blocks × bsize`. */
+  readonly totalBytes: number;
 }
 
 /**
@@ -293,7 +341,7 @@ export function createHttpServer(
     if (url === null) return;
 
     try {
-      dispatch(service, req, res, url);
+      dispatch(service, req, res, url, options.disk);
     } catch (error) {
       if (error instanceof ServiceError || error instanceof StructureError) {
         const { status, code } = statusFor(error);
