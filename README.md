@@ -231,8 +231,9 @@ not legal advice; verify citations against the official eCFR.
 ## Security
 
 See [SECURITY.md](SECURITY.md) for reporting vulnerabilities and the security
-posture summary. Reported by default: Snyk/Sonar-ready lint and CI gates,
-zero runtime dependencies beyond the MCP SDK, XML parser hardening (no
+posture summary. Reported by default: lint/strict-TS/typecheck/coverage/Audit
+gates (plus local trivy/semgrep/osv-scanner/gitleaks scans), zero runtime
+dependencies beyond the MCP SDK, XML parser hardening (no
 DOCTYPE, bounded depth/size), FTS query sanitization (no SQL injection
 surface), and loopback-only networking by default.
 

@@ -22,8 +22,8 @@ import { parseArgs } from 'node:util';
 
 const SYSTEM_PROMPT = [
   'You are a senior staff engineer performing a rigorous code/spec review.',
-  'The project must pass Snyk (dependencies, injection, unsafe patterns) and SonarQube',
-  '(complexity, coverage, maintainability) gates.',
+  'The project must pass the local security and quality gates (dependency audit,',
+  'injection/unsafe-pattern lint, complexity, coverage, maintainability).',
   '',
   'Trust model: you see only the material inside this request. Files may be split',
   'across independent requests, and large files are truncated (marked',

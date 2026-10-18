@@ -13,7 +13,7 @@ export default tseslint.config(
     files: ['**/*.ts'],
     plugins: { security },
     rules: {
-      // TypeScript safety (Sonar-aligned)
+      // TypeScript safety (quality gates)
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-non-null-assertion': 'error',
       '@typescript-eslint/no-unused-vars': [
@@ -30,13 +30,13 @@ export default tseslint.config(
       'no-var': 'error',
       'prefer-const': 'error',
       'no-implicit-coercion': ['error', { boolean: false }],
-      // Security rules (local Snyk/Sonar pre-flight)
+      // Security rules (local pre-flight)
       'security/detect-unsafe-regex': 'error',
       'security/detect-child-process': 'error',
       'security/detect-eval-with-expression': 'error',
       'security/detect-non-literal-fs-filename': 'warn',
       'security/detect-non-literal-require': 'error',
-      // Noisy by design in TypeScript codebases; SonarQube covers these:
+      // Redundant with our local quality + review gates:
       'security/detect-object-injection': 'off',
       'security/detect-possible-timing-attacks': 'off',
     },
