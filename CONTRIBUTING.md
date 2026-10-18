@@ -18,7 +18,9 @@ Requires Node ≥ 22.5.
 1. Open an issue first for anything beyond small fixes.
 2. Branch from `main`: `git checkout -b fix/short-description`.
 3. Make the change with tests. `docs/SPEC.md` is the design authority —
-   update it when behavior or architecture changes.
+   update it when behavior or architecture changes. HTTP API changes must
+   also update `docs/openapi.yaml` (each path cites its router line in
+   `src/titan/http-server.ts`).
 4. Run the gates locally before pushing:
 
    ```bash

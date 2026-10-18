@@ -94,6 +94,8 @@ Hardening: no request bodies, zod-validated query strings, router-level byte cap
 
 The API is JSON-only with one deliberate exception: `GET /metrics` serves Prometheus exposition text (gauges: `cfr_free_sections`, `cfr_free_appendices`, `cfr_free_stale`, `cfr_free_max_age_days`, `cfr_free_issue_date_timestamp_seconds`, `cfr_free_synced_at_timestamp_seconds`, and `cfr_free_structure_drift` when recorded) so scrapers need no JSON parsing. It returns the same read-only data as `/health`.
 
+Machine-readable contract: [`docs/openapi.yaml`](openapi.yaml) (OpenAPI 3.1, derived from `src/titan/http-server.ts` — keep in sync).
+
 ## 6. MCP tools (all read-only annotations)
 
 1. `search_regulations(query, page?, per_page?, part?)` → ranked hits with citations, snippets, bm25 scores and the query terms visible in each hit (`matches`). A query that _is_ a citation (`4.130`, `38 CFR 4.16`, `§ 3.350(a)`) pins that exact section as the first hit (page 1 only; totals include the pin on every page); quoted spans search as exact phrases; curated claims acronyms (ptsd, tdiu, smc, mst, dic, tbi, hlr, bva, nsc) expand to their regulatory phrases; every response carries the `indexIssueDate`/`indexStale`/`notice` freshness envelope and hits carry `citationDisplay` + `sourceUrl`.
