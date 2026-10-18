@@ -57,7 +57,9 @@ Required attack axes — the reviewer must genuinely work, not walk:
 appears in two consecutive rounds by the same reviewer model): any
 required verdict field missing; more than one candidate finding lacking
 a citation; a strongest-case paragraph with no diff-location reference;
-evidence-free assertions anywhere in the verdict.
+evidence-free assertions anywhere in the verdict; and a BLOCK verdict
+in which any blocker fails the harm test (per Verdict discipline,
+below).
 
 Every axis observation must also name the **specific artifact probed**
 (file:line, hunk, or command) — not the axis label alone. An observation
@@ -136,16 +138,19 @@ concretely:
    different class, or differing P0 counts, escalates to the operator
    with both verdicts attached. Identical class and P0 count but P1
    counts differing by 2 or more also escalate; small P1 discrepancies
-   are adjudicated by the orchestrator and disclosed. Identical class,
-   P0 count, and compatible P1 counts → proceed to the merge gate on
-   the **better-evidenced verdict**: the one whose candidate findings
-   all carry the effort floor's file:line citation standard; if both
-   qualify, the one with more file:line-cited candidates.
+   (difference of exactly 1) are adjudicated by the orchestrator and
+   disclosed. Identical class, P0 count, and compatible P1 counts →
+   proceed to the merge gate on the **better-evidenced verdict**: the
+   one whose candidate findings all carry the effort floor's file:line
+   citation standard; if both qualify, the one with more file:line-
+   cited candidates; if NEITHER qualifies, escalate to the operator —
+   never pick between two verdicts the instrument cannot read.
 4. **Verdict capture:** the mirror reviewer returns its verdict as its
    final message; the orchestrator captures that message verbatim into
-   the journal round record and the packet directory (`~/.orchestrator/
-packets/`) — the same capture path as every other round. The record
-   names the packet, both reviewer models, and the comparison result.
+   the journal round record and the packet directory
+   (`~/.orchestrator/packets/`) — the same capture path as every other
+   round. The record names the packet, both reviewer models, and the
+   comparison result.
 5. The orchestrator records both verdicts, the packet identity, and the
    comparison in the journal round record (and `~/.orchestrator/packets/`
    per the audit-trail rule).

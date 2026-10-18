@@ -113,6 +113,9 @@ All of:
 - After merging, verify the squash commit on `origin/main` (subject and
   content), delete/confirm auto-delete of the remote branch, and record
   the merge SHA in the learning journal.
+- **No orchestrator-authored SPEC/ROADMAP edits postdate the reviewed
+  SHA.** Any that do are either named in the review packet or get their
+  own review round before the merge executes.
 
 ## Evidence rules (hard)
 
