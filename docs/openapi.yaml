@@ -1,0 +1,370 @@
+# Static OpenAPI 3.1 description of the Titan HTTP API (SPEC §5). Derived from
+# the router in src/titan/http-server.ts (source of truth; nothing serves this
+# file). Each `paths:` entry cites its router line as
+# `# source: src/titan/http-server.ts:NN` (shared error responses cite their
+# send sites too) so code/doc drift is easy to spot.
+openapi: 3.1.0
+info:
+  title: cfr-free Titan HTTP API
+  version: 0.1.0 # keep in sync with package.json
+  license: { identifier: MIT }
+  description: |
+    GET-only JSON surface over the local Title 38 index. Design authority:
+    [docs/SPEC.md §5](docs/SPEC.md#5-titan-http-api-get-only-json-bind-127001).
+    No request bodies, no auth (loopback bind by default; `CFR_ALLOW_REMOTE=1`
+    is required to expose it); every `GET` route has a `HEAD` twin with
+    identical status/headers and an empty body (src/titan/http-server.ts:48),
+    and the one non-JSON route is `GET /metrics` (Prometheus exposition).
+    Errors are JSON `{ error, message }`; paths not listed under `paths` return
+    404, and any method other than `GET`/`HEAD` returns 405 with
+    `allow: GET, HEAD`. All schema fields are always present; nullable ones use
+    OpenAPI 3.1 `type: [string, "null"]` (never `nullable: true`).
+servers:
+  - url: http://127.0.0.1:8787
+    description: Default loopback bind (CFR_HOST/CFR_PORT may override deliberately).
+paths:
+  /health:
+    # source: src/titan/http-server.ts:208
+    get:
+      summary: Index freshness report
+      responses:
+        '200':
+          description: '{ status: "ok", ...service.status() } — issue date, counts, staleness, drift, last sync changes. Cache-Control: no-store.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    head:
+      summary: Headers-only health check
+      responses:
+        '200':
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:48); errors mirror GET, also body-less.'
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+  /metrics:
+    # source: src/titan/http-server.ts:212
+    get:
+      summary: Prometheus exposition
+      responses:
+        '200':
+          description: 'cfr_free_* gauges (see SPEC §5); served as text/plain; version=0.0.4. Cache-Control: no-store.'
+          content:
+            text/plain:
+              schema: { type: string }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    head:
+      summary: Headers-only metrics check
+      responses:
+        '200':
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:48); errors mirror GET, also body-less.'
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+  /api/v1/search:
+    # source: src/titan/http-server.ts:216
+    get:
+      summary: Full-text search over the local index
+      responses:
+        '200':
+          description: 'Ranked hits plus the index freshness envelope; a query that is itself a citation (4.130, 38 CFR 4.16) is pinned first on page 1. Cache-Control: public, max-age=300.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchResponse' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 3, maxLength: 200 }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 10000, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 20, default: 10 }
+        - name: part
+          in: query
+          description: Restrict to one CFR part.
+          schema: { type: string, pattern: '^\d{1,3}$' }
+    head:
+      summary: Headers-only search probe
+      responses:
+        '200':
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:48); errors mirror GET, also body-less.'
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+  /api/v1/sections/{citation}:
+    # source: src/titan/http-server.ts:220
+    get:
+      summary: Full text of one section or appendix
+      responses:
+        '200':
+          description: 'Markdown + text + metadata + cross-references. Cache-Control: public, max-age=3600.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SectionDetail' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+      parameters:
+        - name: citation
+          in: path
+          required: true
+          description: 'Citation or appendix name — 4.125, § 4.125, or 38 CFR 4.125 — URL-encoded (≤ 120 chars).'
+          schema: { type: string, maxLength: 120 }
+    head:
+      summary: Headers-only section probe
+      responses:
+        '200':
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:48); errors mirror GET, also body-less.'
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+  /api/v1/browse:
+    # source: src/titan/http-server.ts:224
+    get:
+      summary: Structure-tree navigation
+      responses:
+        '200':
+          description: 'The node, its ancestor path, and its children; empty query returns the chapters. Cache-Control: public, max-age=3600.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BrowseResult' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+      parameters:
+        - name: chapter
+          in: query
+          description: Chapter identifier (1–20 chars).
+          schema: { type: string, minLength: 1, maxLength: 20 }
+        - name: part
+          in: query
+          description: Part identifier (1–20 chars).
+          schema: { type: string, minLength: 1, maxLength: 20 }
+        - name: subpart
+          in: query
+          description: Subpart identifier (1–20 chars); requires `part`.
+          schema: { type: string, minLength: 1, maxLength: 20 }
+    head:
+      summary: Headers-only browse probe
+      responses:
+        '200':
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:48); errors mirror GET, also body-less.'
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+components:
+  responses:
+    BadRequest:
+      # source: src/titan/http-server.ts:118,272,277 (encoding, URL parse, byte caps) + :149 (service input)
+      description: '{ error: "invalid_input", message } — malformed URL or citation encoding, oversized q (800 bytes) or part (10 bytes), or a service-level input rejection.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      # source: src/titan/http-server.ts:228 (no route), :146 (structure/service miss)
+      description: '{ error: "not_found", message } — any path not listed here, a citation absent from the index, or a nonexistent browse node (browse adds `available`: the identifiers that do exist).'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    MethodNotAllowed:
+      # source: src/titan/http-server.ts:248
+      description: '{ error: "method_not_allowed", message } — any method other than GET/HEAD, on any path.'
+      headers:
+        allow: { description: 'Always GET, HEAD.', schema: { type: string } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    UriTooLong:
+      # source: src/titan/http-server.ts:262
+      description: '{ error: "uri_too_long", message } — request URL over 2048 bytes.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      # source: src/titan/http-server.ts:255
+      description: '{ error: "rate_limited", message } — per-peer token bucket exhausted (armed only when CFR_ALLOW_REMOTE=1; loopback never throttles).'
+      headers:
+        retry-after: { description: Seconds to wait., schema: { type: integer } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InternalError:
+      # source: src/titan/http-server.ts:314
+      description: '{ error: "internal_error", message } — unexpected failure; details are logged server-side only.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          description: 'One of invalid_input, not_found, method_not_allowed, uri_too_long, rate_limited, internal_error.'
+        message: { type: string }
+        available: { type: array, items: { type: string } }
+    Health:
+      type: object
+      description: Index freshness report — the literal `"ok"` plus `service.status()`.
+      required:
+        - status
+        - issueDate
+        - syncedAt
+        - sections
+        - appendices
+        - stale
+        - maxAgeDays
+        - parserVersion
+        - structureDrift
+        - lastChanges
+      properties:
+        status: { type: string, const: ok }
+        issueDate: { type: [string, 'null'] }
+        syncedAt: { type: [string, 'null'] }
+        sections: { type: integer }
+        appendices: { type: integer }
+        stale: { type: boolean }
+        maxAgeDays: { type: integer }
+        parserVersion: { type: [string, 'null'] }
+        structureDrift: { type: [boolean, 'null'], description: Null on older indexes. }
+        lastChanges:
+          oneOf:
+            - $ref: '#/components/schemas/SyncChanges'
+            - type: 'null'
+    SyncChanges:
+      type: object
+      description: What the most recent sync amended (per-citation sha256 diff).
+      required:
+        - fromIssueDate
+        - toIssueDate
+        - changed
+        - added
+        - removed
+        - changedCitations
+        - addedCitations
+        - removedCitations
+        - baseline
+        - parserChanged
+        - recordedAt
+      properties:
+        fromIssueDate: { type: [string, 'null'] }
+        toIssueDate: { type: string }
+        changed: { type: integer }
+        added: { type: integer }
+        removed: { type: integer }
+        changedCitations: { type: array, items: { type: string }, description: Capped at 100. }
+        addedCitations: { type: array, items: { type: string }, description: Capped at 100. }
+        removedCitations: { type: array, items: { type: string }, description: Capped at 100. }
+        baseline: { type: boolean, description: First sync (no previous index). }
+        parserChanged: { type: boolean }
+        recordedAt: { type: string }
+    SearchResponse:
+      type: object
+      required: [query, page, perPage, total, matchMode, hits, indexIssueDate, indexStale, notice]
+      properties:
+        query: { type: string }
+        page: { type: integer }
+        perPage: { type: integer }
+        total: { type: integer, description: Hits across all pages (pins included). }
+        matchMode: { type: string, enum: [and, or], description: Fallback match tier. }
+        hits:
+          type: array
+          items: { $ref: '#/components/schemas/SearchHit' }
+        indexIssueDate: { type: [string, 'null'] }
+        indexStale: { type: boolean }
+        notice: { type: [string, 'null'], description: Stale-index warning. }
+    SearchHit:
+      type: object
+      required:
+        - citation
+        - heading
+        - part
+        - path
+        - snippet
+        - score
+        - matches
+        - citationDisplay
+        - sourceUrl
+        - direct
+      properties:
+        citation: { type: string }
+        heading: { type: string }
+        part: { type: [string, 'null'] }
+        path: { type: string }
+        snippet: { type: string }
+        score: { type: number, description: 'bm25 — lower is better.' }
+        matches: { type: array, items: { type: string }, description: Query terms seen in the hit. }
+        citationDisplay: { type: string, description: 'Paste-ready form, e.g. 38 C.F.R. § 4.130.' }
+        sourceUrl: { type: string, format: uri }
+        direct: { type: boolean, description: Pinned hit (query was this citation). }
+    SectionDetail:
+      type: object
+      required:
+        - citation
+        - kind
+        - heading
+        - chapter
+        - part
+        - subpart
+        - path
+        - issueDate
+        - markdown
+        - text
+        - sourceUrl
+        - references
+        - indexStale
+        - notice
+      properties:
+        citation: { type: string }
+        kind: { type: string, enum: [section, appendix] }
+        heading: { type: string }
+        chapter: { type: [string, 'null'] }
+        part: { type: [string, 'null'] }
+        subpart: { type: [string, 'null'] }
+        path: { type: string }
+        issueDate: { type: string }
+        markdown: { type: string }
+        text: { type: string }
+        sourceUrl: { type: string, format: uri }
+        references:
+          type: array
+          items:
+            type: object
+            required: [citation, available]
+            properties:
+              citation: { type: string }
+              available: { type: boolean, description: Whether the cited provision is indexed. }
+        indexStale: { type: boolean }
+        notice: { type: [string, 'null'] }
+    BrowseResult:
+      type: object
+      required: [node, path, children]
+      properties:
+        node: { $ref: '#/components/schemas/StructureEntry' }
+        path:
+          type: array
+          items: { $ref: '#/components/schemas/StructureEntry' }
+          description: Ancestors of `node`, root first.
+        children:
+          type: array
+          items: { $ref: '#/components/schemas/StructureEntry' }
+    StructureEntry:
+      type: object
+      required: [type, identifier, label]
+      properties:
+        type: { type: string, description: 'e.g. title, chapter, part, subpart, section.' }
+        identifier: { type: string }
+        label: { type: string }

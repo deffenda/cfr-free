@@ -131,6 +131,9 @@ curl 'http://127.0.0.1:8787/api/v1/browse?chapter=I&part=17'
 curl 'http://127.0.0.1:8787/metrics'
 ```
 
+The full request/response contract (schemas, error envelopes) is documented in
+[`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1).
+
 The API is intentionally minimal: **GET-only, JSON-only, no request bodies,
 no templating**, bound to `127.0.0.1` by default. The single deliberate
 exception is `/metrics`, which serves Prometheus exposition text for
