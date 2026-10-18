@@ -90,6 +90,8 @@ export function startRefreshScheduler(deps: RefreshSchedulerDeps): RefreshSchedu
   let failures = 0;
 
   const tick = (): void => {
+    // The firing timer is consumed before the single-flight check, so a
+    // mid-refresh fire is skipped rather than stacked behind a second timer.
     timer = null;
     if (running) {
       // Single-flight: one timer should never double-fire, but if a tick

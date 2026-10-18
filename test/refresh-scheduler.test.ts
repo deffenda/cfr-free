@@ -192,6 +192,30 @@ describe('startRefreshScheduler', () => {
     expect(clock.timers).toHaveLength(1);
   });
 
+  it('does not re-arm after dispose once an in-flight refresh settles', async () => {
+    const clock = createClock();
+    const gate = createGate();
+    const refresh = vi.fn(() => gate.promise);
+    const { scheduler, logger } = schedulerWith(clock, refresh, 1);
+
+    scheduler.schedule();
+    expect(clock.fire()).toBe(true); // the timer fires while the refresh pends
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    scheduler.dispose(); // mid-flight: the refresh promise is still pending
+    expect(clock.timers).toHaveLength(1);
+
+    gate.resolve();
+    await settle(); // the settle path must complete without throwing
+    expect(clock.timers).toHaveLength(1); // arm() not called again after dispose
+    expect(scheduler.counts).toEqual({ attempts: 1, successes: 1, failures: 0 });
+    expect(logger.records).toContainEqual({
+      level: 'info',
+      message: 'background refresh attempt',
+      fields: { attempt: 1, result: 'ok', elapsedMs: 0 },
+    });
+  });
+
   it('arms a single timer for repeated schedule calls and tolerates bare dispose', () => {
     const clock = createClock();
     const refresh = vi.fn(async () => undefined);
