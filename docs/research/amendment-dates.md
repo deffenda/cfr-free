@@ -27,6 +27,13 @@ URL links in `getSection` responses and the `cfr_claim_evaluation` prompt
 
 ## Revisit triggers
 
+Practical probe note (2026-10-18): the versioner content endpoints
+(`structure/`, `full/`) reject uncompressed requests — HTTP 406, body
+supportCode 11, "This endpoint requires response compression". Probe
+tooling must send `Accept-Encoding: gzip` (curl needs `--compressed`);
+Node's fetch/undici defaults satisfy this, which is why `cfr-free sync`
+works where bare curl does not.
+
 Re-open this item if any of the following changes upstream:
 
 1. eCFR publishes a section-level amendment/version feed (probe #1's paths, or a
