@@ -24,8 +24,6 @@ const titlesSchema = z.object({
 /** Freshness facts for Title 38 as reported by eCFR. */
 export interface TitleSchedule {
   /** Newest date eCFR accepts for point-in-time endpoints. */
-  readonly issueDate: string;
-  readonly name: string;
   readonly upToDateAsOf: string;
 }
 
@@ -57,11 +55,7 @@ export class EcfrApi {
     if (!title) throw new Error(`eCFR titles.json does not include title ${TITLE_38}`);
     const upToDateAsOf = title.up_to_date_as_of ?? title.latest_issue_date;
     if (upToDateAsOf === null) throw new Error(`eCFR reports no issue date for title ${TITLE_38}`);
-    return {
-      issueDate: assertDate(title.latest_issue_date ?? upToDateAsOf),
-      name: title.name,
-      upToDateAsOf: assertDate(upToDateAsOf),
-    };
+    return { upToDateAsOf: assertDate(upToDateAsOf) };
   }
 
   /** Fetch the full hierarchical structure of Title 38 as JSON. */
