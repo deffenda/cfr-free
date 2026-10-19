@@ -53,6 +53,11 @@ export interface PresentedHit extends SearchHit {
   readonly sourceUrl: string;
   /** True when this row was pinned because the query *is* this citation. */
   readonly direct: boolean;
+  /** True when the section matched the ranked search. For non-pin hits
+   * this is always true (they came from the search). For pin hits
+   * (`direct: true`) it reports whether the pin also appeared in the
+   * ranked results. */
+  readonly inResults: boolean;
 }
 
 export interface SearchResponse {
@@ -280,13 +285,14 @@ export class CFRService {
     if (row === null) return null;
     if (part !== undefined && row.part !== part) return null;
     const inResults = this.store.hasSearchMatch(matchMode, query, row.citation);
+    const snippet = excerpt(row.text);
     const hit = this.presentHit(
       {
         citation: row.citation,
         heading: row.heading,
         part: row.part,
         path: row.path,
-        snippet: excerpt(row.text),
+        snippet,
         // Fabricated bm25, strictly better than any real score, so array order
         // and score order agree; `direct: true` is the reliable client signal.
         score: -1_000_000,
@@ -298,23 +304,25 @@ export class CFRService {
           {
             citation: row.citation,
             heading: row.heading,
-            snippet: row.text,
+            snippet,
           },
         ),
       },
       true,
+      inResults,
     );
     return { ...hit, inResults };
   }
 
-  /** Attach display citation, source URL, and direct flag to a raw hit. */
-  private presentHit(hit: SearchHit, direct: boolean): PresentedHit {
+  /** Attach display citation, source URL, direct flag, and inResults to a raw hit. */
+  private presentHit(hit: SearchHit, direct: boolean, inResults = true): PresentedHit {
     const kind = kindForCitation(hit.citation);
     return {
       ...hit,
       citationDisplay: displayCitation(kind, hit.citation),
       sourceUrl: sourceUrlFor(kind, hit.citation),
       direct,
+      inResults,
     };
   }
 
