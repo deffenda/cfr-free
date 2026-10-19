@@ -1,9 +1,9 @@
 /**
  * OpenAPI conformance: `docs/openapi.yaml` protecting itself.
  *
- * The spec is static (nothing serves it), so this file enforces both halves
- * of the contract — the document's own structure, and the live server's
- * responses against the document:
+ * The spec is static (nothing serves it), so this file enforces the
+ * contract — the document's own structure and provenance comments, and the
+ * live server's responses against the document:
  *
  * 1. Spec well-formedness — parses the real YAML through a python3 bridge
  *    (no YAML parser exists in node_modules; the lockfile's only `yaml` entry
@@ -24,12 +24,18 @@
  *    non-null SyncChanges branch of Health.lastChanges (the fixture store
  *    has no sync history, so it exercises the null branch).
  *
+ * 3. Source-citation drift — every `# source: file:NN` comment must land on
+ *    a real line of the cited file that carries the construct it names, so
+ *    a line shift in the router fails the suite instead of silently
+ *    invalidating the doc's provenance claims.
+ *
  * Deterministic by construction: in-process server, injected fetch, no
  * sleeps. The only external process is the python3 YAML bridge reading
  * docs/openapi.yaml — if it cannot run, these tests fail loudly (a silent
  * skip would disable the contract).
  */
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -870,5 +876,118 @@ describe('OpenAPI conformance: sync-seeded /health (lastChanges non-null branch)
       });
       temp.cleanup();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Suite 3 — `# source:` citation drift: every `# source: file:NN[,MM…]`
+// comment in docs/openapi.yaml must land on a real line of the cited file
+// that carries the construct the citation names. Two-step check, both
+// exact-line (a windowed fuzzy match was evaluated and rejected: the
+// 0d4facb +2 shift moved every cited site by exactly 2 lines, so each
+// drifted citation then sat within +2 of its true target and a windowed
+// keyword check would have passed the drift):
+//   (a) the cited line must be non-blank, non-comment, not a bare
+//       `return;`, and carry one of the keywords below on the line itself;
+//   (b) when no keyword matches, the coarse structure check requires the
+//       cited line + next 2 to at least contain a statement opener — its
+//       absence is the `});`/`res,`-class total drift, its presence
+//       escalates the message to "likely off by 1–2 lines".
+// Both steps raise a violation naming the drift; neither can wave one
+// through.
+// ---------------------------------------------------------------------------
+
+const CITATION_KEYWORDS = [
+  'pathname ===',
+  'pathname.startsWith',
+  'sendJson',
+  'sendText',
+  'errorBody',
+  'setHeader',
+  'res.end',
+  'res.statusCode',
+  'content-length',
+  'HEALTH_PATH',
+  'METRICS_PATH',
+  'SEARCH_PREFIX',
+  'SECTIONS_PREFIX',
+  'BROWSE_PATH',
+  'invalid_input',
+  'not_found',
+  'method_not_allowed',
+  'uri_too_long',
+  'rate_limited',
+  'internal_error',
+] as const;
+
+/** Statement openers a citation may legitimately name: block conditions and calls. */
+const STATEMENT_OPENER = /\b(?:if|for|while|switch|catch)\s*\(|[A-Za-z_$][\w$]*\s*\(/;
+
+// `file:NN…` — everything after `file:` is the citation tail; line-number
+// tokens are extracted from it separately (linear regexes only, so the
+// security plugin cannot flag catastrophic backtracking).
+const CITATION_RE = /#\s*source:\s*([\w./-]+\.\w+):(.*)$/;
+
+/** Blank, comment-only, and bare-return lines are never valid citation targets. */
+function deadCitationReason(content: string): string | null {
+  if (content === '') return 'that line is blank: the citation drifted';
+  if (content.startsWith('//') || content.startsWith('/*')) {
+    return 'that line is comment-only: the citation drifted';
+  }
+  if (content === 'return;') return 'that line is a bare return; the citation drifted';
+  return null;
+}
+
+/** Step (b): no keyword on the line — escalate through the coarse structure check. */
+function keywordDriftReason(content: string, target: readonly string[], at: number): string | null {
+  if (CITATION_KEYWORDS.some((keyword) => content.includes(keyword))) return null;
+  const neighborhood = target.slice(at - 1, at + 2).join('\n');
+  if (!STATEMENT_OPENER.test(neighborhood)) {
+    return `"${content}" and its 2-line neighborhood contain no statement opener: the citation drifted`;
+  }
+  return `"${content}" carries none of the expected constructs; a statement opener sits within the next 2 lines — the citation is likely off by 1–2 lines`;
+}
+
+/** The violation message for one `file:NN` citation site, or null when it checks out. */
+function checkCitation(where: string, target: readonly string[], at: number): string | null {
+  if (at < 1 || at > target.length) {
+    return `${where} — out of range (file has ${target.length} lines)`;
+  }
+  const content = (target[at - 1] ?? '').trim();
+  const reason = deadCitationReason(content) ?? keywordDriftReason(content, target, at);
+  return reason === null ? null : `${where} — ${reason}`;
+}
+
+describe('OpenAPI source citations (docs/openapi.yaml # source: lines)', () => {
+  it('every cited file:line exists and carries the construct it names', () => {
+    const specText = readFileSync(SPEC_PATH, 'utf8');
+    const violations: string[] = [];
+    let citations = 0;
+    for (const [index, line] of specText.split('\n').entries()) {
+      const match = CITATION_RE.exec(line);
+      if (match === null) continue;
+      const file = match[1] ?? '';
+      const target = readFileSync(
+        fileURLToPath(new URL(`../${file}`, import.meta.url)),
+        'utf8',
+      ).split('\n');
+      // Number tokens: the `NN[,MM…]` directly after `file:`, then any
+      // further `:NN[,MM…]` groups (`+ :149`, `, :146`). Citation
+      // parentheticals carry no colon-digit prose, so only line numbers match.
+      const numbers = [...(match[2] ?? '').matchAll(/(^|:)\s*[\d][\d,]*/g)]
+        .flatMap((entry) => entry[0].match(/\d+/g) ?? [])
+        .map(Number);
+      for (const at of numbers) {
+        citations += 1;
+        const violation = checkCitation(
+          `docs/openapi.yaml:${index + 1} cites ${file}:${at}`,
+          target,
+          at,
+        );
+        if (violation !== null) violations.push(violation);
+      }
+    }
+    expect(citations, 'docs/openapi.yaml must contain # source: citations').toBeGreaterThan(0);
+    expect(violations, 'drifted # source: citations in docs/openapi.yaml').toEqual([]);
   });
 });
