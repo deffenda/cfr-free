@@ -232,9 +232,70 @@ describe('MCP server (in-memory transport)', () => {
     const parsed = JSON.parse((status.contents[0] as { text?: string }).text ?? '{}') as {
       issueDate: string;
       sections: number;
+      lastChanges: Record<string, unknown> | null;
     };
     expect(parsed.issueDate).toBe('2026-10-09');
     expect(parsed.sections).toBe(5);
+    // The fixture seeds no `last_changes` meta: the resource carries the raw
+    // status, so it must report null rather than fabricate a record.
+    expect(parsed.lastChanges).toBeNull();
+
+    // Seed the record a real first sync writes (sync.ts baseline shape) and
+    // assert the exact wire key set plus the fixture-derived values.
+    const recordedAt = new Date().toISOString();
+    temp.store.setMeta(
+      'last_changes',
+      JSON.stringify({
+        fromIssueDate: null,
+        toIssueDate: '2026-10-09',
+        changed: 0,
+        added: 0,
+        removed: 0,
+        changedCitations: [],
+        addedCitations: [],
+        removedCitations: [],
+        baseline: true,
+        parserChanged: false,
+        recordedAt,
+      }),
+    );
+    const reseeded = await client.readResource({ uri: 'cfr://index/status' });
+    const parsedChanges = JSON.parse((reseeded.contents[0] as { text?: string }).text ?? '{}') as {
+      lastChanges: Record<string, unknown>;
+    };
+    expect(Object.keys(parsedChanges.lastChanges).sort()).toEqual([
+      'added',
+      'addedCitations',
+      'baseline',
+      'changed',
+      'changedCitations',
+      'fromIssueDate',
+      'parserChanged',
+      'recordedAt',
+      'removed',
+      'removedCitations',
+      'toIssueDate',
+    ]);
+    expect(parsedChanges.lastChanges).toMatchObject({
+      fromIssueDate: null,
+      toIssueDate: '2026-10-09',
+      changed: 0,
+      added: 0,
+      removed: 0,
+      changedCitations: [],
+      addedCitations: [],
+      removedCitations: [],
+      baseline: true,
+      parserChanged: false,
+      recordedAt,
+    });
+    // The resource serializes service.status() raw while the index_status tool
+    // copies lastChanges field-by-field: the wire shapes must be identical.
+    const toolStatus = (await client.callTool({
+      name: 'index_status',
+      arguments: {},
+    })) as ToolCallResult;
+    expect(toolStatus.structuredContent?.['lastChanges']).toEqual(parsedChanges.lastChanges);
 
     const parts = await client.readResource({ uri: 'cfr://title38/parts' });
     const parsedParts = JSON.parse((parts.contents[0] as { text?: string }).text ?? '{}') as {
@@ -264,6 +325,56 @@ describe('MCP server (in-memory transport)', () => {
 
   it('rejects unknown resource URIs', async () => {
     await expect(client.readResource({ uri: 'cfr://nope' })).rejects.toThrow();
+  });
+
+  it('reports resource store failures as sanitized McpError rejections', async () => {
+    temp.store.close();
+    // McpError(InternalError) is the SDK's wire shape for a failed read:
+    // JSON-RPC {code: -32603, message: <sanitized>} → client rejection
+    // "MCP error -32603: …". No stack or raw store body may leak.
+    for (const uri of ['cfr://index/status', 'cfr://title38/parts', 'cfr://title38/definitions']) {
+      await expect(client.readResource({ uri })).rejects.toThrow(/^MCP error -32603: /);
+    }
+  });
+
+  it('never serves JSON null content from the definitions resource', async () => {
+    // A service that answers getSection with null (rather than throwing) must
+    // produce a sanitized rejection, not literal JSON `null` resource content.
+    const nullService = new Proxy({} as CFRService, {
+      get: () => () => null,
+    });
+    const server = buildMcpServer(nullService, createTestLogger());
+    const probe = new Client({ name: 'probe', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), probe.connect(clientTransport)]);
+    try {
+      await expect(probe.readResource({ uri: 'cfr://title38/definitions' })).rejects.toThrow(
+        /Section 3.1 is not in the local index/,
+      );
+    } finally {
+      await probe.close();
+      await server.close();
+    }
+  });
+
+  it('reports non-Error resource failures as internal server error', async () => {
+    const badService = new Proxy({} as CFRService, {
+      get: () => () => {
+        throw 'boom';
+      },
+    });
+    const server = buildMcpServer(badService, createTestLogger());
+    const probe = new Client({ name: 'probe', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), probe.connect(clientTransport)]);
+    try {
+      await expect(probe.readResource({ uri: 'cfr://index/status' })).rejects.toThrow(
+        /MCP error -32603: internal server error$/,
+      );
+    } finally {
+      await probe.close();
+      await server.close();
+    }
   });
 
   it('offers a cfr_research prompt with validated arguments', async () => {
@@ -373,7 +484,7 @@ describe('MCP server (in-memory transport)', () => {
     expect(result.content[0]?.text).toContain('Error:');
   });
 
-  it('reports non-Error failures as unknown error', async () => {
+  it('reports non-Error failures as internal server error', async () => {
     const badService = new Proxy({} as CFRService, {
       get: () => () => {
         throw 'boom';
@@ -389,7 +500,7 @@ describe('MCP server (in-memory transport)', () => {
         arguments: {},
       })) as ToolCallResult;
       expect(result.isError).toBe(true);
-      expect(result.content[0]?.text).toContain('unknown error');
+      expect(result.content[0]?.text).toContain('internal server error');
     } finally {
       await probe.close();
       await server.close();

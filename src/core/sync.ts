@@ -64,57 +64,26 @@ function verifyAgainstStructure(
   return { expectedSections, expectedAppendices };
 }
 
-/** Build (or rebuild) the local index from live eCFR data. */
-export async function syncIndex(deps: SyncDeps): Promise<SyncReport> {
-  const startedAt = Date.now();
-  const { ecfr, store, logger } = deps;
-
-  logger.info('resolving eCFR issue date for title 38');
-  const schedule = await ecfr.getTitleSchedule();
-  const issueDate = schedule.upToDateAsOf;
-
-  logger.info('fetching title structure', { issueDate });
-  const structureRaw = await ecfr.getStructureJson(issueDate);
-  const structure = parseStructure(structureRaw);
-
-  logger.info('fetching full title XML', { issueDate });
-  const xml = await ecfr.getFullTitleXml(issueDate);
-
-  const sections = parseTitleXml(xml);
-  if (sections.length === 0) {
-    throw new SyncError(
-      'parsed zero sections — eCFR XML format may have changed (see docs/SPEC.md §3)',
-    );
-  }
-  const expected = verifyAgainstStructure(sections, structure, logger);
-
-  // Snapshot the outgoing index so the rebuild can report what actually
-  // changed at the provision level (roadmap: sync-change report).
-  const previousIssueDate = store.getMeta('issue_date');
-  const previousParser = store.getMeta('parser_version');
-  const oldHashes =
-    store.countSections() > 0 ? store.captureTextHashes() : new Map<string, string>();
-
-  const counts = countKinds(sections);
-  store.replaceAll(sections, issueDate, {
-    issue_date: issueDate,
-    up_to_date_as_of: schedule.upToDateAsOf,
-    title_name: schedule.name,
-    synced_at: new Date().toISOString(),
-    sections_count: String(counts.sections),
-    appendices_count: String(counts.appendices),
-    structure_expected_sections: String(expected.expectedSections),
-    structure_expected_appendices: String(expected.expectedAppendices),
-    structure_json: JSON.stringify(structureRaw),
-    parser_version: PARSER_VERSION,
-    source: 'ecfr.gov',
-  });
-
-  const newHashes = new Map<string, string>();
-  for (const section of sections) newHashes.set(section.citation, hashText(section.text));
+/**
+ * Derive the provision-level change report from the baseline snapshot.
+ *
+ * Runs INSIDE the rebuild transaction (see `Store.replaceAllWithBaseline`):
+ * every input here must come from that in-transaction snapshot or from OUR
+ * own freshly parsed sections — nothing may be read before BEGIN IMMEDIATE,
+ * or a concurrent sync could commit its own index in between and the report
+ * would describe a baseline this sync never replaced.
+ */
+function buildChanges(input: {
+  readonly previousIssueDate: string | null;
+  readonly previousParser: string | null;
+  readonly oldHashes: ReadonlyMap<string, string>;
+  readonly newHashes: ReadonlyMap<string, string>;
+  readonly issueDate: string;
+}): SyncChanges {
+  const { previousIssueDate, previousParser, oldHashes, newHashes, issueDate } = input;
   const baseline = oldHashes.size === 0;
   const diff = diffHashes(oldHashes, newHashes);
-  const changes: SyncChanges = baseline
+  return baseline
     ? {
         fromIssueDate: null,
         toIssueDate: issueDate,
@@ -141,7 +110,79 @@ export async function syncIndex(deps: SyncDeps): Promise<SyncReport> {
         parserChanged: previousParser !== PARSER_VERSION,
         recordedAt: new Date().toISOString(),
       };
-  store.setMeta('last_changes', JSON.stringify(changes));
+}
+
+/** Build (or rebuild) the local index from live eCFR data. */
+export async function syncIndex(deps: SyncDeps): Promise<SyncReport> {
+  const startedAt = Date.now();
+  const { ecfr, store, logger } = deps;
+
+  logger.info('resolving eCFR issue date for title 38');
+  const schedule = await ecfr.getTitleSchedule();
+  const issueDate = schedule.upToDateAsOf;
+
+  logger.info('fetching title structure', { issueDate });
+  const structureRaw = await ecfr.getStructureJson(issueDate);
+  const structure = parseStructure(structureRaw);
+
+  logger.info('fetching full title XML', { issueDate });
+  const xml = await ecfr.getFullTitleXml(issueDate);
+
+  const sections = parseTitleXml(xml);
+  if (sections.length === 0) {
+    throw new SyncError(
+      'parsed zero sections — eCFR XML format may have changed (see docs/SPEC.md §3)',
+    );
+  }
+  const expected = verifyAgainstStructure(sections, structure, logger);
+  const counts = countKinds(sections);
+
+  // newHashes for the diff: computed from OUR own parsed XML, so it is safe
+  // to do outside the transaction (~2 970 sha256 hashes — real CPU time we
+  // must not hold the write lock for). The rebuild transaction below then
+  // only snapshots the outgoing index and swaps rows.
+  const newHashes = new Map<string, string>();
+  for (const section of sections) newHashes.set(section.citation, hashText(section.text));
+
+  const meta: Record<string, string> = {
+    issue_date: issueDate,
+    up_to_date_as_of: schedule.upToDateAsOf,
+    title_name: schedule.name,
+    synced_at: new Date().toISOString(),
+    sections_count: String(counts.sections),
+    appendices_count: String(counts.appendices),
+    structure_expected_sections: String(expected.expectedSections),
+    structure_expected_appendices: String(expected.expectedAppendices),
+    structure_json: JSON.stringify(structureRaw),
+    parser_version: PARSER_VERSION,
+    source: 'ecfr.gov',
+    // The report commits atomically with the index it describes (batch-4
+    // R4): filled from the in-transaction snapshot below, BEFORE the meta
+    // upserts run — so it still rides the SAME rebuild COMMIT.
+  };
+
+  // The baseline snapshot (previous issue date, previous parser, outgoing
+  // text hashes) is taken INSIDE the rebuild transaction by the callback:
+  // between a pre-transaction snapshot and BEGIN IMMEDIATE a second
+  // `cfr-free sync` could commit its own index, making this report describe
+  // a baseline we never actually replaced (scout #3 / batch-5 R3).
+  const changes: SyncChanges = store.replaceAllWithBaseline(
+    sections,
+    issueDate,
+    meta,
+    (snapshot) => {
+      const built = buildChanges({
+        previousIssueDate: snapshot.getMeta('issue_date'),
+        previousParser: snapshot.getMeta('parser_version'),
+        oldHashes:
+          snapshot.countSections() > 0 ? snapshot.captureTextHashes() : new Map<string, string>(),
+        newHashes,
+        issueDate,
+      });
+      meta.last_changes = JSON.stringify(built);
+      return built;
+    },
+  );
 
   const report: SyncReport = {
     issueDate,

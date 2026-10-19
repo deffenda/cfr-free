@@ -101,9 +101,14 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
 
     if (command === 'sync') {
       const report = await runSyncCommand(config, logger);
+      const { changed, added, removed } = report.changes;
+      const changes =
+        changed + added + removed > 0
+          ? `${changed} changed, ${added} added, ${removed} removed`
+          : 'no provision changes';
       io.out(
         `synced ${report.sections} sections + ${report.appendices} appendices ` +
-          `(issue date ${report.issueDate}, ${report.durationMs} ms)\n`,
+          `(issue date ${report.issueDate}; ${changes}; ${report.durationMs} ms)\n`,
       );
       return 0;
     }

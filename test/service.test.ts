@@ -670,6 +670,37 @@ describe('CFRService direct-hit excerpts', () => {
       temp.cleanup();
     }
   });
+
+  it('advertises only query terms visible in the shown snippet', () => {
+    // 354-char run-on: `38` at char 30 (inside the ~200-char window),
+    // `cfr` at char 305 (past the ellipsis cut).
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '4.97',
+          heading: 'Excerpt match visibility.',
+          text:
+            'Entitlement to benefits under 38 depends on the evidence of record and the rating ' +
+            'schedule criteria applied consistently to every claimant under the agency standards ' +
+            'of review and weighing of testimony plus the procedural requirements outlined in ' +
+            'this part for filing and development of claims before the cfr token that sits only ' +
+            'past the excerpt window.',
+        }),
+      ],
+    });
+    try {
+      const hit = new CFRService(temp.store, 7).search({ query: '38 CFR 4.97' }).hits[0];
+      expect(hit?.direct).toBe(true);
+      expect(hit?.snippet.endsWith('…')).toBe(true);
+      // `cfr` is invisible in the snippet, so it must not be advertised…
+      expect(hit?.snippet).not.toContain('cfr');
+      expect(hit?.matches).not.toContain('cfr');
+      // …while `38` sits inside the window and must still be (no over-correction).
+      expect(hit?.matches).toContain('38');
+    } finally {
+      temp.cleanup();
+    }
+  });
 });
 
 describe('CFRService vanished-citation guidance', () => {

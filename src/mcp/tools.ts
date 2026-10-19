@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Logger } from '../logger.js';
 import type { CFRService } from '../core/service.js';
+import { clientSafeMessage } from './client-safe.js';
 
 /**
  * MCP tool registrations. Every tool is read-only over the local index:
@@ -36,6 +37,7 @@ const searchOutputSchema = z.object({
       snippet: z.string(),
       score: z.number(),
       matches: z.array(z.string()),
+      inResults: z.boolean(),
     }),
   ),
 });
@@ -124,11 +126,6 @@ function textContent(payload: unknown): string {
   return JSON.stringify(payload, null, 2);
 }
 
-function toClientMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return 'unknown error';
-}
-
 /** Register all tools on the server. */
 export function registerTools(server: McpServer, service: CFRService, logger: Logger): void {
   server.registerTool(
@@ -140,7 +137,12 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
         'Returns section citations, headings, relevance snippets, bm25 scores (lower is better) ' +
         'and the query terms visible in each hit. ' +
         'Use `part` to scope results to a single CFR part (e.g. "4" for ratings, "17" for prosthetics). ' +
-        'Follow up with get_section to read a hit in full.',
+        'Follow up with get_section to read a hit in full. ' +
+        'If the query itself is a citation (e.g. "4.130" or "38 CFR 4.16"), that exact ' +
+        'section is pinned to the top of page 1 (totals include the pin on every page) ' +
+        "and marked `direct: true` — the reliable client signal; the pinned hit's " +
+        '`inResults` flag reports whether it also matched the ranked results. ' +
+        'Quoted spans (e.g. "exact regulatory language") are emitted as FTS5 phrase queries — the last token gets a prefix wildcard (so "language" also matches "languages"); earlier tokens are matched exactly.',
       inputSchema: {
         query: z
           .string()
@@ -187,9 +189,11 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
           structuredContent,
         };
       } catch (error) {
-        logger.error('tool search_regulations failed', { message: toClientMessage(error) });
+        logger.error('tool search_regulations failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
         return {
-          content: [{ type: 'text', text: `Error: ${toClientMessage(error)}` }],
+          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
           isError: true,
         };
       }
@@ -222,9 +226,11 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
           structuredContent: result,
         };
       } catch (error) {
-        logger.error('tool get_section failed', { message: toClientMessage(error) });
+        logger.error('tool get_section failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
         return {
-          content: [{ type: 'text', text: `Error: ${toClientMessage(error)}` }],
+          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
           isError: true,
         };
       }
@@ -263,9 +269,11 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
           structuredContent,
         };
       } catch (error) {
-        logger.error('tool browse_title38 failed', { message: toClientMessage(error) });
+        logger.error('tool browse_title38 failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
         return {
-          content: [{ type: 'text', text: `Error: ${toClientMessage(error)}` }],
+          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
           isError: true,
         };
       }
@@ -302,9 +310,11 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
           structuredContent: result,
         };
       } catch (error) {
-        logger.error('tool index_status failed', { message: toClientMessage(error) });
+        logger.error('tool index_status failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
         return {
-          content: [{ type: 'text', text: `Error: ${toClientMessage(error)}` }],
+          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
           isError: true,
         };
       }
@@ -333,9 +343,11 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
           structuredContent,
         };
       } catch (error) {
-        logger.error('tool list_parts failed', { message: toClientMessage(error) });
+        logger.error('tool list_parts failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
         return {
-          content: [{ type: 'text', text: `Error: ${toClientMessage(error)}` }],
+          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
           isError: true,
         };
       }
@@ -362,9 +374,11 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
           structuredContent,
         };
       } catch (error) {
-        logger.error('tool health failed', { message: toClientMessage(error) });
+        logger.error('tool health failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
         return {
-          content: [{ type: 'text', text: `Error: ${toClientMessage(error)}` }],
+          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
           isError: true,
         };
       }
