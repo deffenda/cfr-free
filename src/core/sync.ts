@@ -146,16 +146,12 @@ export async function syncIndex(deps: SyncDeps): Promise<SyncReport> {
 
   const meta: Record<string, string> = {
     issue_date: issueDate,
-    up_to_date_as_of: schedule.upToDateAsOf,
-    title_name: schedule.name,
     synced_at: new Date().toISOString(),
-    sections_count: String(counts.sections),
     appendices_count: String(counts.appendices),
     structure_expected_sections: String(expected.expectedSections),
     structure_expected_appendices: String(expected.expectedAppendices),
     structure_json: JSON.stringify(structureRaw),
     parser_version: PARSER_VERSION,
-    source: 'ecfr.gov',
     // The report commits atomically with the index it describes (batch-4
     // R4): filled from the in-transaction snapshot below, BEFORE the meta
     // upserts run — so it still rides the SAME rebuild COMMIT.

@@ -110,13 +110,26 @@ describe('syncIndex', () => {
       expect(deps.store.countSections()).toBe(2);
       expect(deps.store.getMeta('issue_date')).toBe(ISSUE_DATE);
       expect(deps.store.getMeta('parser_version')).toBe(PARSER_VERSION);
-      expect(deps.store.getMeta('sections_count')).toBe('1');
       expect(deps.store.getMeta('structure_expected_sections')).toBe('2');
       expect(deps.store.getMeta('structure_expected_appendices')).toBe('1');
       expect(JSON.parse(deps.store.getMeta('structure_json') ?? '{}')).toMatchObject({
         type: 'title',
       });
       expect(deps.logger.records.some((record) => record.message === 'index rebuilt')).toBe(true);
+    } finally {
+      deps.temp.cleanup();
+    }
+  });
+
+  it('does not write retired meta keys', async () => {
+    const deps = makeDeps(makeFetch());
+    try {
+      await syncIndex(deps);
+      // getMeta returns null for a missing key (store.ts:498), not undefined.
+      expect(deps.store.getMeta('up_to_date_as_of')).toBeNull();
+      expect(deps.store.getMeta('title_name')).toBeNull();
+      expect(deps.store.getMeta('sections_count')).toBeNull();
+      expect(deps.store.getMeta('source')).toBeNull();
     } finally {
       deps.temp.cleanup();
     }
