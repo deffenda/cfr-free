@@ -413,13 +413,44 @@ export class Store {
     }
   }
 
-  /** Atomically replace the entire index contents. */
+  /**
+   * Atomically replace the entire index contents.
+   *
+   * Delegates to {@link replaceAllWithBaseline} with a no-op baseline.
+   */
   replaceAll(
     sections: readonly RawSection[],
     issueDate: string,
     meta: Readonly<Record<string, string>>,
   ): void {
+    this.replaceAllWithBaseline(sections, issueDate, meta, () => undefined);
+  }
+
+  /**
+   * Atomically replace the entire index while running `baseline` INSIDE the
+   * same IMMEDIATE transaction, BEFORE the wipe.
+   *
+   * The baseline callback reads the OUTGOING index (previous issue date,
+   * previous text hashes) only after the write lock is held: a concurrent
+   * writer can no longer commit its own index between the snapshot and the
+   * rebuild, so the advisory change report always describes the exact state
+   * this call replaced (scout #3 / batch-5 R3). The callback's return value
+   * is handed back to the caller, and any meta it writes participates in the
+   * same COMMIT.
+   *
+   * Ordering: callback first, then DELETE → INSERT → meta upserts — the
+   * baseline must see pre-wipe rows, and everything it reads is pinned by
+   * BEGIN IMMEDIATE until COMMIT.
+   */
+  replaceAllWithBaseline<T>(
+    sections: readonly RawSection[],
+    issueDate: string,
+    meta: Readonly<Record<string, string>>,
+    baseline: (store: Store) => T,
+  ): T {
+    let result!: T;
     this.transaction(() => {
+      result = baseline(this);
       this.db.exec('DELETE FROM sections');
       const insert = this.stmt(INSERT_SECTION_SQL);
       for (const section of sections) {
@@ -441,6 +472,7 @@ export class Store {
       const upsert = this.stmt(UPSERT_META_SQL);
       for (const [key, value] of Object.entries(meta)) upsert.run(key, value);
     });
+    return result;
   }
 
   countSections(): number {
