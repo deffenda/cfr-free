@@ -13,7 +13,7 @@ info:
     [docs/SPEC.md §5](docs/SPEC.md#5-titan-http-api-get-only-json-bind-127001).
     No request bodies, no auth (loopback bind by default; `CFR_ALLOW_REMOTE=1`
     is required to expose it); every `GET` route has a `HEAD` twin with
-    identical status/headers and an empty body (src/titan/http-server.ts:48),
+    identical status/headers and an empty body (src/titan/http-server.ts:49),
     and the one non-JSON route is `GET /metrics` (Prometheus exposition).
     Errors are JSON `{ error, message }`; paths not listed under `paths` return
     404, and any method other than `GET`/`HEAD` returns 405 with
@@ -44,7 +44,7 @@ paths:
       summary: Headers-only health check
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:48); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:49); errors mirror GET, also body-less.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '414': { $ref: '#/components/responses/UriTooLong' }
@@ -69,7 +69,7 @@ paths:
       summary: Headers-only metrics check
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:48); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:49); errors mirror GET, also body-less.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '414': { $ref: '#/components/responses/UriTooLong' }
@@ -109,7 +109,7 @@ paths:
       summary: Headers-only search probe
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:48); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:49); errors mirror GET, also body-less.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '414': { $ref: '#/components/responses/UriTooLong' }
@@ -156,7 +156,7 @@ paths:
       summary: Headers-only section probe
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:48); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:49); errors mirror GET, also body-less.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -202,7 +202,7 @@ paths:
       summary: Headers-only browse probe
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:48); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:49); errors mirror GET, also body-less.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
