@@ -357,7 +357,7 @@ describe('MCP server (in-memory transport)', () => {
     }
   });
 
-  it('reports non-Error resource failures as unknown error', async () => {
+  it('reports non-Error resource failures as internal server error', async () => {
     const badService = new Proxy({} as CFRService, {
       get: () => () => {
         throw 'boom';
@@ -369,7 +369,7 @@ describe('MCP server (in-memory transport)', () => {
     await Promise.all([server.connect(serverTransport), probe.connect(clientTransport)]);
     try {
       await expect(probe.readResource({ uri: 'cfr://index/status' })).rejects.toThrow(
-        /unknown error/,
+        /MCP error -32603: internal server error$/,
       );
     } finally {
       await probe.close();
@@ -484,7 +484,7 @@ describe('MCP server (in-memory transport)', () => {
     expect(result.content[0]?.text).toContain('Error:');
   });
 
-  it('reports non-Error failures as unknown error', async () => {
+  it('reports non-Error failures as internal server error', async () => {
     const badService = new Proxy({} as CFRService, {
       get: () => () => {
         throw 'boom';
@@ -500,7 +500,7 @@ describe('MCP server (in-memory transport)', () => {
         arguments: {},
       })) as ToolCallResult;
       expect(result.isError).toBe(true);
-      expect(result.content[0]?.text).toContain('unknown error');
+      expect(result.content[0]?.text).toContain('internal server error');
     } finally {
       await probe.close();
       await server.close();

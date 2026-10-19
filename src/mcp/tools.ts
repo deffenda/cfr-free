@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Logger } from '../logger.js';
 import type { CFRService } from '../core/service.js';
+import { clientSafeMessage } from './client-safe.js';
 
 /**
  * MCP tool registrations. Every tool is read-only over the local index:
@@ -125,11 +126,6 @@ function textContent(payload: unknown): string {
   return JSON.stringify(payload, null, 2);
 }
 
-function toClientMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return 'unknown error';
-}
-
 /** Register all tools on the server. */
 export function registerTools(server: McpServer, service: CFRService, logger: Logger): void {
   server.registerTool(
@@ -193,9 +189,11 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
           structuredContent,
         };
       } catch (error) {
-        logger.error('tool search_regulations failed', { message: toClientMessage(error) });
+        logger.error('tool search_regulations failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
         return {
-          content: [{ type: 'text', text: `Error: ${toClientMessage(error)}` }],
+          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
           isError: true,
         };
       }
@@ -228,9 +226,11 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
           structuredContent: result,
         };
       } catch (error) {
-        logger.error('tool get_section failed', { message: toClientMessage(error) });
+        logger.error('tool get_section failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
         return {
-          content: [{ type: 'text', text: `Error: ${toClientMessage(error)}` }],
+          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
           isError: true,
         };
       }
@@ -269,9 +269,11 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
           structuredContent,
         };
       } catch (error) {
-        logger.error('tool browse_title38 failed', { message: toClientMessage(error) });
+        logger.error('tool browse_title38 failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
         return {
-          content: [{ type: 'text', text: `Error: ${toClientMessage(error)}` }],
+          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
           isError: true,
         };
       }
@@ -308,9 +310,11 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
           structuredContent: result,
         };
       } catch (error) {
-        logger.error('tool index_status failed', { message: toClientMessage(error) });
+        logger.error('tool index_status failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
         return {
-          content: [{ type: 'text', text: `Error: ${toClientMessage(error)}` }],
+          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
           isError: true,
         };
       }
@@ -339,9 +343,11 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
           structuredContent,
         };
       } catch (error) {
-        logger.error('tool list_parts failed', { message: toClientMessage(error) });
+        logger.error('tool list_parts failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
         return {
-          content: [{ type: 'text', text: `Error: ${toClientMessage(error)}` }],
+          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
           isError: true,
         };
       }
@@ -368,9 +374,11 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
           structuredContent,
         };
       } catch (error) {
-        logger.error('tool health failed', { message: toClientMessage(error) });
+        logger.error('tool health failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
         return {
-          content: [{ type: 'text', text: `Error: ${toClientMessage(error)}` }],
+          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
           isError: true,
         };
       }
