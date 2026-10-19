@@ -25,20 +25,31 @@ cfr-free mcp       # start the MCP stdio server (reads local index)
 src/
   cli.ts              arg parsing, subcommand dispatch (thin)
   config.ts           env config, zod-validated
+  exit-codes.ts       process exit-code contract for CLI automation
   logger.ts           stderr-only structured logging (stdout is JSON-RPC)
+  process-utils.ts    idempotent shutdown handling shared by serve/mcp
+  version.ts          package-version resolution seam
+  commands/           per-subcommand entrypoints (sync, serve, mcp,
+                      export, ensure-index, refresh-scheduler)
   core/
-    http-client.ts    fetch wrapper: timeout, size cap, gzip, friendly errors
-    ecfr.ts           eCFR endpoints: dates, structure, full-title XML, search
-    xml.ts            XML → markdown/text renderer + section extractor
+    changes.ts        sync change report: hash diff between syncs
     citations.ts      parse/normalize "38 CFR 4.125", "§ 4.125", "4.125"
-    store.ts          SQLite schema, queries (FTS5), transactional rebuild
-    sync.ts           index build pipeline
+    ecfr.ts           eCFR endpoints: dates, structure, full-title XML, search
+    http-client.ts    fetch wrapper: timeout, size cap, gzip, friendly errors
+    references.ts     cross-reference extraction for search results
     service.ts        facade shared by MCP + HTTP: search/getSection/browse/status
+    store.ts          SQLite schema, queries (FTS5), transactional rebuild
+    structure.ts      browse-tree validation + StructureError
+    sync.ts           index build pipeline
+    xml.ts            XML → markdown/text renderer + section extractor
   mcp/
+    client-safe.ts    client-safe error text (sanitized messages on the wire)
+    resources.ts      resource + prompt handlers
     server.ts         buildServer(deps) — testable, no I/O at module load
     tools.ts          tool schemas + handlers
   titan/
     http-server.ts    node:http server + router (GET-only, JSON)
+    rate-limit.ts     per-peer token bucket for deliberately exposed APIs
 test/                 vitest unit + integration (mocked fetch, temp SQLite)
 ```
 
@@ -116,7 +127,7 @@ All return MCP `structuredContent` + text content. `readOnlyHint: true`, `openWo
 
 ## 8. Test plan
 
-Unit: citation parser, FTS sanitizer (incl. injection attempts `" OR 1=1--`), XML renderer (tables, authority/source-credit nodes, reserved sections), TTL-LRU cache, store queries (temp SQLite), sync with mocked eCFR payloads (count-mismatch warning, 0-section hard-fail). Integration: MCP via `InMemoryTransport` (tools/list + every tool + resources/prompts), HTTP API via ephemeral port + `fetch`. Live: `test/live.test.ts` gated behind `LIVE_TESTS=1` (full real-eCFR sync + read consistency; hard-skipped otherwise), exercised by the weekly Live E2E workflow.
+Unit: citation parser, FTS sanitizer (incl. injection attempts `" OR 1=1--`), XML renderer (tables, authority/source-credit nodes, reserved sections), store queries (temp SQLite), sync with mocked eCFR payloads (count-mismatch warning, 0-section hard-fail). Integration: MCP via `InMemoryTransport` (tools/list + every tool + resources/prompts), HTTP API via ephemeral port + `fetch`. Live: `test/live.test.ts` gated behind `LIVE_TESTS=1` (full real-eCFR sync + read consistency; hard-skipped otherwise), exercised by the weekly Live E2E workflow.
 
 ## 9. Risks / open questions
 

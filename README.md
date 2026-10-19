@@ -52,7 +52,7 @@ docker run -d --name cfr-free -p 8787:8787 -v cfr-data:/data \
   ghcr.io/deffenda/cfr-free:latest
 ```
 
-The container syncs on first start (~15 s, ~2–3 MB from eCFR), then serves
+The container syncs on first start (~5 s, ~2–3 MB from eCFR), then serves
 the HTTP API; the index persists in the `cfr-data` volume mounted at `/data`.
 Any CLI command works the same way, e.g.
 `docker run --rm -v cfr-data:/data ghcr.io/deffenda/cfr-free:latest sync` to
