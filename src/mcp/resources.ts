@@ -2,17 +2,20 @@ import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Logger } from '../logger.js';
-import type { CFRService } from '../core/service.js';
+import { ServiceError, type CFRService } from '../core/service.js';
+import { clientSafeMessage } from './client-safe.js';
 
 /**
  * MCP resources and prompts. Resources expose the same read-only index
  * metadata as the tools (freshness, parts) so clients can pull it without
  * inventing tool arguments; the prompt encodes the canonical
  * search → read → cite workflow. No network access happens in any handler.
- * Resource read failures follow the tools' convention: log the sanitized
- * message, then rethrow as `McpError(InternalError, …)` — the SDK's request
- * layer serializes only `code` + `message` onto the wire (never a stack or
- * raw store body), so the client sees exactly the sanitized text.
+ * Resource read failures follow the tools' convention: log the full detail
+ * server-side, then rethrow as `McpError(InternalError, clientSafeMessage(error))`
+ * — the SDK's request layer serializes only `code` + `message` onto the wire
+ * (never a stack or raw store body), so the client sees exactly the sanitized
+ * text (guidance from `ServiceError`/`StructureError` verbatim; everything
+ * else the fixed generic, matching the HTTP layer).
  */
 
 function jsonContents(
@@ -24,11 +27,6 @@ function jsonContents(
       { uri: uri.href, mimeType: 'application/json', text: JSON.stringify(payload, null, 2) },
     ],
   };
-}
-
-function toClientMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return 'unknown error';
 }
 
 /** Register the read-only resources and the research prompt. */
@@ -47,8 +45,10 @@ export function registerResources(server: McpServer, service: CFRService, logger
       try {
         return jsonContents(uri, service.status());
       } catch (error) {
-        logger.error('resource index-status failed', { message: toClientMessage(error) });
-        throw new McpError(ErrorCode.InternalError, toClientMessage(error));
+        logger.error('resource index-status failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
+        throw new McpError(ErrorCode.InternalError, clientSafeMessage(error));
       }
     },
   );
@@ -67,8 +67,10 @@ export function registerResources(server: McpServer, service: CFRService, logger
       try {
         return jsonContents(uri, { parts: service.listParts() });
       } catch (error) {
-        logger.error('resource title38-parts failed', { message: toClientMessage(error) });
-        throw new McpError(ErrorCode.InternalError, toClientMessage(error));
+        logger.error('resource title38-parts failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
+        throw new McpError(ErrorCode.InternalError, clientSafeMessage(error));
       }
     },
   );
@@ -88,16 +90,23 @@ export function registerResources(server: McpServer, service: CFRService, logger
         const section = service.getSection('3.1');
         // Defense-in-depth: CFRService.getSection throws on a miss today, but
         // a null must never serialize as JSON `null` content — that reads as
-        // an indistinguishable-from-success response.
+        // an indistinguishable-from-success response. ServiceError (not a
+        // plain Error) keeps this guidance on the client-safe list: the
+        // message is user-facing ("run `cfr-free sync`"), matching the
+        // ServiceError this miss would throw once getSection stops returning
+        // null.
         if (section === null) {
-          throw new Error(
+          throw new ServiceError(
             'Section 3.1 is not in the local index (no sync yet or not yet parsed); run `cfr-free sync` first',
+            'not_found',
           );
         }
         return jsonContents(uri, section);
       } catch (error) {
-        logger.error('resource title38-definitions failed', { message: toClientMessage(error) });
-        throw new McpError(ErrorCode.InternalError, toClientMessage(error));
+        logger.error('resource title38-definitions failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
+        throw new McpError(ErrorCode.InternalError, clientSafeMessage(error));
       }
     },
   );
