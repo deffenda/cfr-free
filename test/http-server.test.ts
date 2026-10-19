@@ -1,4 +1,5 @@
 import type { AddressInfo } from 'node:net';
+import net from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type http from 'node:http';
 import { CFRService } from '../src/core/service.js';
@@ -243,6 +244,32 @@ describe('Titan HTTP API', () => {
     expect(status).toBe(405);
     expect(body['error']).toBe('method_not_allowed');
     expect(headers.get('allow')).toBe('GET, HEAD');
+  });
+
+  it('answers 400 invalid_input when the request URL cannot be parsed', async () => {
+    // fetch() normalizes URLs, so drive a raw socket. Verified empirically:
+    // Node's HTTP parser delivers the absolute-form target
+    // `http://example.com:-1/` verbatim as req.url, while
+    // `new URL(req.url, 'http://localhost')` throws on the invalid port —
+    // hitting precheck's malformed-URL arm, not the 414 byte-cap path.
+    const port = (server.address() as AddressInfo).port;
+    const raw = await new Promise<string>((resolve, reject) => {
+      const socket = net.connect(port, '127.0.0.1', () => {
+        socket.write(
+          'GET http://example.com:-1/ HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n',
+        );
+      });
+      let received = '';
+      socket.setEncoding('latin1');
+      socket.on('data', (chunk) => {
+        received += chunk;
+      });
+      socket.on('close', () => resolve(received));
+      socket.on('error', reject);
+    });
+    expect(raw.startsWith('HTTP/1.1 400')).toBe(true);
+    expect(raw).toContain('"error":"invalid_input"');
+    expect(raw).toContain('malformed request URL');
   });
 
   it('serves HEAD requests without a body', async () => {
