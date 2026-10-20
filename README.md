@@ -73,6 +73,12 @@ Prefer Compose? `docker compose up -d --build` serves the API on
 (`docker compose run --rm cfr-free sync`) so starts never trigger a surprise
 download.
 
+npm publishing runs from the `v*`-tag release workflow with OIDC provenance
+(no publish tokens), gated behind the `NPM_TRUSTED_PUBLISHING` repository
+variable plus one-time trusted-publisher registration on npmjs.com; until that
+gate is activated, `npm install -g cfr-free` resolves nothing and installing
+from a source checkout is the way to go.
+
 ### Use with Claude (MCP)
 
 Add to your MCP client config (e.g. `claude_desktop_config.json`):

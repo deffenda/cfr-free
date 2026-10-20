@@ -99,3 +99,32 @@ jobs:
           subject-name: ghcr.io/${{ github.repository }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+
+  # Activation gate (operator-only): set repo variable NPM_TRUSTED_PUBLISHING=true
+  # AND register the trusted publisher on npmjs.com for this package: GitHub Actions
+  # -> deffenda/cfr-free -> release.yml (one-time; first publish must land within 2 days).
+  publish-npm:
+    name: publish to npm (OIDC provenance)
+    needs: [ci]
+    if: vars.NPM_TRUSTED_PUBLISHING == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing (OIDC) — no token secret
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
+          cache: npm
+      - run: npm ci
+      - name: tag/package version match
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          test "$TAG" = "$PKG" || { echo "tag v$TAG != package.json $PKG — bump package.json before tagging"; exit 1; }
+      - name: publish (dry-run first)
+        run: npm publish --dry-run --provenance
+      - name: publish
+        run: npm publish --provenance
