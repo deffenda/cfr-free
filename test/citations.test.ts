@@ -16,6 +16,42 @@ describe('normalizeCitation', () => {
     expect(normalizeCitation('cfr 3.1000')).toEqual({ kind: 'section', citation: '3.1000' });
   });
 
+  it('accepts the dotted legal form the product emits (P1-03)', () => {
+    // `displayCitation` hands the user `38 C.F.R. \u00a7 4.130`; that string
+    // must parse back to the same section.
+    expect(normalizeCitation('38 C.F.R. \u00a7 4.125')).toEqual({
+      kind: 'section',
+      citation: '4.125',
+    });
+    expect(normalizeCitation('38 C.F.R.\u00a7 4.125')).toEqual({
+      kind: 'section',
+      citation: '4.125',
+    });
+    expect(normalizeCitation('38  c.f.r.  \u00a7  4.125')).toEqual({
+      kind: 'section',
+      citation: '4.125',
+    });
+    expect(normalizeCitation('38 C.F.R. \u00a7 4.125.')).toEqual({
+      kind: 'section',
+      citation: '4.125',
+    });
+    expect(normalizeCitation('C.F.R. \u00a7 4.125')).toEqual({
+      kind: 'section',
+      citation: '4.125',
+    });
+    expect(normalizeCitation('38 C.F.R. \u00a7 4.124A')).toEqual({
+      kind: 'section',
+      citation: '4.124a',
+    });
+  });
+
+  it('still rejects a wrong title and junk in the dotted form (P1-03)', () => {
+    expect(normalizeCitation('42 C.F.R. \u00a7 4.125')).toBeNull();
+    expect(normalizeCitation('38 C.F.R. \u00a7 <script>alert(1)</script>')).toBeNull();
+    expect(normalizeCitation('38 C.F.R. \u00a7 4.125"; DROP TABLE')).toBeNull();
+    expect(normalizeCitation('38 C.F.R. \u00a7 ')).toBeNull();
+  });
+
   it('lowercases letter suffixes', () => {
     expect(normalizeCitation('4.124A')).toEqual({ kind: 'section', citation: '4.124a' });
   });

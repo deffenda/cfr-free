@@ -76,6 +76,12 @@ describe('CFRService.search', () => {
 describe('CFRService.getSection', () => {
   it('resolves flexible citations to full content', () => {
     withService((service) => {
+      // P1-03: the citation the search hit DISPLAYS must resolve through
+      // getSection to the same section.
+      const displayed = service.search({ query: '38 CFR 4.130' }).hits[0]?.citationDisplay;
+      expect(displayed).toBe('38 C.F.R. \u00a7 4.130');
+      expect(service.getSection(String(displayed)).citation).toBe('4.130');
+
       const section = service.getSection('38 CFR 4.125');
       expect(section.citation).toBe('4.125');
       expect(section.kind).toBe('section');
