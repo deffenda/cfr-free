@@ -290,6 +290,7 @@ const KNOWN_PATHS = [
   '/api/v1/search',
   '/api/v1/sections/{citation}',
   '/api/v1/browse',
+  '/api/v1/diff',
 ] as const;
 
 interface OperationEntry {
@@ -561,7 +562,30 @@ const ROUTE_PROBES: Readonly<
   '/api/v1/search': { requestPath: '/api/v1/search', query: 'q=veteran&per_page=1' },
   '/api/v1/sections/{citation}': { requestPath: '/api/v1/sections/4.125' },
   '/api/v1/browse': { requestPath: '/api/v1/browse' },
+  '/api/v1/diff': { requestPath: '/api/v1/diff', query: 'from=2026-01-01&to=2026-06-01' },
 };
+
+/**
+ * Offline eCFR stub for the `/api/v1/diff` happy probe: one section amended
+ * between the two probe dates, so the route answers a real 200 DiffResult
+ * (stub builders are duplicated per suite — test/helpers.ts is not shared
+ * for these).
+ */
+function makeDiffEcfr(): EcfrApi {
+  const xml = (body: string): string =>
+    `<ECFR><DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD><DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD><DIV5 N="4" TYPE="PART"><HEAD>Part 4</HEAD><DIV8 N="4.125" TYPE="SECTION"><HEAD>§ 4.125 Test.</HEAD><P>${body}</P></DIV8></DIV5></DIV3></DIV1>`;
+  const byDate: Readonly<Record<string, string>> = {
+    '2026-01-01': xml('Original body.'),
+    '2026-06-01': xml('Amended body.'),
+  };
+  return {
+    getFullTitleXml: async (issueDate: string) => {
+      const doc = byDate[issueDate];
+      if (doc === undefined) throw new Error(`HTTP 404 for ${issueDate}`);
+      return doc;
+    },
+  } as unknown as EcfrApi;
+}
 
 interface HappyProbeRow {
   readonly label: string;
@@ -570,7 +594,6 @@ interface HappyProbeRow {
   readonly method: 'GET' | 'HEAD';
   readonly url: string;
 }
-
 function buildHappyProbeRows(): HappyProbeRow[] {
   const rows: HappyProbeRow[] = [];
   for (const specPath of Object.keys(specPaths())) {
@@ -631,6 +654,14 @@ const ERROR_PROBES: readonly ErrorProbeRow[] = [
     expectedStatus: 400,
   },
   {
+    label: 'diff GET without required date params',
+    specPath: '/api/v1/diff',
+    operation: 'get',
+    method: 'GET',
+    url: '/api/v1/diff',
+    expectedStatus: 400,
+  },
+  {
     label: 'sections GET unknown citation',
     specPath: '/api/v1/sections/{citation}',
     operation: 'get',
@@ -673,7 +704,14 @@ describe('OpenAPI response conformance (in-process server vs spec)', () => {
 
   beforeAll(async () => {
     temp = openTempStore();
-    server = createHttpServer(new CFRService(temp.store, 7), createTestLogger());
+    // The happy probe for /api/v1/diff needs a fetching client, so this server
+    // carries the stub diff stack — every other route still reads the fixture
+    // store exactly as before.
+    const ecfr = makeDiffEcfr();
+    server = createHttpServer(
+      new CFRService(temp.store, 7, ecfr, createTestLogger()),
+      createTestLogger(),
+    );
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   });

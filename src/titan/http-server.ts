@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { CHANGE_LIST_CAP } from '../core/changes.js';
 import { ServiceError, type CFRService } from '../core/service.js';
 import { StructureError } from '../core/structure.js';
 import type { Logger } from '../logger.js';
@@ -7,6 +8,8 @@ import { UI_CSP, UI_CSS, UI_HTML, UI_JS } from './ui.js';
 
 /**
  * Titan HTTP API: a tiny GET-only JSON surface over the local index, plus
+ * the stateless `/api/v1/diff` point-in-time comparison (two issue dates
+ * fetched from eCFR per call — see handleDiff), plus
  * the read-only web UI at the serve root (`/`, `/ui.js`, `/ui.css` — see
  * ui.ts) that consumes the same surface.
  *
@@ -24,6 +27,7 @@ const NOSNIFF = 'X-Content-Type-Options';
 const SEARCH_PREFIX = '/api/v1/search';
 const SECTIONS_PREFIX = '/api/v1/sections/';
 const BROWSE_PATH = '/api/v1/browse';
+const DIFF_PATH = '/api/v1/diff';
 const HEALTH_PATH = '/health';
 const METRICS_PATH = '/metrics';
 const UI_PATH = '/';
@@ -183,6 +187,58 @@ function handleBrowse(
   );
 }
 
+/**
+ * `GET /api/v1/diff?from=<YYYY-MM-DD>&to=<YYYY-MM-DD>` — both params required
+ * on the wire: missing/empty params are a 400 BEFORE the service is touched,
+ * and no default-to resolution crosses the HTTP surface (the titan server does
+ * hold a store, but resolving `to` from its `issue_date` meta would hide a
+ * store dependency behind the service — the CLI keeps that convenience).
+ *
+ * The `await` rejects into the same catch every sync handler uses:
+ * `ServiceError` maps through `statusFor` (400/404 + client-safe message),
+ * anything else (`HttpError` from an upstream fetch, `SyncError`) falls to
+ * the generic 500 path with the detail logged server-side only.
+ */
+async function handleDiff(
+  service: CFRService,
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  url: URL,
+): Promise<void> {
+  const fromDate = url.searchParams.get('from');
+  const toDate = url.searchParams.get('to');
+  if (fromDate === null || fromDate === '' || toDate === null || toDate === '') {
+    sendJson(
+      req,
+      res,
+      400,
+      errorBody('invalid_input', "both 'from' and 'to' query parameters are required (YYYY-MM-DD)"),
+    );
+    return;
+  }
+  const diff = await service.diffBetween(fromDate, toDate);
+  // Pure function of two fixed issue dates — cacheable like section reads.
+  // Lists are capped HERE, at the wire layer: core returns FULL sorted lists
+  // (caps belong to the presenting layers only), and `truncated` flags any cut.
+  sendJson(
+    req,
+    res,
+    200,
+    {
+      fromIssueDate: diff.fromIssueDate,
+      toIssueDate: diff.toIssueDate,
+      changed: diff.changed.slice(0, CHANGE_LIST_CAP),
+      added: diff.added.slice(0, CHANGE_LIST_CAP),
+      removed: diff.removed.slice(0, CHANGE_LIST_CAP),
+      truncated:
+        diff.changed.length > CHANGE_LIST_CAP ||
+        diff.added.length > CHANGE_LIST_CAP ||
+        diff.removed.length > CHANGE_LIST_CAP,
+    },
+    'public, max-age=3600',
+  );
+}
+
 function statusFor(error: ServiceError | StructureError): { status: number; code: string } {
   if (error instanceof StructureError) return { status: 404, code: 'not_found' };
   return error.code === 'not_found'
@@ -252,13 +308,13 @@ function renderMetrics(service: CFRService, disk?: () => DiskSnapshot | null): s
   return out;
 }
 
-function dispatch(
+async function dispatch(
   service: CFRService,
   req: http.IncomingMessage,
   res: http.ServerResponse,
   url: URL,
   disk?: () => DiskSnapshot | null,
-): void {
+): Promise<void> {
   const pathname = url.pathname;
   if (pathname === HEALTH_PATH) {
     const diskSnapshot = disk?.() ?? null;
@@ -293,6 +349,10 @@ function dispatch(
   }
   if (pathname === BROWSE_PATH) {
     handleBrowse(service, req, res, url);
+    return;
+  }
+  if (pathname === DIFF_PATH) {
+    await handleDiff(service, req, res, url);
     return;
   }
   if (pathname === UI_PATH) {
@@ -390,33 +450,41 @@ export function createHttpServer(
   const limiter =
     options.rateLimit === undefined ? null : new RateLimiter({ ...options.rateLimit });
   const server = http.createServer((req, res) => {
-    const url = precheck(req, res, limiter);
-    if (url === null) return;
+    // `dispatch` is async since the diff route awaits the eCFR facade, so one
+    // async task wraps the whole cycle: precheck runs first (it answers its
+    // own errors synchronously and never throws), then `await dispatch` puts
+    // async rejections in front of the SAME catch the sync handlers have
+    // always used — ServiceError/StructureError → statusFor (400/404 +
+    // client-safe message), anything else → logged + generic 500.
+    void (async () => {
+      const url = precheck(req, res, limiter);
+      if (url === null) return;
 
-    try {
-      dispatch(service, req, res, url, options.disk);
-    } catch (error) {
-      if (error instanceof ServiceError || error instanceof StructureError) {
-        const { status, code } = statusFor(error);
-        const available = error instanceof StructureError ? error.available : undefined;
-        sendJson(
-          req,
-          res,
-          status,
-          errorBody(code, error.message, available ? { available } : undefined),
-        );
-        return;
+      try {
+        await dispatch(service, req, res, url, options.disk);
+      } catch (error) {
+        if (error instanceof ServiceError || error instanceof StructureError) {
+          const { status, code } = statusFor(error);
+          const available = error instanceof StructureError ? error.available : undefined;
+          sendJson(
+            req,
+            res,
+            status,
+            errorBody(code, error.message, available ? { available } : undefined),
+          );
+          return;
+        }
+        logger.error('http request failed', {
+          path: url.pathname,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        if (!res.headersSent) {
+          sendJson(req, res, 500, errorBody('internal_error', 'internal server error'));
+        } else {
+          res.end();
+        }
       }
-      logger.error('http request failed', {
-        path: url.pathname,
-        message: error instanceof Error ? error.message : String(error),
-      });
-      if (!res.headersSent) {
-        sendJson(req, res, 500, errorBody('internal_error', 'internal server error'));
-      } else {
-        res.end();
-      }
-    }
+    })();
   });
   // Bound how long a client may take to complete a request (SPEC §12 #16);
   // the header timeout already defaults to 60 s.

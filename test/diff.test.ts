@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { diffIssues } from '../src/core/diff.js';
 import { EcfrApi } from '../src/core/ecfr.js';
-import { HttpClient } from '../src/core/http-client.js';
+import { HttpClient, HttpError } from '../src/core/http-client.js';
 import { ServiceError } from '../src/core/service.js';
 import { SyncError } from '../src/core/sync.js';
 import { createTestLogger, type TestLogger } from './helpers.js';
@@ -116,16 +116,47 @@ describe('diffIssues', () => {
   });
 
   it('rejects malformed dates with ServiceError invalid_input', async () => {
-    const deps = makeDeps(makeDiffFetch([]));
+    const requested: string[] = [];
+    const deps = makeDeps(makeDiffFetch(requested));
     for (const [from, to] of [
       ['not-a-date', TO_DATE],
       ['2026-1-1', TO_DATE],
       [FROM_DATE, '06/01/2026'],
+      // Semantic range check (R3 nit 1): shape-valid but impossible — month
+      // past 12, and a day February can never hold. Both must fail BEFORE any
+      // network round-trip.
+      ['2026-13-01', TO_DATE],
+      ['2026-02-30', TO_DATE],
     ] as const) {
       const error = await rejection(diffIssues(deps, from, to));
       expect(error).toBeInstanceOf(ServiceError);
       expect((error as ServiceError).code).toBe('invalid_input');
     }
+    expect(requested).toEqual([]);
+  });
+
+  it('accepts 2026-02-28 — the maximum day February can hold in a non-leap year', async () => {
+    const requested: string[] = [];
+    const deps = makeDeps(makeDiffFetch(requested, { '2026-02-28': FROM_XML, [TO_DATE]: TO_XML }));
+    const report = await diffIssues(deps, '2026-02-28', TO_DATE);
+    expect(report.fromIssueDate).toBe('2026-02-28');
+    expect(requested).toEqual(['2026-02-28', TO_DATE]);
+  });
+
+  it('leaves true calendar edges (2025-02-29) to the upstream authority', async () => {
+    // 2025 is not a leap year, so 2025-02-29 is not a real date — but the
+    // in-repo check only bounds the day by the month's MAXIMUM possible
+    // length (February ≤ 29 in any year), by design: computing the real
+    // per-year edge would duplicate eCFR's calendar logic. The value passes
+    // validation, the fetch RUNS (both dates requested below), and the
+    // upstream document index is what rejects it — see the MAX_DAYS_BY_MONTH
+    // comment in diff.ts.
+    const requested: string[] = [];
+    const deps = makeDeps(makeDiffFetch(requested, { [TO_DATE]: TO_XML }));
+    const error = await rejection(diffIssues(deps, '2025-02-29', TO_DATE));
+    expect(error).toBeInstanceOf(HttpError);
+    expect((error as HttpError).status).toBe(404);
+    expect(requested).toEqual(['2025-02-29', TO_DATE]);
   });
 
   it('fails hard with SyncError when the from-date parses to zero sections', async () => {

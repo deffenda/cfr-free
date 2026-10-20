@@ -1,12 +1,19 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Logger } from '../logger.js';
+import { CHANGE_LIST_CAP } from '../core/changes.js';
+import { diffIssues } from '../core/diff.js';
+import type { EcfrApi } from '../core/ecfr.js';
 import type { CFRService } from '../core/service.js';
 import { clientSafeMessage } from './client-safe.js';
 
 /**
- * MCP tool registrations. Every tool is read-only over the local index:
- * no network access happens during tool calls (`openWorldHint: false`).
+ * MCP tool registrations. Every tool is read-only (never destructive,
+ * idempotent). Six read the local index with zero network access during tool
+ * calls; `diff_issues` is the one deliberate network exception — it is
+ * read-only everywhere, but fetches two issue dates' full-title XML from eCFR
+ * on demand (see its registration below), which is why the server registers
+ * it only when an eCFR client is injected.
  */
 
 const READ_ONLY_ANNOTATIONS = {
@@ -14,6 +21,12 @@ const READ_ONLY_ANNOTATIONS = {
   destructiveHint: false,
   idempotentHint: true,
   openWorldHint: false,
+} as const;
+
+// diff_issues hits the live eCFR versioner on every call — openWorld stays true while the other hints stay read-only.
+const DIFF_ANNOTATIONS = {
+  ...READ_ONLY_ANNOTATIONS,
+  openWorldHint: true,
 } as const;
 
 const searchOutputSchema = z.object({
@@ -116,19 +129,47 @@ const healthOutputSchema = z.object({
   stale: z.boolean(),
 });
 
+const dateArgSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .describe('eCFR issue date, YYYY-MM-DD');
+
+const changeReportOutputSchema = z.object({
+  fromIssueDate: z.string(),
+  toIssueDate: z.string(),
+  changed: z
+    .array(z.string())
+    .describe(`citations whose text changed — capped at ${CHANGE_LIST_CAP}`),
+  added: z
+    .array(z.string())
+    .describe(`citations added at the to-date — capped at ${CHANGE_LIST_CAP}`),
+  removed: z
+    .array(z.string())
+    .describe(`citations removed by the to-date — capped at ${CHANGE_LIST_CAP}`),
+  truncated: z
+    .boolean()
+    .describe(`true when any citation list was cut at the ${CHANGE_LIST_CAP}-citation cap`),
+});
+
 type SearchOutput = z.infer<typeof searchOutputSchema>;
 type SectionOutput = z.infer<typeof sectionOutputSchema>;
 type BrowseOutput = z.infer<typeof browseOutputSchema>;
 type StatusOutput = z.infer<typeof statusOutputSchema>;
 type ListPartsOutput = z.infer<typeof listPartsOutputSchema>;
 type HealthOutput = z.infer<typeof healthOutputSchema>;
+type ChangeReportOutput = z.infer<typeof changeReportOutputSchema>;
 
 function textContent(payload: unknown): string {
   return JSON.stringify(payload, null, 2);
 }
 
-/** Register all tools on the server. */
-export function registerTools(server: McpServer, service: CFRService, logger: Logger): void {
+/** Register all tools on the server; `deps.ecfr` gates the diff tool. */
+export function registerTools(
+  server: McpServer,
+  service: CFRService,
+  logger: Logger,
+  deps?: { readonly ecfr?: EcfrApi },
+): void {
   server.registerTool(
     'search_regulations',
     {
@@ -401,4 +442,61 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
       }
     },
   );
+
+  // Registered only when an eCFR client is injected: without one there is no
+  // honest way to serve a point-in-time diff, so the tool stays off the
+  // server's tools/list instead of existing as a guaranteed failure.
+  const ecfr = deps?.ecfr;
+  if (ecfr !== undefined) {
+    server.registerTool(
+      'diff_issues',
+      {
+        title: 'Diff two eCFR issue dates',
+        description:
+          'Provision-level diff of Title 38 between two eCFR issue dates: which citations changed, ' +
+          'which were added, and which were removed between `from_date` and `to_date` ' +
+          '(both YYYY-MM-DD, both required — this tool has no default-to; for ' +
+          '"what changed since my index was built" run `cfr-free diff <from>` locally, ' +
+          "which resolves `to` from the index issue date). Stateless: both dates' full-title XML is " +
+          'fetched from eCFR and hashed per citation on the fly — no local index needed, no cache. ' +
+          `Each citation list is capped at ${CHANGE_LIST_CAP} entries; \`truncated: true\` means at least ` +
+          'one list was cut. Identical dates or an impossible calendar date (e.g. month 13) are ' +
+          'rejected as errors before any fetch.',
+        inputSchema: {
+          from_date: dateArgSchema,
+          to_date: dateArgSchema,
+        },
+        outputSchema: changeReportOutputSchema,
+        annotations: DIFF_ANNOTATIONS,
+      },
+      async (args) => {
+        try {
+          const diff = await diffIssues({ ecfr, logger }, args.from_date, args.to_date);
+          const structuredContent: ChangeReportOutput = {
+            fromIssueDate: diff.fromIssueDate,
+            toIssueDate: diff.toIssueDate,
+            changed: [...diff.changed.slice(0, CHANGE_LIST_CAP)],
+            added: [...diff.added.slice(0, CHANGE_LIST_CAP)],
+            removed: [...diff.removed.slice(0, CHANGE_LIST_CAP)],
+            truncated:
+              diff.changed.length > CHANGE_LIST_CAP ||
+              diff.added.length > CHANGE_LIST_CAP ||
+              diff.removed.length > CHANGE_LIST_CAP,
+          };
+          return {
+            content: [{ type: 'text', text: textContent(structuredContent) }],
+            structuredContent,
+          };
+        } catch (error) {
+          logger.error('tool diff_issues failed', {
+            message: error instanceof Error ? error.message : String(error),
+          });
+          return {
+            content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
+            isError: true,
+          };
+        }
+      },
+    );
+  }
 }

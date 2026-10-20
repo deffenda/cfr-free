@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { CFRService, ServiceError } from '../src/core/service.js';
 import { StructureError } from '../src/core/structure.js';
-import { FIXTURE_SECTIONS, FIXTURE_STRUCTURE, makeSection, openTempStore } from './helpers.js';
+import type { EcfrApi } from '../src/core/ecfr.js';
+import {
+  createTestLogger,
+  FIXTURE_SECTIONS,
+  FIXTURE_STRUCTURE,
+  makeSection,
+  openTempStore,
+} from './helpers.js';
 
 function withService(fn: (service: CFRService) => void): void {
   const temp = openTempStore();
@@ -832,6 +839,79 @@ describe('CFRService historical-version guidance', () => {
       const search = new CFRService(temp.store, 7).search({ query: 'mental disorder' });
       expect(search.notice).toContain('point-in-time');
       expect(search.notice).toContain('/on/<YYYY-MM-DD>/title-38/section-<citation>');
+    } finally {
+      temp.cleanup();
+    }
+  });
+});
+
+describe('CFRService.diffBetween (diff facade)', () => {
+  const FROM_DATE = '2026-01-01';
+  const TO_DATE = '2026-06-01';
+
+  // Minimal full-title XML, same shape the core diff parses (see
+  // test/diff.test.ts): one amended section between the two dates.
+  const FROM_XML = `<ECFR><DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD><DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD><DIV5 N="4" TYPE="PART"><HEAD>Part 4</HEAD><DIV8 N="4.125" TYPE="SECTION"><HEAD>§ 4.125 Test.</HEAD><P>Original body.</P></DIV8></DIV5></DIV3></DIV1>`;
+  const TO_XML = FROM_XML.replace('Original body.', 'Amended body.');
+
+  /** Offline eCFR stub: serves the fixture XML for any requested date. */
+  function stubEcfr(requested: string[]): EcfrApi {
+    return {
+      getFullTitleXml: async (issueDate: string) => {
+        requested.push(issueDate);
+        return issueDate === FROM_DATE ? FROM_XML : TO_XML;
+      },
+    } as unknown as EcfrApi;
+  }
+
+  it('delegates to the core diff through the injected client and logger', async () => {
+    const temp = openTempStore();
+    try {
+      const requested: string[] = [];
+      const service = new CFRService(temp.store, 7, stubEcfr(requested), createTestLogger());
+      const report = await service.diffBetween(FROM_DATE, TO_DATE);
+      expect(report.fromIssueDate).toBe(FROM_DATE);
+      expect(report.toIssueDate).toBe(TO_DATE);
+      expect(report.changed).toEqual(['4.125']);
+      expect(report.added).toEqual([]);
+      expect(report.removed).toEqual([]);
+      expect(requested).toEqual([FROM_DATE, TO_DATE]);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('fails closed with a mapped invalid_input when no eCFR client was injected', async () => {
+    const temp = openTempStore();
+    try {
+      // Plain 2-arg construction (tests, index readers): the facade must not
+      // reach into an undefined client — it throws a clean ServiceError the
+      // HTTP layer maps through statusFor instead of crashing the handler.
+      const service = new CFRService(temp.store, 7);
+      const error = await service.diffBetween(FROM_DATE, TO_DATE).then(
+        () => {
+          throw new Error('expected the promise to reject');
+        },
+        (thrown: unknown) => thrown,
+      );
+      expect(error).toBeInstanceOf(ServiceError);
+      expect((error as ServiceError).code).toBe('invalid_input');
+      expect((error as ServiceError).message).toBe('diff unavailable — no eCFR client injected');
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('keeps core validation semantics on the facade (identical dates, no fetch)', async () => {
+    const temp = openTempStore();
+    try {
+      const requested: string[] = [];
+      const service = new CFRService(temp.store, 7, stubEcfr(requested), createTestLogger());
+      await expect(service.diffBetween(FROM_DATE, FROM_DATE)).rejects.toMatchObject({
+        name: 'ServiceError',
+        code: 'invalid_input',
+      });
+      expect(requested).toEqual([]);
     } finally {
       temp.cleanup();
     }

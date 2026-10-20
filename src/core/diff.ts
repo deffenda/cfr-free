@@ -23,10 +23,34 @@ export interface IssueDiff {
   readonly removed: readonly string[];
 }
 
-/** Validate an operator-supplied date against eCFR's `YYYY-MM-DD` shape. */
+/**
+ * Maximum days a month can hold in ANY year — a coarse pre-fetch rejection
+ * only. February's real limit is year-specific (28 vs 29); computing that is
+ * a full calendar validator, and real per-month day counts stay upstream
+ * authority: eCFR rejects impossible dates (e.g. 2025-02-29) on the fetch,
+ * and this check deliberately does not duplicate that logic. What lives here
+ * is the set no year could ever produce: month outside 01–12, or a day past
+ * the month's maximum (2026-13-01, 2026-02-30, 2026-04-31) — shapes that
+ * would otherwise burn a network round-trip before failing upstream.
+ */
+const MAX_DAYS_BY_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
+
+/**
+ * Validate an operator-supplied date against eCFR's `YYYY-MM-DD` shape plus a
+ * plausible month/day — `ServiceError` (`invalid_input`) BEFORE any fetch.
+ */
 function assertIssueDate(value: string, label: string): string {
   if (!isIssueDateString(value)) {
     throw new ServiceError(`${label} must be a YYYY-MM-DD date, got: ${value}`, 'invalid_input');
+  }
+  const month = Number(value.slice(5, 7));
+  const day = Number(value.slice(8, 10));
+  const maxDay = month >= 1 && month <= 12 ? (MAX_DAYS_BY_MONTH[month - 1] ?? 0) : 0;
+  if (day < 1 || day > maxDay) {
+    throw new ServiceError(
+      `${label} must be a YYYY-MM-DD date with month 01-12 and a day within that month, got: ${value}`,
+      'invalid_input',
+    );
   }
   return value;
 }
@@ -51,7 +75,8 @@ function hashesByCitation(xml: string, issueDate: string): Map<string, string> {
  * (sync's structure validation guards index integrity; a textual diff of two
  * parsed documents does not need it).
  *
- * @throws {ServiceError} (`invalid_input`) for malformed or identical dates.
+ * @throws {ServiceError} (`invalid_input`) for malformed, impossible
+ *   (out-of-range month/day), or identical dates — all before any fetch.
  * @throws {SyncError} when either date parses to zero sections.
  */
 export async function diffIssues(
