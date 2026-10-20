@@ -213,6 +213,15 @@ describe('Titan HTTP API', () => {
     expect(headers.get('cache-control')).toBe('public, max-age=3600');
   });
 
+  it('resolves the dotted citation the search hit displays (P1-03)', async () => {
+    // The displayed legal form must be readable straight back over HTTP.
+    const { status, body } = await get(
+      '/api/v1/sections/' + encodeURIComponent('38 C.F.R. \u00a7 4.125'),
+    );
+    expect(status).toBe(200);
+    expect(body['citation']).toBe('4.125');
+  });
+
   it('surfaces citedBy backlinks on the wire', async () => {
     // Self-contained store: the shared fixture seed has no citation edges, so
     // a real backlink needs its own two-section index (4.131 → § 4.130).

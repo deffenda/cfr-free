@@ -33,7 +33,7 @@ src/
                       export, ensure-index, refresh-scheduler)
   core/
     changes.ts        sync change report: hash diff between syncs
-    citations.ts      parse/normalize "38 CFR 4.125", "§ 4.125", "4.125"
+    citations.ts      parse/normalize "38 CFR 4.125", "38 C.F.R. § 4.125", "§ 4.125", "4.125"
     ecfr.ts           eCFR endpoints: dates, structure, full-title XML, search
     http-client.ts    fetch wrapper: timeout, size cap, gzip, friendly errors
     references.ts     cross-reference extraction for search results
@@ -115,7 +115,7 @@ Machine-readable contract: [`docs/openapi.yaml`](openapi.yaml) (OpenAPI 3.1, der
 ## 6. MCP tools (all read-only annotations)
 
 1. `search_regulations(query, page?, per_page?, part?)` → ranked hits with citations, snippets, bm25 scores and the query terms visible in each hit (`matches`). A query that _is_ a citation (`4.130`, `38 CFR 4.16`, `§ 3.350(a)`) pins that exact section as the first hit (page 1 only; totals include the pin on every page); quoted spans search as exact phrases; curated claims acronyms (ptsd, tdiu, smc, mst, dic, tbi, hlr, bva, nsc) expand to their regulatory phrases; every response carries the `indexIssueDate`/`indexStale`/`notice` freshness envelope and hits carry `citationDisplay` + `sourceUrl`.
-2. `get_section(citation)` → accepts `4.125`, `§ 4.125`, `38 CFR 4.125`; returns markdown text, heading, path, issue date, eCFR source URL, and `references[]` (every `§`/`38 CFR` cross-cite in the text with a local-availability flag). A citation that misses the index returns actionable guidance instead of a bare 404: reserved/removed/outside-Title-38 possibilities, the eCFR verify link, and indexed sections that mention it. Stale-index notices also link the eCFR point-in-time form (`/on/<date>/title-38/section-<citation>`) for date-of-claim/CUE analysis.
+2. `get_section(citation)` → accepts `4.125`, `§ 4.125`, `38 CFR 4.125` and the dotted legal form the product itself displays (`38 C.F.R. § 4.125` — a pasted citation must resolve to the provision it was copied from; P1-03); returns markdown text, heading, path, issue date, eCFR source URL, and `references[]` (every `§`/`38 CFR` cross-cite in the text with a local-availability flag). A citation that misses the index returns actionable guidance instead of a bare 404: reserved/removed/outside-Title-38 possibilities, the eCFR verify link, and indexed sections that mention it. Stale-index notices also link the eCFR point-in-time form (`/on/<date>/title-38/section-<citation>`) for date-of-claim/CUE analysis.
 3. `browse_title38(chapter?, part?, subpart?)` → structure children at that level.
 4. `index_status()` → freshness (issue date, synced at, staleness vs. `CFR_MAX_AGE_DAYS`, structure-drift flag) plus `lastChanges`: what the most recent sync amended/added/removed at the provision level (per-citation sha256 diff across the wholesale rebuild, capped lists, `baseline` flag on first sync, `parserChanged` guard against re-extraction noise).
 5. `list_parts()` → every part present in the index with its structure-tree title and section/appendix counts.

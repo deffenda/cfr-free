@@ -15,7 +15,8 @@ function collapseWhitespace(value: string): string {
  * Parse user-supplied citation text into a canonical lookup key.
  *
  * Accepts bare citations (`4.125`), `§`-prefixed forms (`§ 4.125`), full
- * citations (`38 CFR 4.125`), and appendix names (`Appendix A to Part 4`).
+ * citations (`38 CFR 4.125`, `38 C.F.R. § 4.125` — the dotted legal form
+ * the product itself emits), and appendix names (`Appendix A to Part 4`).
  *
  * @returns `null` when the input is not a recognizable citation.
  */
@@ -27,7 +28,15 @@ export function normalizeCitation(input: string): ParsedCitation | null {
 
   // Two flat patterns instead of one nested-quantifier pattern: identical
   // behavior, and linear-time for ReDoS checkers (eslint-plugin-security).
-  const withoutTitle = trimmed.replace(/^38\s+cfr\.?\s*/i, '').replace(/^cfr\.?\s*/i, '');
+  //
+  // The dotted form matters: `displayCitation` emits `38 C.F.R. § 4.130`
+  // (the paste-ready legal form), so the parser must accept exactly what
+  // the product hands the user — otherwise copying a citation the tool
+  // printed back into the tool yields "invalid input" (review finding
+  // P1-03). The optional dots are per letter and flat, so no ReDoS shape.
+  const withoutTitle = trimmed
+    .replace(/^38\s+c\.?f\.?r\.?\s*/i, '')
+    .replace(/^c\.?f\.?r\.?\s*/i, '');
   const withoutSection = withoutTitle.replace(/^§\s*/, '');
   const candidate = withoutSection.replace(/\.$/, '').trim();
   if (!SECTION_RE.test(candidate)) return null;
