@@ -245,6 +245,11 @@ async function main() {
       const before = parts[i - 1];
       const after = parts[i];
       if (before.length === 0 || after.length === 0) continue;
+      // A label block ("Footnote:", "Extract:") is a deliberate separator,
+      // not a split phrase: the boundary BEFORE it is prose-then-label, so
+      // skip it. (The label is the `after` side of that boundary — the
+      // earlier form checked the `before` side and never fired.)
+      if (after === 'Footnote:' || after === 'Extract:') continue;
       const left = before[before.length - 1];
       const right = after[0];
       // Both sides must look like the middle of a word or a bracket group.
