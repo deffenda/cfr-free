@@ -468,3 +468,112 @@ describe('UI copy-a-citation (M5 slice 1)', () => {
     expect(harness.element('copy-status').textContent).toContain('blocked');
   });
 });
+
+describe('UI redline view (M5 slice 2)', () => {
+  const HUNK = {
+    fromLine: 1,
+    toLine: null,
+    type: 'del',
+    text: 'Old line.',
+  };
+  const ADDED = {
+    fromLine: null,
+    toLine: 1,
+    type: 'add',
+    text: 'New line.',
+  };
+
+  function redlineBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      fromIssueDate: '2026-01-01',
+      toIssueDate: '2026-06-01',
+      citation: '4.130',
+      status: 'changed',
+      fromText: 'Old line.\n',
+      toText: 'New line.\n',
+      hunks: [HUNK, ADDED],
+      coarse: false,
+      ...overrides,
+    };
+  }
+
+  async function submitRedline(harness: Harness): Promise<void> {
+    harness.element('redline-from').value = '2026-01-01';
+    harness.element('redline-to').value = '2026-06-01';
+    harness.element('redline-citation').value = '4.130';
+    harness.element('redline-form').dispatch('submit', { preventDefault: () => undefined });
+    await harness.flush();
+  }
+
+  it('requests the redline for the entered date pair and citation', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/redline');
+    await submitRedline(harness);
+    expect(harness.calls[0]?.url).toBe(
+      '/api/v1/redline?from=2026-01-01&to=2026-06-01&citation=4.130',
+    );
+  });
+
+  it('renders the hunks in the CLI shape', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/redline');
+    await submitRedline(harness);
+    harness.calls[0]?.respond(true, redlineBody());
+    await harness.flush();
+
+    expect(harness.element('redline-heading').textContent).toBe('Section 4.130: changed');
+    expect(harness.element('redline-meta').textContent).toContain('from 2026-01-01 to 2026-06-01');
+    const output = harness.element('redline-output').textContent;
+    expect(output).toContain('L1 | L- | - Old line.');
+    expect(output).toContain('L- | L1 | + New line.');
+  });
+
+  it('shows the coarse flag so a whole-block diff is not read as a line diff', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/redline');
+    await submitRedline(harness);
+    harness.calls[0]?.respond(true, redlineBody({ coarse: true }));
+    await harness.flush();
+    expect(harness.element('redline-meta').textContent).toContain('coarse diff');
+  });
+
+  it('reports an unchanged provision plainly', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/redline');
+    await submitRedline(harness);
+    harness.calls[0]?.respond(true, redlineBody({ status: 'unchanged', hunks: [] }));
+    await harness.flush();
+    expect(harness.element('redline-output').textContent).toContain('No text difference');
+  });
+
+  it('surfaces an upstream error instead of an empty diff', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/redline');
+    await submitRedline(harness);
+    harness.calls[0]?.respond(false, { error: 'not_found', message: '4.999 is not in Title 38' });
+    await harness.flush();
+    expect(harness.element('redline-error').textContent).toContain('not_found');
+    expect(harness.element('redline-output').textContent).toBe('');
+  });
+
+  it('requires a date pair and a citation before fetching', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/redline');
+    harness.element('redline-form').dispatch('submit', { preventDefault: () => undefined });
+    await harness.flush();
+    expect(harness.calls).toHaveLength(0);
+    expect(harness.element('redline-error').textContent).toContain('required');
+  });
+
+  it('does not let a late response repaint a view the user left (P1-02 ownership)', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/redline');
+    await submitRedline(harness);
+    // The user navigates away before the redline lands.
+    await harness.navigate('#/search?q=alpha');
+    harness.calls[0]?.respond(true, redlineBody());
+    await harness.flush();
+    expect(harness.element('redline-heading').textContent).toBe('');
+    expect(harness.element('redline-output').textContent).toBe('');
+  });
+});

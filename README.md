@@ -21,6 +21,8 @@ keys, no telemetry — one Node process and one SQLite file.
   `[image content not included: <path>]` marker where the graphic belongs,
   so a missing table is never mistaken for complete text. Nothing is
   fetched or transcribed — the service stays fully offline.
+- **Read-only web UI** (search, browse, section reads, line-level redlines,
+  copy-a-citation) over the same JSON API.
 - **MCP server** with nine read-only tools any MCP client can use: six
   offline index-backed ones (`search_regulations`, `get_section`,
   `browse_title38`, `index_status`, `list_parts`, `health`) plus three that
