@@ -122,8 +122,23 @@ function elementText(block, tag) {
   // EXACT tag name: `<FP>` must not match `<FP-1>`/`<FP-2>` (a word
   // boundary after "FP" matches the hyphen), or the capture would span
   // list items and the fragment would never be found in the output.
-  const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(`<${escaped}(?![-\\w])[^>]*>([\\s\\S]*?)</${escaped}>`, 'gi');
+  // A LITERAL pattern for THIS element name only — not built from the
+  // `tag` variable (that trips the repo's ReDoS linter, semgrep
+  // detect-non-literal-regexp, which the pre-commit scan enforces) and
+  // not one shared alternation (an alternation closes on the first
+  // matching close tag and can truncate).
+  const LITERAL_PATTERNS = {
+    FP: /<FP\b[^>]*>([\s\S]*?)<\/FP>/gi,
+    NOTE: /<NOTE\b[^>]*>([\s\S]*?)<\/NOTE>/gi,
+    EDNOTE: /<EDNOTE\b[^>]*>([\s\S]*?)<\/EDNOTE>/gi,
+    HD2: /<HD2\b[^>]*>([\s\S]*?)<\/HD2>/gi,
+    EXTRACT: /<EXTRACT\b[^>]*>([\s\S]*?)<\/EXTRACT>/gi,
+    CITA: /<CITA\b[^>]*>([\s\S]*?)<\/CITA>/gi,
+    SECAUTH: /<SECAUTH\b[^>]*>([\s\S]*?)<\/SECAUTH>/gi,
+    TFOOT: /<TFOOT\b[^>]*>([\s\S]*?)<\/TFOOT>/gi,
+  };
+  const pattern = LITERAL_PATTERNS[tag];
+  if (pattern === undefined) return out;
   let match;
   while ((match = pattern.exec(block)) !== null) {
     // Tags become NOTHING (not a space): the parser concatenates inline
@@ -151,8 +166,11 @@ function elementText(block, tag) {
  * hyphen), and `<E>` must not count `<ECFR>`.
  */
 function countTag(xml, tag) {
-  const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return [...xml.matchAll(new RegExp(`<${escaped}(?![-\\w])`, 'gi'))].length;
+  let count = 0;
+  for (const match of xml.matchAll(/<([A-Za-z][\w-]*)(?:\s[^>]*)?>/g)) {
+    if (match[1] === tag) count += 1;
+  }
+  return count;
 }
 
 async function main() {
@@ -178,12 +196,17 @@ async function main() {
     let lost = 0;
     for (const entryTag of entry.tags) occurrences += countTag(xml, entryTag);
 
-    const blockPattern = /<DIV8 N="([^"]+)"[^>]*>/g;
+    // Sections AND appendices both carry these constructs (source credits,
+    // authority notes, sub-headings and images all appear in appendices);
+    // scan DIV8 and DIV9, closing each block on its OWN tag.
+    const blockPattern = /<DIV(?:8|9) N="([^"]+)"[^>]*>/g;
     let match;
     while ((match = blockPattern.exec(xml)) !== null) {
       const citation = match[1];
       const start = match.index;
-      const end = xml.indexOf('</DIV8>', start);
+      const end8 = xml.indexOf('</DIV8>', start);
+      const end9 = xml.indexOf('</DIV9>', start);
+      const end = end9 > 0 && (end8 === -1 || end9 < end8) ? end9 : end8;
       const block = xml.slice(start, end === -1 ? undefined : end);
 
       // An image has no inner text: the thing to survive is the marker the
