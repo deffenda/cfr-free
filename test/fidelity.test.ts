@@ -413,6 +413,23 @@ describe('construct classes survive the parser (M1 inventory, behaviour only)', 
     expect(section?.text).not.toContain('For\n');
   });
 
+  it('never inlines a paragraph that sits inside a container with own text (M1(b1) drift guard)', () => {
+    // The upstream document has no such shape today (measured: zero
+    // containers mix own text with an element-bearing child), but the
+    // document is mutable — so the rule must not depend on that. A
+    // paragraph is never part of a phrase: it stays its own block.
+    const xml =
+      '<ECFR><DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD>' +
+      '<DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD>' +
+      '<DIV5 N="4" TYPE="PART"><HEAD>Part 4</HEAD>' +
+      '<DIV8 N="1.1" TYPE="SECTION"><HEAD>&#xA7; 1.1 Test.</HEAD>' +
+      '<NOTE>Leading text<P>Paragraph inside.</P>trailing text</NOTE>' +
+      '</DIV8></DIV5></DIV3></DIV1></ECFR>';
+    const [section] = parseTitleXml(xml);
+    expect(section?.text).toContain('Leading text\n\nParagraph inside.');
+    expect(section?.text).not.toContain('Leading textParagraph inside.');
+  });
+
   it('keeps block structure as blocks (the fix must not flatten it)', () => {
     // A note's heading and its paragraph are separate BLOCKS upstream and
     // must stay separate: the inline fix must not merge block structure.

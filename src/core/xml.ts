@@ -341,14 +341,28 @@ function renderBlocks(nodes: readonly unknown[], depth: number): Rendered {
  * inline-only children (the case this fixes), and NO container mixes own
  * text with an element-bearing child — so this test needs no tag list.
  */
+const BLOCK_TAGS: ReadonlySet<string> = new Set([
+  'P',
+  'FP',
+  'HEAD',
+  'TABLE',
+  'CITA',
+  'SECAUTH',
+  'NOTE',
+  'EDNOTE',
+  'EXTRACT',
+]);
+
 function hasOnlyInlineChildren(children: readonly unknown[]): boolean {
   for (const child of children) {
     if (!isOrderNode(child)) continue;
     for (const [key, value] of Object.entries(child)) {
       if (key === ATTR_KEY || key === TEXT_KEY) continue;
       if (!Array.isArray(value)) continue;
+      // These never render as part of a phrase, whatever their content.
+      if (BLOCK_TAGS.has(key)) return false;
       // `value` is THIS child element's content. If that content holds
-      // another element, the child is block-ish (a P, a TABLE, a NOTE).
+      // another element, the child is block-ish (a TABLE, a NOTE).
       for (const grandchild of value) {
         if (!isOrderNode(grandchild)) continue;
         for (const [gkey, gvalue] of Object.entries(grandchild)) {

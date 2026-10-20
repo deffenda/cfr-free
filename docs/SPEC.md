@@ -72,7 +72,13 @@ split by a blank line around the inline element it contains — upstream
 line. A container that holds BLOCK children (a `<P>`, `<TABLE>`, `<NOTE>`'s
 paragraph, the `DIV` hierarchy) keeps its block structure: a note's heading
 and its paragraph stay separate blocks. The rule is structural (inline
-elements hold text only), not a tag list.
+elements hold text only), not a tag list, with one explicit guard: a child
+that is a `P`, `FP`, `HEAD`, `TABLE`, `CITA`, `SECAUTH`, `NOTE`, `EDNOTE` or
+`EXTRACT` is never part of a phrase, whatever its content. The guard makes
+the rule independent of the current document — a future eCFR document that
+places a paragraph inside a container with its own text keeps that
+paragraph as its own block instead of silently folding it into a
+phrase.
 
 **Image content (P1-01):** some provisions publish their rating tables as `<img>` elements (15 in the 2026-10-16 document, across 9 provisions — 1.9, 4.71, 4.71a, 4.76a, 4.77, 4.85, 17.610, 45.605, 59.50). The parser cannot include image content offline and must never drop it silently: every `<img>` — inline in a paragraph, nested in a container, or a direct content child — is replaced IN PLACE by the explicit marker `[image content not included: <path>]` in BOTH the text and the markdown representation. Only a vetted relative eCFR graphics path (`/graphics/<file>`, safe charset, no traversal) is named; any other source (scheme-qualified, host-qualified, outside `/graphics/`, or missing) yields `[image content not included: unrecognized image source]` and is never echoed. Nothing is fetched, OCR'd, or transcribed: the service stays fully offline, and a matching section count never implies complete textual coverage — the sync report states how many provisions carry the marker (`meta.image_content_sections`).
 
