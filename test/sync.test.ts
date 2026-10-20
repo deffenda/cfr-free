@@ -125,7 +125,7 @@ describe('syncIndex', () => {
     const deps = makeDeps(makeFetch());
     try {
       await syncIndex(deps);
-      // getMeta returns null for a missing key (store.ts:498), not undefined.
+      // getMeta returns null for a missing key (store.ts:609), not undefined.
       expect(deps.store.getMeta('up_to_date_as_of')).toBeNull();
       expect(deps.store.getMeta('title_name')).toBeNull();
       expect(deps.store.getMeta('sections_count')).toBeNull();

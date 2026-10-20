@@ -25,9 +25,10 @@ export async function runDiffCommand(
 ): Promise<IssueDiff> {
   let resolvedTo = toDate;
   if (resolvedTo === undefined) {
-    // Mirror export's no-index pre-check: Store.open creates the file, so
-    // opening a never-synced path would fabricate an empty index instead of
-    // reporting the absence.
+    // Store.open creates the file (DatabaseSync opens/creates), so a
+    // missing path must be reported before opening — otherwise the first
+    // `diff <from>` without an index would fabricate an empty index and read
+    // no issue date from it, producing a confusing error instead of this one.
     if (!existsSync(config.indexPath)) {
       throw new CommandError(
         `no index at ${config.indexPath} — run \`cfr-free sync\` first`,
