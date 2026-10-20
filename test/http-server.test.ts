@@ -600,7 +600,7 @@ describe('Titan web UI routes', () => {
   // The exact policy string pinned for the HTML document (UI_CSP in
   // src/titan/ui.ts): any drift on either side must fail here.
   const EXPECTED_CSP =
-    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
   const UI_ROUTES = [
     { path: '/', contentType: 'text/html; charset=utf-8' },
@@ -652,13 +652,43 @@ describe('Titan web UI routes', () => {
     expect(html).toContain('<script src="/ui.js"></script>');
   });
 
-  it('pinned posture: ui.js never touches innerHTML/outerHTML, insertAdjacentHTML, or document.write', async () => {
+  it('pinned posture: ui.js never touches innerHTML/outerHTML, insertAdjacentHTML, document.write, style props, or on*= handlers', async () => {
     const { text: uiJs } = await fetchUi('/ui.js');
     // All dynamic content goes through createElement/textContent; any of
     // these sinks would reopen an HTML-injection path for index content.
     expect(uiJs).not.toMatch(/(inner|outer)HTML/);
     expect(uiJs).not.toContain('insertAdjacentHTML');
     expect(uiJs).not.toContain('document.write');
+    // The JS side of the posture too: no style mutation, no property-assigned
+    // event handlers (the HTML pin covers the markup side of on*=/style=).
+    expect(uiJs).not.toMatch(/\.(style|on[a-z-]+)\s*=/);
+  });
+
+  it('pinned posture: the served HTML carries both view tabs and the browse view shell', async () => {
+    const { text: html } = await fetchUi('/');
+    // Both tab affordances live in the header's Views nav, as plain hash links.
+    const tabs = (html.match(/<nav[^>]*aria-label="Views"[^>]*>[\s\S]*?<\/nav>/) ?? [''])[0];
+    expect(tabs).toContain('<a href="#/search">Search</a>');
+    expect(tabs).toContain('<a href="#/browse">Browse</a>');
+    // The browse view's static shell (error line, breadcrumb nav, heading, list).
+    expect(html).toContain('id="browse-view"');
+    expect(html).toContain('id="browse-crumbs"');
+    expect(html).toContain('id="browse-list"');
+  });
+
+  it('pinned posture: ui.js pins both hash routes and builds the /api/v1/browse URL from all three query names', async () => {
+    const { text: uiJs } = await fetchUi('/ui.js');
+    // The two hash routes that must resolve in parseHash (unknown hashes fall
+    // through to search), and the browse URL builder with chapter/part/subpart.
+    expect(uiJs).toContain("'#/search'");
+    expect(uiJs).toContain("'#/browse'");
+    expect(uiJs).toContain('function browseUrl(level) {');
+    expect(uiJs).toContain("if (level.chapter !== '') params.set('chapter', level.chapter);");
+    expect(uiJs).toContain("if (level.part !== '') params.set('part', level.part);");
+    expect(uiJs).toContain("if (level.subpart !== '') params.set('subpart', level.subpart);");
+    expect(uiJs).toContain("return '/api/v1/browse' + (query === '' ? '' : '?' + query);");
+    // Leaf links go through the section reader route — never raw hrefs.
+    expect(uiJs).toContain('leaf.href = sectionHref(String(entry.identifier));');
   });
 
   it('keeps 404 for anything that is not an exact UI route', async () => {

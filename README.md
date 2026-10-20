@@ -156,7 +156,7 @@ non-loopback address you must put it behind your own reverse proxy/auth
 (`CFR_ALLOW_REMOTE=1` is required to allow that, as an explicit opt-in).
 
 The serve root `/` also serves a **read-only web UI** (search + section
-reader over the same JSON API, hash-routed) — no auth, loopback bind by
+reader with chapter/part browse over the same JSON API, hash-routed) — no auth, loopback bind by
 default like the rest of the surface.
 
 ## Configuration
