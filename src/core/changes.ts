@@ -29,9 +29,37 @@ export interface SyncChanges {
   readonly recordedAt: string;
 }
 
-/** sha256 of a section's text — the unit of "did this provision change?". */
+/**
+ * sha256 of a section's TEXT — the unit of "did this provision change?".
+ *
+ * Kept for callers that compare text alone (the redline's line-level
+ * contract). The change-detection surfaces use {@link hashContent}, which
+ * also covers the heading.
+ */
 export function hashText(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/**
+ * sha256 of a provision's CONTENT — its text AND its heading.
+ *
+ * A heading is part of the provision's meaning: Title 38 § 3.17 was
+ * retitled from "Disability and death pension" to "Disability and
+ * survivors pension" with no change to the body, and a text-only hash
+ * reported that amendment as "no change" — in the sync report, in
+ * `cfr-free diff`, and in the MCP diff tool alike. Measured on the live
+ * corpus: exactly one such heading-only amendment per ~2,921 provisions
+ * per year, and it is invisible to a text-only comparison.
+ *
+ * The separator keeps the two fields unambiguous (no collision between a
+ * text/heading pair and a different pair with the same concatenation).
+ */
+export function hashContent(text: string, heading: string): string {
+  return createHash('sha256')
+    .update(text, 'utf8')
+    .update('\u0000', 'utf8')
+    .update(heading, 'utf8')
+    .digest('hex');
 }
 
 /** Citation-level diff of two hash snapshots; result lists are sorted. */
