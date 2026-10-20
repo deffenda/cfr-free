@@ -95,6 +95,18 @@ its text-only contract (`redline` is a text diff by definition); a
 heading-only amendment is surfaced by the change-detection surfaces, not
 by the redline.
 
+**Point-in-time reads (M2(c)):** `cfr-free historical <at> <citation>`
+and the MCP tool `get_section_at` return one provision AS IT STOOD at a
+requested date. eCFR serves the revision in force on that date, so a date
+that is not itself an issue date resolves to the revision that was in
+force then. The upstream does NOT report which issue date it served, so
+the read NAMES THE REQUESTED DATE and never a served-revision date. The
+response also carries the dated eCFR URL for the requested date — the
+same revision the text came from. eCFR's point-in-time archive starts at
+2017-01-01 (measured 2026-10-20: the versioner answers 404 before that);
+a date outside the archive is a clean not_found, and the date is
+validated BEFORE any fetch.
+
 **Dated source URL (M2(a)):** every section response carries TWO links to
 the same provision on ecfr.gov: `sourceUrl` points at the CURRENT text
 (`/current/title-38/section-<citation>`) for navigation and verification,

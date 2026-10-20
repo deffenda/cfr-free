@@ -21,10 +21,11 @@ keys, no telemetry — one Node process and one SQLite file.
   `[image content not included: <path>]` marker where the graphic belongs,
   so a missing table is never mistaken for complete text. Nothing is
   fetched or transcribed — the service stays fully offline.
-- **MCP server** with eight read-only tools any MCP client can use: six
+- **MCP server** with nine read-only tools any MCP client can use: six
   offline index-backed ones (`search_regulations`, `get_section`,
-  `browse_title38`, `index_status`, `list_parts`, `health`) plus two that
-  fetch the live eCFR versioner per call (`diff_issues`, `redline`).
+  `browse_title38`, `index_status`, `list_parts`, `health`) plus three that
+  fetch the live eCFR versioner per call (`diff_issues`, `redline`,
+  `get_section_at` — one provision as it stood at a date).
 - **HTTP JSON API** for scripts and apps: search, read sections, browse the
   CFR hierarchy, health check, Prometheus metrics.
 - **Freshness tracking**: the index records the eCFR issue date it was built

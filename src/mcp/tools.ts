@@ -5,6 +5,7 @@ import { CHANGE_LIST_CAP } from '../core/changes.js';
 import { diffIssues } from '../core/diff.js';
 import type { EcfrApi } from '../core/ecfr.js';
 import { redlineSection } from '../core/redline.js';
+import { historicalSection } from '../core/historical.js';
 import type { CFRService } from '../core/service.js';
 import { clientSafeMessage } from './client-safe.js';
 
@@ -135,6 +136,26 @@ const dateArgSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
   .describe('eCFR issue date, YYYY-MM-DD');
+
+/**
+ * The point-in-time read's payload: the REQUESTED date and the text as it
+ * stood then. eCFR does not report which issue date it served, so no
+ * served-revision date is claimed.
+ */
+const historicalOutputSchema = z.object({
+  requestedDate: z.string(),
+  citation: z.string(),
+  kind: z.enum(['section', 'appendix']),
+  heading: z.string(),
+  chapter: z.string().nullable(),
+  part: z.string().nullable(),
+  subpart: z.string().nullable(),
+  path: z.string(),
+  text: z.string(),
+  markdown: z.string(),
+  sourceUrl: z.string(),
+  sourceUrlAtRequestedDate: z.string(),
+});
 
 const changeReportOutputSchema = z.object({
   fromIssueDate: z.string(),
@@ -476,6 +497,64 @@ export function registerTools(
   // the server's tools/list instead of existing as guaranteed failures.
   const ecfr = deps?.ecfr;
   if (ecfr !== undefined) {
+    server.registerTool(
+      'get_section_at',
+      {
+        title: 'Read one provision as it stood at a date',
+        description:
+          'One Title 38 provision as it stood at a requested date (YYYY-MM-DD, required). ' +
+          'eCFR serves the revision IN FORCE on that date, so a date that is not itself an ' +
+          'issue date resolves to the revision that was in force then; the upstream does not ' +
+          'report which issue date it served, so the response names the REQUESTED date and ' +
+          'never a served-revision date. Stateless: the revision is fetched from eCFR on ' +
+          "every call — no local index, no cache. eCFR's point-in-time archive starts at " +
+          '2017-01-01; a date before that is rejected as not_found. Use this for ' +
+          'date-of-claim and CUE questions ("what did this section say when the claim was ' +
+          'filed?"); for the CURRENT text use get_section.',
+        inputSchema: {
+          at_date: dateArgSchema,
+          citation: z
+            .string()
+            .min(1)
+            .max(120)
+            .describe('the citation to read, e.g. "38 CFR 4.130"'),
+        },
+        outputSchema: historicalOutputSchema,
+        annotations: DIFF_ANNOTATIONS,
+      },
+      async (args) => {
+        try {
+          const section = await historicalSection({ ecfr, logger }, args.at_date, args.citation);
+          const structuredContent = {
+            requestedDate: section.requestedDate,
+            citation: section.citation,
+            kind: section.kind,
+            heading: section.heading,
+            chapter: section.chapter,
+            part: section.part,
+            subpart: section.subpart,
+            path: section.path,
+            text: section.text,
+            markdown: section.markdown,
+            sourceUrl: section.sourceUrl,
+            sourceUrlAtRequestedDate: section.sourceUrlAtRequestedDate,
+          };
+          return {
+            content: [{ type: 'text', text: textContent(structuredContent) }],
+            structuredContent,
+          };
+        } catch (error) {
+          logger.error('tool get_section_at failed', {
+            message: error instanceof Error ? error.message : String(error),
+          });
+          return {
+            content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
+            isError: true,
+          };
+        }
+      },
+    );
+
     server.registerTool(
       'diff_issues',
       {
