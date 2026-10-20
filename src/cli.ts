@@ -6,6 +6,7 @@ import { runMcpCommand } from './commands/mcp.js';
 import { runServeCommand } from './commands/serve.js';
 import { runSyncCommand } from './commands/sync.js';
 import { runExportCommand } from './commands/export.js';
+import { formatIssueDiff, runDiffCommand } from './commands/diff.js';
 import { CommandError, EXIT } from './exit-codes.js';
 import { createLogger } from './logger.js';
 import { VERSION } from './version.js';
@@ -16,6 +17,8 @@ export const USAGE = `cfr-free ${VERSION} — self-hosted Title 38 CFR data serv
 Usage:
   cfr-free [mcp]          Start the MCP server on stdio (default)
   cfr-free sync           Rebuild the local index from eCFR
+  cfr-free diff <from> [to]  Show provision changes between two eCFR issue dates
+                             (to defaults to the index's issue date)
   cfr-free serve          Start the Titan HTTP API (default http://127.0.0.1:8787)
   cfr-free export <path>  Save a consistent snapshot of the local index
   cfr-free help           Show this help
@@ -42,12 +45,13 @@ export class CliError extends CommandError {
   }
 }
 
-export type Command = 'mcp' | 'sync' | 'serve' | 'export' | 'help' | 'version';
+export type Command = 'mcp' | 'sync' | 'diff' | 'serve' | 'export' | 'help' | 'version';
 
-/** Parsed argv: `export` additionally carries its required target path. */
+/** Parsed argv: `export` and `diff` carry their positional arguments. */
 export type ParsedCommand =
   | { readonly command: 'export'; readonly exportPath: string }
-  | { readonly command: Exclude<Command, 'export'> };
+  | { readonly command: 'diff'; readonly fromDate: string; readonly toDate?: string }
+  | { readonly command: Exclude<Command, 'export' | 'diff'> };
 
 /** Validate `export`'s required single target path. */
 function parseExportTarget(rest: readonly string[]): ParsedCommand {
@@ -60,6 +64,25 @@ function parseExportTarget(rest: readonly string[]): ParsedCommand {
   return { command: 'export', exportPath: target };
 }
 
+/** Validate `diff`'s required from-date and optional to-date. */
+function parseDiffArgs(rest: readonly string[]): ParsedCommand {
+  const [from, to] = rest;
+  if (
+    rest.length < 1 ||
+    rest.length > 2 ||
+    from === undefined ||
+    from.startsWith('-') ||
+    (to !== undefined && to.startsWith('-'))
+  ) {
+    throw new CliError(
+      'diff requires a from-date and an optional to-date (e.g. `cfr-free diff 2026-01-01 2026-06-01`)',
+    );
+  }
+  return to === undefined
+    ? { command: 'diff', fromDate: from }
+    : { command: 'diff', fromDate: from, toDate: to };
+}
+
 /** Parse argv (without node/script) into a command. Default: `mcp`. */
 export function parseArgs(argv: readonly string[]): ParsedCommand {
   const [first, ...rest] = argv;
@@ -67,6 +90,7 @@ export function parseArgs(argv: readonly string[]): ParsedCommand {
   if (first === '-h' || first === '--help' || first === 'help') return { command: 'help' };
   if (first === '-v' || first === '--version' || first === 'version') return { command: 'version' };
   if (first === 'export') return parseExportTarget(rest);
+  if (first === 'diff') return parseDiffArgs(rest);
   if (first === 'mcp' || first === 'sync' || first === 'serve') {
     if (rest.length > 0)
       throw new CliError(`unexpected arguments after '${first}': ${rest.join(' ')}`);
@@ -115,6 +139,13 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
     if (command === 'export') {
       const report = runExportCommand(config, parsed.exportPath, logger);
       io.out(`exported ${report.bytes} bytes to ${report.path}\n`);
+      return 0;
+    }
+    if (command === 'diff') {
+      // A diff WITH results is a success: exit 0 regardless of size. Errors
+      // (bad dates, missing index for the default `to`) surface as throws.
+      const report = await runDiffCommand(config, logger, parsed.fromDate, parsed.toDate);
+      io.out(formatIssueDiff(report));
       return 0;
     }
     if (command === 'serve') return await runServeCommand(config, logger);

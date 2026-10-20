@@ -30,8 +30,8 @@ keys, no telemetry — one Node process and one SQLite file.
 
 - Node.js **≥ 22.5** (uses the built-in `node:sqlite`; SQLite ≥ 3.50 with
   FTS5, bundled with Node 22.5+)
-- Network access only for `cfr-free sync` (~2–3 MB from ecfr.gov); serving
-  and searching are fully offline.
+- Network access only for `cfr-free sync` and `cfr-free diff` (~2–3 MB from
+  ecfr.gov per fetch); serving and searching are fully offline.
 
 ## Quickstart
 
@@ -43,6 +43,8 @@ cfr-free serve             # HTTP API on http://127.0.0.1:8787
 cfr-free mcp               # MCP server on stdio (default command)
 
 cfr-free export ./backup.sqlite   # consistent snapshot of the local index
+
+cfr-free diff 2026-01-01 2026-06-01   # provision changes between two issue dates
 ```
 
 ### Docker
