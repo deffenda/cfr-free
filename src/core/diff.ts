@@ -39,7 +39,7 @@ const MAX_DAYS_BY_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as co
  * Validate an operator-supplied date against eCFR's `YYYY-MM-DD` shape plus a
  * plausible month/day — `ServiceError` (`invalid_input`) BEFORE any fetch.
  */
-function assertIssueDate(value: string, label: string): string {
+export function assertIssueDate(value: string, label: string): string {
   if (!isIssueDateString(value)) {
     throw new ServiceError(`${label} must be a YYYY-MM-DD date, got: ${value}`, 'invalid_input');
   }
