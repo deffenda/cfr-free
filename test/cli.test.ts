@@ -3,6 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { CliError, main, parseArgs } from '../src/cli.js';
+import { formatIssueDiff } from '../src/commands/diff.js';
+import { Store } from '../src/core/store.js';
 import type { FetchLike } from '../src/core/http-client.js';
 import { VERSION } from '../src/version.js';
 import { FIXTURE_STRUCTURE } from './helpers.js';
@@ -62,6 +64,25 @@ describe('parseArgs', () => {
     expect(() => parseArgs(['export', 'a', 'b'])).toThrow(/exactly one target path/);
     expect(() => parseArgs(['export', '-o'])).toThrow(/exactly one target path/);
   });
+
+  it('parses diff with one or two dates', () => {
+    expect(parseArgs(['diff', '2026-01-01'])).toEqual({
+      command: 'diff',
+      fromDate: '2026-01-01',
+    });
+    expect(parseArgs(['diff', '2026-01-01', '2026-06-01'])).toEqual({
+      command: 'diff',
+      fromDate: '2026-01-01',
+      toDate: '2026-06-01',
+    });
+  });
+
+  it('rejects diff without dates, with extra dates, or with options', () => {
+    expect(() => parseArgs(['diff'])).toThrow(/from-date and an optional to-date/);
+    expect(() => parseArgs(['diff', '2026-01-01', '2026-06-01', '2026-12-01'])).toThrow(CliError);
+    expect(() => parseArgs(['diff', '--flag'])).toThrow(CliError);
+    expect(() => parseArgs(['diff', '2026-01-01', '-v'])).toThrow(CliError);
+  });
 });
 
 describe('main', () => {
@@ -70,6 +91,7 @@ describe('main', () => {
     const code = await main(['--help'], io);
     expect(code).toBe(0);
     expect(out.join('')).toContain('Usage:');
+    expect(out.join('')).toContain('cfr-free diff <from> [to]');
     expect(err.join('')).toBe('');
   });
 
@@ -170,6 +192,162 @@ describe('main: sync output', () => {
       );
     } finally {
       vi.unstubAllGlobals();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+const DIFF_FROM = '2026-01-01';
+const DIFF_TO = '2026-06-09'; // also the synced index's issue date in the default-to test
+const DIFF_FROM_XML = `<ECFR><DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD><DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD><DIV5 N="4" TYPE="PART"><HEAD>Part 4</HEAD><DIV8 N="4.125" TYPE="SECTION"><HEAD>§ 4.125 Diagnosis of mental disorders.</HEAD><P>Body text.</P></DIV8><DIV9 N="Appendix A to Part 4" TYPE="APPENDIX"><HEAD>Appendix A to Part 4—Table</HEAD><P>Appendix text.</P></DIV9></DIV5></DIV3></ECFR>`;
+const DIFF_TO_XML = `<ECFR><DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD><DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD><DIV5 N="4" TYPE="PART"><HEAD>Part 4</HEAD><DIV8 N="4.125" TYPE="SECTION"><HEAD>§ 4.125 Diagnosis of mental disorders.</HEAD><P>Amended body text.</P></DIV8><DIV8 N="4.130" TYPE="SECTION"><HEAD>§ 4.130 Evaluation of residual functional capacity.</HEAD><P>New section text.</P></DIV8><DIV9 N="Appendix A to Part 4" TYPE="APPENDIX"><HEAD>Appendix A to Part 4—Table</HEAD><P>Appendix text.</P></DIV9></DIV5></DIV3></ECFR>`;
+
+/** Versioner stub routing full-title XML per date (diff never hits titles.json). */
+function makeDiffFetch(xmlByDate: Readonly<Record<string, string>>): FetchLike {
+  return async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/titles.json'))
+      return Response.json({
+        titles: [
+          {
+            number: 38,
+            name: 'Title 38',
+            latest_issue_date: '2026-05-20',
+            up_to_date_as_of: DIFF_TO,
+            latest_amended_on: '2026-05-20',
+          },
+        ],
+      });
+    if (url.pathname.includes('/structure/')) return Response.json(FIXTURE_STRUCTURE);
+    const match = /\/full\/(\d{4}-\d{2}-\d{2})\/title-38\.xml$/.exec(url.pathname);
+    if (match) {
+      const xml = xmlByDate[match[1] as string];
+      if (xml === undefined) return new Response('no such date', { status: 404 });
+      return new Response(xml, { status: 200, headers: { 'content-type': 'application/xml' } });
+    }
+    return new Response('not found', { status: 404 });
+  };
+}
+
+describe('formatIssueDiff', () => {
+  it('renders the no-changes summary with no citation lists', () => {
+    const text = formatIssueDiff({
+      fromIssueDate: DIFF_FROM,
+      toIssueDate: DIFF_TO,
+      changed: [],
+      added: [],
+      removed: [],
+    });
+    expect(text).toBe(`no provision changes between ${DIFF_FROM} and ${DIFF_TO}\n`);
+  });
+
+  it('caps long lists at CHANGE_LIST_CAP with an ellipsis note', () => {
+    const citations = Array.from({ length: 101 }, (_, i) => `4.${String(i + 1).padStart(3, '0')}`);
+    const text = formatIssueDiff({
+      fromIssueDate: DIFF_FROM,
+      toIssueDate: DIFF_TO,
+      changed: ['4.125'],
+      added: [],
+      removed: citations,
+    });
+    expect(text).toContain(`0 added`);
+    expect(text).toContain('changed (1):\n  4.125\n');
+    expect(text).toContain('removed (101):');
+    // 100 shown (4.001 … 4.100), the 101st only via the ellipsis note.
+    expect(text).toContain('  4.100\n');
+    expect(text).toContain('… 1 more not shown\n');
+    expect(text).not.toContain('  4.101');
+  });
+});
+
+describe('main: diff output', () => {
+  it('prints the summary and lists, exiting 0 with no index present', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-cli-diff-'));
+    vi.stubGlobal('fetch', makeDiffFetch({ [DIFF_FROM]: DIFF_FROM_XML, [DIFF_TO]: DIFF_TO_XML }));
+    const { out, io, err } = makeIo({
+      CFR_INDEX_PATH: path.join(dir, 'index.sqlite'), // never synced: no index on disk
+      CFR_LOG_LEVEL: 'error',
+    });
+    try {
+      const code = await main(['diff', DIFF_FROM, DIFF_TO], io);
+      expect(code).toBe(0);
+      expect(out.join('')).toContain(
+        `1 changed, 1 added, 0 removed between ${DIFF_FROM} and ${DIFF_TO}`,
+      );
+      expect(out.join('')).toContain('changed (1):\n  4.125\n');
+      expect(out.join('')).toContain('added (1):\n  4.130\n');
+      expect(err.join('')).toBe('');
+    } finally {
+      vi.unstubAllGlobals();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports no provision changes for identical content and still exits 0', async () => {
+    vi.stubGlobal('fetch', makeDiffFetch({ [DIFF_FROM]: DIFF_TO_XML, [DIFF_TO]: DIFF_TO_XML }));
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-cli-diff-'));
+    const { out, io } = makeIo({
+      CFR_INDEX_PATH: path.join(dir, 'index.sqlite'),
+      CFR_LOG_LEVEL: 'error',
+    });
+    try {
+      expect(await main(['diff', DIFF_FROM, DIFF_TO], io)).toBe(0);
+      expect(out.join('')).toBe(`no provision changes between ${DIFF_FROM} and ${DIFF_TO}\n`);
+    } finally {
+      vi.unstubAllGlobals();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('defaults the to-date to the issue date of the local index', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-cli-diff-'));
+    vi.stubGlobal('fetch', makeDiffFetch({ [DIFF_FROM]: DIFF_FROM_XML, [DIFF_TO]: DIFF_TO_XML }));
+    const { out, io } = makeIo({
+      CFR_INDEX_PATH: path.join(dir, 'index.sqlite'),
+      CFR_LOG_LEVEL: 'error',
+    });
+    try {
+      // Sync first: the index records issue date 2026-06-09 (up_to_date_as_of).
+      expect(await main(['sync'], io)).toBe(0);
+      out.length = 0;
+      // Single-date diff: `to` resolves from the index's issue_date meta.
+      expect(await main(['diff', DIFF_FROM], io)).toBe(0);
+      expect(out.join('')).toContain(
+        `1 changed, 1 added, 0 removed between ${DIFF_FROM} and ${DIFF_TO}`,
+      );
+      expect(out.join('')).toContain('added (1):\n  4.130\n');
+    } finally {
+      vi.unstubAllGlobals();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns exit code 3 when the to-date must come from a missing index', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-cli-diff-'));
+    const { err, io } = makeIo({
+      CFR_INDEX_PATH: path.join(dir, 'index.sqlite'),
+      CFR_LOG_LEVEL: 'error',
+    });
+    try {
+      const code = await main(['diff', DIFF_FROM], io);
+      expect(code).toBe(3);
+      expect(err.join('')).toContain('cfr-free sync');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns exit code 3 when the index carries no issue date', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-cli-diff-'));
+    const indexPath = path.join(dir, 'index.sqlite');
+    const store = Store.open(indexPath); // schema present, but never synced
+    store.close();
+    const { err, io } = makeIo({ CFR_INDEX_PATH: indexPath, CFR_LOG_LEVEL: 'error' });
+    try {
+      const code = await main(['diff', DIFF_FROM], io);
+      expect(code).toBe(3);
+      expect(err.join('')).toContain('has no issue date');
+    } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });

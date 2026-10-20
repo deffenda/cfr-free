@@ -32,6 +32,11 @@ function assertDate(value: string): string {
   return value;
 }
 
+/** True for `YYYY-MM-DD` — the only date shape eCFR endpoints accept. */
+export function isIssueDateString(value: string): boolean {
+  return DATE_RE.test(value);
+}
+
 /**
  * Thin client for the public eCFR versioner API.
  *
