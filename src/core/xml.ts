@@ -128,6 +128,9 @@ function getAttributes(node: OrderNode): Record<string, string> {
  */
 export const IMAGE_MARKER_PREFIX = '[image content not included:';
 
+/** The whole marker, including its closing bracket, for removal/stripping. */
+const IMAGE_MARKER_PATTERN = /\[image content not included:[^\]]*\]/g;
+
 /**
  * The only image sources the parser will name: a relative eCFR graphics
  * path (`/graphics/<file>`), optionally with further safe segments. A
@@ -136,6 +139,9 @@ export const IMAGE_MARKER_PREFIX = '[image content not included:';
  */
 const GRAPHICS_PREFIX = '/graphics/';
 const GRAPHICS_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
+/** Bounds on a vetted source path (real eCFR graphics paths are ~26 chars). */
+const GRAPHICS_SEGMENT_MAX = 64;
+const GRAPHICS_SRC_MAX = 255;
 
 /**
  * Vet an image `src` and return the safe path form, or null when the value
@@ -151,7 +157,11 @@ function safeGraphicsSrc(raw: string | undefined): string | null {
   if (!raw.startsWith(GRAPHICS_PREFIX)) return null;
   const rest = raw.slice(GRAPHICS_PREFIX.length);
   if (rest.length === 0) return null;
+  // Length bounds: an upstream document must not be able to inflate the
+  // index with a megabyte-long source path echoed into a marker.
+  if (raw.length > GRAPHICS_SRC_MAX) return null;
   for (const segment of rest.split('/')) {
+    if (segment.length > GRAPHICS_SEGMENT_MAX) return null;
     if (!GRAPHICS_SEGMENT_RE.test(segment)) return null;
     // `.` and `..` match the charset above, so they are rejected explicitly.
     if (segment === '.' || segment === '..') return null;
@@ -203,20 +213,52 @@ interface Rendered {
   readonly text: string;
 }
 
+/**
+ * Markers for images that are a DIRECT child of a table (malformed markup:
+ * an <img> between <TR> elements — not seen in eCFR, but "every image is
+ * captured" must hold). Images inside a CELL are already captured by the
+ * inline text path, so only table-level children are collected here.
+ */
+function collectStrayImageMarkers(children: readonly unknown[]): string[] {
+  const markers: string[] = [];
+  for (const child of children) {
+    if (!isOrderNode(child)) continue;
+    if (Object.prototype.hasOwnProperty.call(child, 'img')) {
+      markers.push(imageMarker(getAttributes(child)));
+      continue;
+    }
+    // Row groups may hold the stray image too (an <img> between <TR>s):
+    // descend through the table's structure, but NOT into cells — an image
+    // inside a cell is already captured by the inline text path.
+    for (const [key, value] of Object.entries(child)) {
+      if (key === 'THEAD' || key === 'TBODY' || key === 'TFOOT' || key === 'TR') {
+        if (Array.isArray(value)) markers.push(...collectStrayImageMarkers(value));
+      }
+    }
+  }
+  return markers;
+}
+
 function renderTable(children: readonly unknown[], depth: number): Rendered {
   if (depth > MAX_DEPTH) throw new XmlFormatError(`XML nesting exceeds ${MAX_DEPTH} levels`);
   const rows: string[][] = [];
   collectTableRows(children, rows, depth + 1);
-  if (rows.length === 0) return { markdown: '', text: '' };
+  const strayMarkers = collectStrayImageMarkers(children);
+  if (rows.length === 0) {
+    if (strayMarkers.length === 0) return { markdown: '', text: '' };
+    const only = strayMarkers.join('\n');
+    return { markdown: only, text: only };
+  }
   const header = rows[0] ?? [];
   const markdownRows = [
     `| ${header.map(escapePipe).join(' | ')} |`,
     `| ${header.map(() => '---').join(' | ')} |`,
     ...rows.slice(1).map((row) => `| ${row.map(escapePipe).join(' | ')} |`),
   ];
+  const stray = strayMarkers.length > 0 ? `\n${strayMarkers.join('\n')}` : '';
   return {
-    markdown: markdownRows.join('\n'),
-    text: rows.map((row) => row.join(' | ')).join('\n'),
+    markdown: markdownRows.join('\n') + stray,
+    text: rows.map((row) => row.join(' | ')).join('\n') + stray,
   };
 }
 
@@ -304,7 +346,9 @@ function renderBlock(tag: string, children: readonly unknown[], depth: number): 
 }
 
 function cleanHeading(head: string, citation: string, kind: SectionKind): string {
-  const flat = collapseWhitespace(head);
+  // A heading is a title, not content: an image marker that reached it
+  // (an <img> inside a <HEAD>) is removed rather than shown as a title.
+  const flat = collapseWhitespace(head.replace(IMAGE_MARKER_PATTERN, ' '));
   if (kind === 'section') {
     const prefix = `§ ${citation}`;
     if (flat.startsWith(prefix)) return flat.slice(prefix.length).trim();

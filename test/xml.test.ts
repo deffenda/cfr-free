@@ -290,4 +290,43 @@ describe('image content markers (P1-01)', () => {
     expect(plain?.text).toContain('(a) If the diagnosis of a mental disorder');
     expect(plain?.markdown).toContain('| Rating | Description |');
   });
+  it('refuses an over-long image source (no index bloat)', () => {
+    const long = '/graphics/' + 'a'.repeat(1000) + '.gif';
+    const xml = `<ECFR><DIV8 N="1.1" TYPE="SECTION"><HEAD>x</HEAD><P>t <img src="${long}"/></P></DIV8></ECFR>`;
+    const [section] = parseTitleXml(xml);
+    expect(section?.text).toContain('[image content not included: unrecognized image source]');
+    expect(section?.text).not.toContain(long);
+  });
+
+  it('captures an image that is a direct child of a table', () => {
+    const xml =
+      '<ECFR><DIV8 N="1.1" TYPE="SECTION"><HEAD>x</HEAD>' +
+      '<TABLE><THEAD><TR><TH>Rating</TH></TR></THEAD><TBODY>' +
+      '<img src="/graphics/er11my99.005.gif"/>' +
+      '<TR><TD>10</TD></TR></TBODY></TABLE></DIV8></ECFR>';
+    const [section] = parseTitleXml(xml);
+    expect(section?.text).toContain('[image content not included: /graphics/er11my99.005.gif]');
+    expect(section?.markdown).toContain('[image content not included: /graphics/er11my99.005.gif]');
+    // The table's own rows are still rendered.
+    expect(section?.text).toContain('Rating');
+    expect(section?.text).toContain('10');
+  });
+
+  it('captures an image inside a table cell', () => {
+    const xml =
+      '<ECFR><DIV8 N="1.1" TYPE="SECTION"><HEAD>x</HEAD>' +
+      '<TABLE><TBODY><TR><TD>see <img src="/graphics/er11my99.005.gif"/></TD></TR></TBODY>' +
+      '</TABLE></DIV8></ECFR>';
+    const [section] = parseTitleXml(xml);
+    expect(section?.text).toContain('[image content not included: /graphics/er11my99.005.gif]');
+  });
+
+  it('keeps an image marker out of the heading', () => {
+    const xml =
+      '<ECFR><DIV8 N="1.1" TYPE="SECTION"><HEAD>§ 1.1 <img src="/graphics/x.gif"/> Title.</HEAD>' +
+      '<P>body</P></DIV8></ECFR>';
+    const [section] = parseTitleXml(xml);
+    expect(section?.heading).toBe('Title.');
+    expect(section?.heading).not.toContain('image content not included');
+  });
 });
