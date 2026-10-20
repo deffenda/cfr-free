@@ -2,6 +2,9 @@ import { z } from 'zod';
 import { normalizeCitation } from './citations.js';
 import { extractReferences } from './references.js';
 import type { SyncChanges } from './changes.js';
+import { diffIssues, type IssueDiff } from './diff.js';
+import type { EcfrApi } from './ecfr.js';
+import type { Logger } from '../logger.js';
 import {
   browse as browseStructure,
   parseStructure,
@@ -240,10 +243,18 @@ function noticeFor(status: IndexStatus): string | null {
 export class CFRService {
   private readonly store: Store;
   private readonly maxAgeDays: number;
+  /**
+   * Optional diff stack (batch-7 D2): injected by `serve`/`mcp`, absent in
+   * plain index readers and tests — the facade below fails closed without it.
+   */
+  private readonly ecfr: EcfrApi | undefined;
+  private readonly logger: Logger | undefined;
 
-  constructor(store: Store, maxAgeDays: number) {
+  constructor(store: Store, maxAgeDays: number, ecfr?: EcfrApi, logger?: Logger) {
     this.store = store;
     this.maxAgeDays = maxAgeDays;
+    this.ecfr = ecfr;
+    this.logger = logger;
   }
 
   search(input: SearchInput): SearchResponse {
@@ -522,5 +533,30 @@ export class CFRService {
       sections: row.sections,
       appendices: row.appendices,
     }));
+  }
+
+  /**
+   * Point-in-time diff of two eCFR issue dates (`/api/v1/diff`): a thin
+   * facade over `diffIssues` so the HTTP surface shares the core's exact
+   * validation and error semantics. BOTH dates are required — no default-to
+   * resolution happens here (the store's `issue_date` lookup is the CLI's
+   * convenience, deliberately not threaded behind this facade). Stateless by
+   * design: every call fetches both dates' full-title XML from eCFR — no
+   * prefetch, no cache.
+   *
+   * Every `serve`/`mcp` entrypoint injects the client and logger together;
+   * the guard fails closed for test-constructed services without the diff
+   * stack, so the route answers a clean mapped error instead of a crash.
+   *
+   * @throws {ServiceError} (`invalid_input`) when no eCFR client was
+   *   injected, or when a date is malformed/impossible or the two dates are
+   *   identical; upstream fetch failures surface as `HttpError`.
+   */
+  async diffBetween(fromDate: string, toDate: string): Promise<IssueDiff> {
+    const { ecfr, logger } = this;
+    if (ecfr === undefined || logger === undefined) {
+      throw new ServiceError('diff unavailable — no eCFR client injected', 'invalid_input');
+    }
+    return diffIssues({ ecfr, logger }, fromDate, toDate);
   }
 }

@@ -2,6 +2,7 @@ import type { AddressInfo } from 'node:net';
 import net from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type http from 'node:http';
+import type { EcfrApi } from '../src/core/ecfr.js';
 import { CFRService } from '../src/core/service.js';
 import { createHttpServer, type HttpServerOptions } from '../src/titan/http-server.js';
 import { createTestLogger, makeSection, openTempStore, type TempStore } from './helpers.js';
@@ -666,5 +667,172 @@ describe('Titan web UI routes', () => {
       expect(status, `${path} must stay a 404`).toBe(404);
       expect(headers.get('content-type')).toContain('application/json');
     }
+  });
+});
+
+describe('Titan HTTP /api/v1/diff', () => {
+  const FROM_DATE = '2026-01-01';
+  const TO_DATE = '2026-06-01';
+  const DIFF_QUERY = `from=${FROM_DATE}&to=${TO_DATE}`;
+
+  // Stub builders duplicated per suite (test/helpers.ts is not in this
+  // packet's allowlist) — same minimal full-title shape test/diff.test.ts uses.
+  function diffXml(sections: string): string {
+    return `<ECFR><DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD><DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD><DIV5 N="4" TYPE="PART"><HEAD>Part 4</HEAD>${sections}</DIV5></DIV3></DIV1>`;
+  }
+
+  function diffSection(citation: string, body: string): string {
+    return `<DIV8 N="${citation}" TYPE="SECTION"><HEAD>§ ${citation} Test.</HEAD><P>${body}</P></DIV8>`;
+  }
+
+  const DIFF_FROM_XML = diffXml(
+    diffSection('4.125', 'Original body.') + diffSection('4.130', 'RFC text.'),
+  );
+  const DIFF_TO_XML = diffXml(
+    diffSection('4.125', 'Amended body.') + diffSection('4.130', 'RFC text.'),
+  );
+
+  /** Offline eCFR stub keyed by date; unknown dates reject like upstream 404. */
+  function stubEcfr(xmlByDate: Readonly<Record<string, string>> = {}): EcfrApi {
+    return {
+      getFullTitleXml: async (issueDate: string) => {
+        const xml = xmlByDate[issueDate];
+        if (xml === undefined) throw new Error(`HTTP 404 for ${issueDate}`);
+        return xml;
+      },
+    } as unknown as EcfrApi;
+  }
+
+  const happyEcfr = (): EcfrApi => stubEcfr({ [FROM_DATE]: DIFF_FROM_XML, [TO_DATE]: DIFF_TO_XML });
+
+  let temp: TempStore;
+  let server: http.Server;
+  let base: string;
+
+  beforeEach(async () => {
+    temp = openTempStore();
+    server = createHttpServer(
+      new CFRService(temp.store, 7, happyEcfr(), createTestLogger()),
+      createTestLogger(),
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      server.closeAllConnections();
+    });
+    temp.cleanup();
+  });
+
+  async function get(
+    pathname: string,
+    init?: RequestInit,
+  ): Promise<{ status: number; body: Json; headers: Headers; text: string }> {
+    const response = await fetch(`${base}${pathname}`, init);
+    const text = await response.text();
+    const body = text.length > 0 ? (JSON.parse(text) as Json) : {};
+    return { status: response.status, body, headers: response.headers, text };
+  }
+
+  /** Start an ad-hoc server around `service`; returns status + parsed body. */
+  async function withService(
+    service: CFRService,
+    pathname: string,
+    init?: RequestInit,
+  ): Promise<{ status: number; body: Json; headers: Headers; text: string }> {
+    const custom = createHttpServer(service, createTestLogger());
+    await new Promise<void>((resolve) => custom.listen(0, '127.0.0.1', resolve));
+    const port = (custom.address() as AddressInfo).port;
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}${pathname}`, init);
+      const text = await response.text();
+      const body = text.length > 0 ? (JSON.parse(text) as Json) : {};
+      return { status: response.status, body, headers: response.headers, text };
+    } finally {
+      await new Promise<void>((resolve) => {
+        custom.close(() => resolve());
+        custom.closeAllConnections();
+      });
+    }
+  }
+
+  it('serves a capped two-date diff as JSON', async () => {
+    const { status, body, headers } = await get(`/api/v1/diff?${DIFF_QUERY}`);
+    expect(status).toBe(200);
+    expect(body).toEqual({
+      fromIssueDate: FROM_DATE,
+      toIssueDate: TO_DATE,
+      changed: ['4.125'],
+      added: [],
+      removed: [],
+      truncated: false,
+    });
+    expect(headers.get('content-type')).toContain('application/json');
+    expect(headers.get('cache-control')).toBe('public, max-age=3600');
+    expect(headers.get('x-content-type-options')).toBe('nosniff');
+    expect(headers.get('cross-origin-resource-policy')).toBe('same-origin');
+  });
+
+  it('rejects missing or empty date params with 400 before the service', async () => {
+    for (const query of ['', 'from=', `to=${TO_DATE}`, `from=${FROM_DATE}&to=`]) {
+      const { status, body } = await get(`/api/v1/diff?${query}`);
+      expect(status, `query "${query}" must be a 400`).toBe(400);
+      expect(body['error']).toBe('invalid_input');
+      expect(String(body['message'])).toContain('both');
+    }
+  });
+
+  it('rejects an impossible date with 400 before any fetch', async () => {
+    const { status, body } = await get(`/api/v1/diff?from=2026-13-01&to=${TO_DATE}`);
+    expect(status).toBe(400);
+    expect(body['error']).toBe('invalid_input');
+    expect(String(body['message'])).toContain('month 01-12');
+    // Nothing was fetched: the core check runs before the eCFR client.
+    expect(String(body['message'])).not.toContain('internal server error');
+  });
+
+  it('answers a clean mapped 400 when no eCFR client was injected', async () => {
+    // Default construction (2-arg) — the facade fails closed; the packet
+    // allows "500/ServiceError-mapped", and statusFor maps invalid_input to a
+    // 400 with the client-safe message rather than a generic internal error.
+    const service = new CFRService(temp.store, 7);
+    const { status, body } = await withService(service, `/api/v1/diff?${DIFF_QUERY}`);
+    expect(status).toBe(400);
+    expect(body).toEqual({
+      error: 'invalid_input',
+      message: 'diff unavailable — no eCFR client injected',
+    });
+  });
+
+  it('masks upstream fetch failures as the generic 500', async () => {
+    const service = new CFRService(temp.store, 7, stubEcfr({}), createTestLogger());
+    const { status, body } = await withService(service, `/api/v1/diff?${DIFF_QUERY}`);
+    expect(status).toBe(500);
+    expect(body).toEqual({ error: 'internal_error', message: 'internal server error' });
+  });
+
+  it('mirrors GET on HEAD with identical headers and an empty body', async () => {
+    const getResponse = await fetch(`${base}/api/v1/diff?${DIFF_QUERY}`);
+    const getBody = await getResponse.text();
+    const headResponse = await fetch(`${base}/api/v1/diff?${DIFF_QUERY}`, { method: 'HEAD' });
+    const headBody = await headResponse.text();
+    expect(headResponse.status).toBe(getResponse.status);
+    expect(headBody).toBe('');
+    expect(headResponse.headers.get('content-type')).toBe(getResponse.headers.get('content-type'));
+    expect(headResponse.headers.get('content-length')).toBe(
+      getResponse.headers.get('content-length'),
+    );
+    expect(headResponse.headers.get('cache-control')).toBe(
+      getResponse.headers.get('cache-control'),
+    );
+    // The HEAD body is empty, so parse the GET body captured above: same route,
+    // same payload contract.
+    expect(JSON.parse(getBody)).toMatchObject({
+      fromIssueDate: FROM_DATE,
+      toIssueDate: TO_DATE,
+    });
   });
 });

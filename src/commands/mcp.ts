@@ -28,8 +28,12 @@ export async function runMcpCommand(config: AppConfig, logger: Logger): Promise<
 
   try {
     const freshness = await ensureIndex(store, config, logger);
-    const service = new CFRService(store, config.maxAgeDays);
-    const server = buildMcpServer(service, logger);
+    // One stateless eCFR client serves both the diff tool registration and
+    // the service's diff facade (batch-7 D2); createEcfrApi() was already
+    // imported here for the refresh scheduler.
+    const ecfr = createEcfrApi();
+    const service = new CFRService(store, config.maxAgeDays, ecfr, logger);
+    const server = buildMcpServer(service, logger, { ecfr });
 
     // Opt-in background refresh (CFR_REFRESH_HOURS); disposed on every
     // shutdown path below so no timer outlives the process lifecycle.
