@@ -324,3 +324,86 @@ describe('§ 4.85 image content is flagged, never dropped (P1-01)', () => {
     expect(section?.text).not.toContain('](http');
   });
 });
+
+/**
+ * § 1.916, § 1.561 and § 2.6 — VERBATIM from the eCFR versioner API
+ * (https://www.ecfr.gov/api/versioner/v1/full/2026-10-16/title-38.xml,
+ * title 38 issue date 2026-10-16, retrieved 2026-10-20).
+ *
+ * These three provisions carry the construct classes the dated inventory
+ * (docs/research/corpus-fidelity-2026-10-20.md) examines: a footnote, a
+ * note to a paragraph, and an editorial note. The inventory measured that
+ * NO class loses text; what it also found is that the rendering is lossy
+ * in MEANING (footnotes are not anchored or labelled, notes are not
+ * labelled) and that inline <E> elements split words across blank lines.
+ *
+ * These tests pin BEHAVIOUR, never counts: the upstream document is
+ * mutable, so a count would be a test that fails the day eCFR changes.
+ */
+const SECTION_1_916_FOOTNOTE = `<DIV8 N="1.916" TYPE="SECTION">
+<HEAD>&#xA7; 1.916 Reports to consumer reporting agencies.</HEAD>
+<P>(a) When an agency discloses information under paragraph (b) of this section, it shall provide a copy of the information to each consumer reporting agency to which information was released.</P>
+<FP><FP>A notice of the right to request this information will be sent with the notice described in paragraph (d)(1) of this section.</FP></FP>
+</DIV8>`;
+
+const SECTION_1_561_NOTE = `<DIV8 N="1.561" TYPE="SECTION">
+<HEAD>&#xA7; 1.561 Fees.</HEAD>
+<P>(g) The Department of Veterans Affairs will charge the requester the full cost of the information.</P>
+<NOTE>
+<HED>Note to paragraph (<E T="01">g</E>)(1):</HED>
+<P>VA will charge fees consistent with the salary scale published by the Office of Personnel Management (OPM).</P></NOTE>
+</DIV8>`;
+
+const SECTION_2_6_EDNOTE = `<DIV8 N="2.6" TYPE="SECTION">
+<HEAD>&#xA7; 2.6 Head of staff and certain other officials.</HEAD>
+<P>(a) The Secretary may appoint the heads of the staff offices, assistant secretaries, or staff office heads.</P>
+<EDNOTE>
+<HED>Editorial Note:</HED><PSPACE>For <E T="04">Federal Register</E> citations affecting § 2.6, see the List of CFR Sections Affected, which appears in the Finding Aids section of the printed volume and at <I>www.govinfo.gov.</I></PSPACE></EDNOTE>
+</DIV8>`;
+
+/** Compare ignoring whitespace: the parser concatenates inline elements without a space. */
+function withoutWhitespace(value: string): string {
+  return value.replace(/\s+/g, '');
+}
+
+describe('construct classes survive the parser (M1 inventory, behaviour only)', () => {
+  it("keeps a footnote's text in both representations", () => {
+    const [section] = parseTitleXml(SECTION_1_916_FOOTNOTE);
+    const footnote =
+      'A notice of the right to request this information will be sent with the notice described in paragraph (d)(1) of this section.';
+    expect(withoutWhitespace(section?.text ?? '')).toContain(withoutWhitespace(footnote));
+    expect(withoutWhitespace(section?.markdown ?? '')).toContain(withoutWhitespace(footnote));
+    // The surrounding regulatory prose is untouched.
+    expect(section?.text).toContain('it shall provide a copy of the information');
+  });
+
+  it("keeps a note-to-paragraph's text", () => {
+    const [section] = parseTitleXml(SECTION_1_561_NOTE);
+    const note =
+      'VA will charge fees consistent with the salary scale published by the Office of Personnel Management (OPM).';
+    expect(withoutWhitespace(section?.text ?? '')).toContain(withoutWhitespace(note));
+    expect(withoutWhitespace(section?.markdown ?? '')).toContain(withoutWhitespace(note));
+  });
+
+  it("keeps an editorial note's text", () => {
+    const [section] = parseTitleXml(SECTION_2_6_EDNOTE);
+    const note =
+      'For Federal Register citations affecting \u00a7 2.6, see the List of CFR Sections Affected, which appears in the Finding Aids section of the printed volume and at www.govinfo.gov.';
+    expect(withoutWhitespace(section?.text ?? '')).toContain(withoutWhitespace(note));
+  });
+
+  it('documents the known rendering gap: inline elements split a word across blank lines', () => {
+    // The inventory's G1 finding: the inline <E T="01">g</E> renders as
+    // "(\n\ng\n\n)" because the parser keeps the XML pretty-print
+    // whitespace around an inline element. This test pins the CURRENT
+    // behaviour on purpose — M1(b) will change it, and the change must
+    // then update this assertion deliberately.
+    const [section] = parseTitleXml(SECTION_1_561_NOTE);
+    expect(section?.text).toContain('Note to paragraph (');
+    expect(section?.text).toContain(')');
+    // The note's substance is still present despite the split.
+    expect(withoutWhitespace(section?.text ?? '')).toContain(
+      withoutWhitespace('VA will charge fees consistent with the salary scale'),
+    );
+  });
+});
