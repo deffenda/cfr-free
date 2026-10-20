@@ -612,7 +612,7 @@ describe('MCP diff_issues tool (ecfr injected)', () => {
     };
   }
 
-  it('registers diff_issues only when an eCFR client is injected', async () => {
+  it('registers diff_issues and redline only when an eCFR client is injected', async () => {
     const withClient = await connectedServer(
       stubEcfr({ [FROM_DATE]: DIFF_FROM_XML, [TO_DATE]: DIFF_TO_XML }),
     );
@@ -626,6 +626,7 @@ describe('MCP diff_issues tool (ecfr injected)', () => {
         'health',
         'index_status',
         'list_parts',
+        'redline',
         'search_regulations',
       ]);
       const diffTool = listed.tools.find((tool) => tool.name === 'diff_issues');
@@ -648,7 +649,7 @@ describe('MCP diff_issues tool (ecfr injected)', () => {
     }
   });
 
-  it('annotates diff_issues openWorld and the six index tools closed-world', async () => {
+  it('annotates the two eCFR tools openWorld and the six index tools closed-world', async () => {
     const probe = await connectedServer(
       stubEcfr({ [FROM_DATE]: DIFF_FROM_XML, [TO_DATE]: DIFF_TO_XML }),
     );
@@ -659,7 +660,9 @@ describe('MCP diff_issues tool (ecfr injected)', () => {
         expect(tool.annotations?.readOnlyHint).toBe(true);
         expect(tool.annotations?.destructiveHint).toBe(false);
         expect(tool.annotations?.idempotentHint).toBe(true);
-        expect(tool.annotations?.openWorldHint).toBe(tool.name === 'diff_issues');
+        expect(tool.annotations?.openWorldHint).toBe(
+          tool.name === 'diff_issues' || tool.name === 'redline',
+        );
       }
     } finally {
       await probe.close();
@@ -768,6 +771,193 @@ describe('MCP diff_issues tool (ecfr injected)', () => {
       expect(result.content[0]?.text).toMatch(/invalid arguments/i);
     } finally {
       await probe.close();
+    }
+  });
+});
+
+describe('MCP redline tool (ecfr injected)', () => {
+  const FROM_DATE = '2026-01-01';
+  const TO_DATE = '2026-06-01';
+
+  // Stub builders duplicated per suite (test/helpers.ts is not in this
+  // packet's allowlist) — same minimal full-title shape test/diff.test.ts uses.
+  function diffXml(sections: string): string {
+    return `<ECFR><DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD><DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD><DIV5 N="4" TYPE="PART"><HEAD>Part 4</HEAD>${sections}</DIV5></DIV3></DIV1>`;
+  }
+
+  function diffSection(citation: string, body: string): string {
+    return `<DIV8 N="${citation}" TYPE="SECTION"><HEAD>§ ${citation} Test.</HEAD><P>${body}</P></DIV8>`;
+  }
+
+  const REDLINE_FROM_XML = diffXml(
+    diffSection('4.125', 'Original body.') + diffSection('4.130', 'RFC text.'),
+  );
+  const REDLINE_TO_XML = diffXml(
+    diffSection('4.125', 'Amended body.') + diffSection('4.130', 'RFC text.'),
+  );
+
+  /** Offline eCFR stub keyed by date; unknown dates reject like upstream 404. */
+  function stubEcfr(xmlByDate: Readonly<Record<string, string>>): EcfrApi {
+    return {
+      getFullTitleXml: async (issueDate: string) => {
+        const xml = xmlByDate[issueDate];
+        if (xml === undefined) throw new Error(`HTTP 404 for ${issueDate}`);
+        return xml;
+      },
+    } as unknown as EcfrApi;
+  }
+
+  async function connectedServer(
+    ecfr: EcfrApi | undefined,
+  ): Promise<{ client: Client; close: () => Promise<void> }> {
+    const temp = openTempStore();
+    const logger = createTestLogger();
+    const service = new CFRService(temp.store, 7);
+    const server = buildMcpServer(service, logger, ecfr === undefined ? undefined : { ecfr });
+    const client = new Client({ name: 'redline-probe', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    return {
+      client,
+      close: async () => {
+        await client.close();
+        await server.close();
+        temp.cleanup();
+      },
+    };
+  }
+
+  it('registers redline alongside diff_issues only when an eCFR client is injected', async () => {
+    const withClient = await connectedServer(
+      stubEcfr({ [FROM_DATE]: REDLINE_FROM_XML, [TO_DATE]: REDLINE_TO_XML }),
+    );
+    try {
+      const listed = await withClient.client.listTools();
+      const names = listed.tools.map((tool) => tool.name).sort();
+      expect(names).toEqual([
+        'browse_title38',
+        'diff_issues',
+        'get_section',
+        'health',
+        'index_status',
+        'list_parts',
+        'redline',
+        'search_regulations',
+      ]);
+      const redlineTool = listed.tools.find((tool) => tool.name === 'redline');
+      expect(redlineTool?.annotations?.openWorldHint).toBe(true);
+      expect(redlineTool?.inputSchema).toMatchObject({
+        type: 'object',
+        required: ['from_date', 'to_date', 'citation'],
+      });
+    } finally {
+      await withClient.close();
+    }
+
+    const withoutClient = await connectedServer(undefined);
+    try {
+      const names = (await withoutClient.client.listTools()).tools.map((tool) => tool.name);
+      expect(names).not.toContain('redline');
+      expect(names).not.toContain('diff_issues');
+      expect(names).toHaveLength(6);
+    } finally {
+      await withoutClient.close();
+    }
+  });
+
+  it('returns the core SectionRedline as structured content', async () => {
+    const probe = await connectedServer(
+      stubEcfr({ [FROM_DATE]: REDLINE_FROM_XML, [TO_DATE]: REDLINE_TO_XML }),
+    );
+    try {
+      const result = (await probe.client.callTool({
+        name: 'redline',
+        arguments: { from_date: FROM_DATE, to_date: TO_DATE, citation: '4.125' },
+      })) as ToolCallResult;
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent).toEqual({
+        fromIssueDate: FROM_DATE,
+        toIssueDate: TO_DATE,
+        citation: '4.125',
+        status: 'changed',
+        fromText: 'Original body.',
+        toText: 'Amended body.',
+        hunks: [
+          { fromLine: 1, toLine: null, type: 'del', text: 'Original body.' },
+          { fromLine: null, toLine: 1, type: 'add', text: 'Amended body.' },
+        ],
+        coarse: false,
+      });
+      const parsed = JSON.parse(result.content[0]?.text ?? '{}') as Record<string, unknown>;
+      expect(parsed).toEqual(result.structuredContent);
+    } finally {
+      await probe.close();
+    }
+  });
+
+  it('reports client-safe errors for shape-invalid, identical and impossible dates', async () => {
+    const probe = await connectedServer(
+      stubEcfr({ [FROM_DATE]: REDLINE_FROM_XML, [TO_DATE]: REDLINE_TO_XML }),
+    );
+    try {
+      // Shape-invalid: rejected by the tool's own input schema.
+      const shape = (await probe.client.callTool({
+        name: 'redline',
+        arguments: { from_date: 'not-a-date', to_date: TO_DATE, citation: '4.125' },
+      })) as ToolCallResult;
+      expect(shape.isError).toBe(true);
+      expect(shape.content[0]?.text).toMatch(/invalid arguments/i);
+
+      // Same dates: core ServiceError (invalid_input) → verbatim guidance.
+      const same = (await probe.client.callTool({
+        name: 'redline',
+        arguments: { from_date: FROM_DATE, to_date: FROM_DATE, citation: '4.125' },
+      })) as ToolCallResult;
+      expect(same.isError).toBe(true);
+      expect(same.content[0]?.text).toContain('from date and to date are the same');
+      expect(same.structuredContent).toBeUndefined();
+
+      // Semantic range check surfaces through the tool the same way.
+      const impossible = (await probe.client.callTool({
+        name: 'redline',
+        arguments: { from_date: '2026-13-01', to_date: TO_DATE, citation: '4.125' },
+      })) as ToolCallResult;
+      expect(impossible.isError).toBe(true);
+      expect(impossible.content[0]?.text).toContain('month 01-12');
+    } finally {
+      await probe.close();
+    }
+  });
+
+  it('reports a citation missing from BOTH dates as a not_found tool error', async () => {
+    const probe = await connectedServer(
+      stubEcfr({ [FROM_DATE]: REDLINE_FROM_XML, [TO_DATE]: REDLINE_TO_XML }),
+    );
+    try {
+      const result = (await probe.client.callTool({
+        name: 'redline',
+        arguments: { from_date: FROM_DATE, to_date: TO_DATE, citation: '99.999' },
+      })) as ToolCallResult;
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain('99.999 not found in Title 38');
+      expect(result.structuredContent).toBeUndefined();
+    } finally {
+      await probe.close();
+    }
+  });
+
+  it('masks upstream fetch failures as the generic internal server error', async () => {
+    const upstream = await connectedServer(stubEcfr({}));
+    try {
+      const result = (await upstream.client.callTool({
+        name: 'redline',
+        arguments: { from_date: FROM_DATE, to_date: TO_DATE, citation: '4.125' },
+      })) as ToolCallResult;
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain('internal server error');
+      expect(result.content[0]?.text).not.toContain('HTTP 404');
+    } finally {
+      await upstream.close();
     }
   });
 });

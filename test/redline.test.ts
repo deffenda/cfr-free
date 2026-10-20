@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { EcfrApi } from '../src/core/ecfr.js';
 import { HttpClient } from '../src/core/http-client.js';
 import { MAX_REDLINE_LINES, redlineSection, splitRedlineLines } from '../src/core/redline.js';
-import { ServiceError } from '../src/core/service.js';
+import { CFRService, ServiceError } from '../src/core/service.js';
 import { SyncError } from '../src/core/sync.js';
-import { createTestLogger, type TestLogger } from './helpers.js';
+import { createTestLogger, openTempStore, type TempStore, type TestLogger } from './helpers.js';
 import type { FetchLike } from '../src/core/http-client.js';
 
 /**
@@ -336,5 +336,47 @@ describe('splitRedlineLines', () => {
     // CRLF discipline: the \r stays with its line, never normalized away.
     expect(splitRedlineLines('a\r\nb\r\n')).toEqual(['a\r', 'b\r', '']);
     expect(splitRedlineLines('')).toEqual(['']);
+  });
+});
+
+describe('CFRService.redlineBetween (redline facade)', () => {
+  it('delegates to the core redline through the injected client and logger', async () => {
+    const temp: TempStore = openTempStore();
+    try {
+      const requested: string[] = [];
+      const deps = makeDeps(makeFetch(requested));
+      const service = new CFRService(temp.store, 7, deps.ecfr, deps.logger);
+      const report = await service.redlineBetween(FROM_DATE, TO_DATE, '4.125');
+      expect(report.fromIssueDate).toBe(FROM_DATE);
+      expect(report.toIssueDate).toBe(TO_DATE);
+      expect(report.citation).toBe('4.125');
+      expect(report.status).toBe('changed');
+      expect(report.coarse).toBe(false);
+      expect(requested).toEqual([FROM_DATE, TO_DATE]);
+      expect(deps.logger.records.some((r) => r.message === 'section redline computed')).toBe(true);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('fails closed with a mapped invalid_input when no eCFR client was injected', async () => {
+    const temp: TempStore = openTempStore();
+    try {
+      // Plain 2-arg construction (tests, index readers): the facade must not
+      // reach into an undefined client — it throws a clean ServiceError the
+      // HTTP/MCP layers map instead of crashing the handler.
+      const service = new CFRService(temp.store, 7);
+      const error = await service.redlineBetween(FROM_DATE, TO_DATE, '4.125').then(
+        () => {
+          throw new Error('expected the promise to reject');
+        },
+        (thrown: unknown) => thrown,
+      );
+      expect(error).toBeInstanceOf(ServiceError);
+      expect((error as ServiceError).code).toBe('invalid_input');
+      expect((error as ServiceError).message).toBe('redline unavailable — no eCFR client injected');
+    } finally {
+      temp.cleanup();
+    }
   });
 });
