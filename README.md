@@ -46,6 +46,7 @@ keys, no telemetry — one Node process and one SQLite file.
 Run from a source checkout (Node **≥ 22.5**):
 
 ```bash
+# requires Node >= 22.5
 git clone https://github.com/deffenda/cfr-free.git
 cd cfr-free
 npm ci                  # install the pinned dependencies
@@ -63,11 +64,18 @@ node dist/cli.js diff 2026-01-01 2026-06-01   # provision changes between two is
 node dist/cli.js redline 2026-01-01 2026-06-01 4.125   # line-level redline of one provision
 ```
 
+`sync` writes the index at `~/.cfr-free/index.sqlite`. To try it against a
+throwaway index instead of your own, point `CFR_INDEX_PATH` somewhere else:
+
+```bash
+CFR_INDEX_PATH=/tmp/cfr-smoke.sqlite node dist/cli.js sync   # ~5 s, then delete the file
+```
+
 Prefer a shorter command? `npm link` in the checkout puts `cfr-free` on your
 PATH, after which the examples above work verbatim as `cfr-free …`.
 
 **npm install is not available yet.** The package is not published: the npm
-registry returns 404 for `cfr-free` (checked 2026-10-20). Publication runs
+registry returns 404 for `cfr-free` (last checked 2026-10-20). Publication runs
 from the `v*`-tag release workflow with OIDC provenance and is gated behind
 trusted-publishing registration, so until that gate opens, the source
 checkout above is the installation path. Re-check with
