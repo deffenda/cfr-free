@@ -112,6 +112,46 @@ consumers before dispatch rather than silently changing their contracts.
 Checks: targeted parser/fidelity tests, `npm run ci`, and a separately logged
 `LIVE_TESTS=1 npm test -- test/live.test.ts` when network access is available.
 
+### M1 — Corpus fidelity beyond row counts — DONE (2026-10-20)
+
+**Shipped:** both packets, in three reviewed PRs, all with the Nemotron
+reviewer at the fixing SHA.
+
+- **M1(a) — the dated inventory** — PR #73 → `c2a7fac`; inventory at
+  `docs/research/corpus-fidelity-2026-10-20.md`, probe at
+  `tools/corpus-fidelity-probe.mjs` (issue date 2026-10-16, 9 613 330
+  bytes, sha256 `9506de6c…`). Verdict: APPROVE_WITH_NITS 0/0/3, then
+  RE_AFFIRM 0/0/0 after the caveat fixup. **Finding: no construct class
+  loses text** (footnotes, notes, editorial notes, extracts, sub-headings,
+  source credits, authority notes, table footers — all intact in every
+  provision that carries them); the loss was in MEANING.
+- **M1(b1) — inline rendering** — PR #74 → `c7b0085`. A container mixing
+  its own text with inline elements was rendered as blocks, splitting
+  phrases across blank lines (upstream "Note to paragraph (<E T="01">g
+  </E>)(1):" rendered as "Note to paragraph (⏎⏎g⏎⏎)(1):"). Fixed with a
+  structural inline rule plus an explicit block-tag guard; whole-corpus
+  diff: 2 970 provisions, 57 changed, every change whitespace-only, 0 lost;
+  the defect is 55 provisions (the inventory's "at least 71" included 16
+  legitimate block boundaries). Verdict: APPROVE_WITH_NITS 0/0/1, then
+  RE_AFFIRM 0/0/0.
+- **M1(b2) — labelling** — PR #75 → `eedd913`. Footnotes and extracts are
+  labelled ("Footnote:" / "Extract:", the document's own style) and
+  sub-headings render as headings; notes and editorial notes are NOT
+  re-labelled (all 70/33 already carry a self-labelling `<HED>`). Verdict:
+  APPROVE 0/0/0. Whole-corpus diff: 73 provisions changed, 0 content
+  changes after label removal, 0 lost.
+
+**Two corrections the inventory itself required** (recorded in it, not
+quietly absorbed): the footnote count was 274 because `<FP-1>`/`<FP-2>`
+list items were counted as footnotes (the real count is 62), and the
+claims that notes and editorial notes were unlabelled were wrong — the
+upstream wording labels both.
+
+**Not done, and why:** no local graphic caching (the roadmap's decision
+step — download/size bounds, source validation, offline behaviour,
+attribution, export handling — was not reached); no automatic OCR or
+guessed legal text; no completeness field on the wire surfaces.
+
 ### M2 — Dated provenance and honest comparison semantics
 
 **Dependency:** baseline fixes; coordinate with queued E1/E2/E5.

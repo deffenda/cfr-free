@@ -245,6 +245,9 @@ async function main() {
       const before = parts[i - 1];
       const after = parts[i];
       if (before.length === 0 || after.length === 0) continue;
+      // A label block ("Footnote:", "Extract:") is a deliberate separator,
+      // not a split phrase: skip it so the proxy counts only real splits.
+      if (before.endsWith(':') && (before === 'Footnote:' || before === 'Extract:')) continue;
       const left = before[before.length - 1];
       const right = after[0];
       // Both sides must look like the middle of a word or a bracket group.
