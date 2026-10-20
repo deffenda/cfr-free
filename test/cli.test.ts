@@ -377,6 +377,25 @@ describe('main: diff output', () => {
   });
 });
 
+describe('parseArgs: historical', () => {
+  it('parses historical with exactly two positionals', () => {
+    expect(parseArgs(['historical', '2024-03-10', '4.130'])).toEqual({
+      command: 'historical',
+      atDate: '2024-03-10',
+      citation: '4.130',
+    });
+  });
+
+  it('rejects historical with too few, too many, or dash-prefixed arguments', () => {
+    const usage = /cfr-free historical <at> <citation>/;
+    expect(() => parseArgs(['historical'])).toThrow(CliError);
+    expect(() => parseArgs(['historical', '2024-03-10'])).toThrow(usage);
+    expect(() => parseArgs(['historical', '2024-03-10', '4.130', 'extra'])).toThrow(usage);
+    expect(() => parseArgs(['historical', '--at', '4.130'])).toThrow(usage);
+    expect(() => parseArgs(['historical', '2024-03-10', '--citation'])).toThrow(usage);
+  });
+});
+
 describe('parseArgs: redline', () => {
   it('parses redline with exactly three positionals', () => {
     expect(parseArgs(['redline', '2026-01-01', '2026-06-01', '4.125'])).toEqual({

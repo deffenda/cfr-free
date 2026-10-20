@@ -622,7 +622,14 @@ describe('MCP diff_issues tool (ecfr injected)', () => {
     return {
       getFullTitleXml: async (issueDate: string) => {
         const xml = xmlByDate[issueDate];
-        if (xml === undefined) throw new Error(`HTTP 404 for ${issueDate}`);
+        if (xml === undefined) {
+          // The real client throws an HttpError carrying the status; the
+          // historical read maps a 404 to a clean not_found, so the stub
+          // must be faithful about it.
+          const error = new Error(`HTTP 404 for ${issueDate}`) as Error & { status?: number };
+          error.status = 404;
+          throw error;
+        }
         return xml;
       },
     } as unknown as EcfrApi;
@@ -659,6 +666,7 @@ describe('MCP diff_issues tool (ecfr injected)', () => {
         'browse_title38',
         'diff_issues',
         'get_section',
+        'get_section_at',
         'health',
         'index_status',
         'list_parts',
@@ -685,7 +693,7 @@ describe('MCP diff_issues tool (ecfr injected)', () => {
     }
   });
 
-  it('annotates the two eCFR tools openWorld and the six index tools closed-world', async () => {
+  it('annotates the three eCFR tools openWorld and the six index tools closed-world', async () => {
     const probe = await connectedServer(
       stubEcfr({ [FROM_DATE]: DIFF_FROM_XML, [TO_DATE]: DIFF_TO_XML }),
     );
@@ -697,9 +705,43 @@ describe('MCP diff_issues tool (ecfr injected)', () => {
         expect(tool.annotations?.destructiveHint).toBe(false);
         expect(tool.annotations?.idempotentHint).toBe(true);
         expect(tool.annotations?.openWorldHint).toBe(
-          tool.name === 'diff_issues' || tool.name === 'redline',
+          tool.name === 'diff_issues' || tool.name === 'redline' || tool.name === 'get_section_at',
         );
       }
+    } finally {
+      await probe.close();
+    }
+  });
+
+  it('get_section_at returns the provision as it stood at the requested date (M2(c))', async () => {
+    const probe = await connectedServer(stubEcfr({ '2024-03-10': DIFF_FROM_XML }));
+    try {
+      const result = (await probe.client.callTool({
+        name: 'get_section_at',
+        arguments: { at_date: '2024-03-10', citation: '4.125' },
+      })) as ToolCallResult;
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent?.['requestedDate']).toBe('2024-03-10');
+      expect(result.structuredContent?.['citation']).toBe('4.125');
+      expect(String(result.structuredContent?.['sourceUrlAtRequestedDate'])).toContain(
+        '/on/2024-03-10/title-38/section-4.125',
+      );
+      // The response names the requested date and never a served date.
+      expect(Object.keys(result.structuredContent ?? {})).not.toContain('servedDate');
+    } finally {
+      await probe.close();
+    }
+  });
+
+  it('get_section_at reports a date outside eCFR archive as a client-safe error', async () => {
+    const probe = await connectedServer(stubEcfr({}));
+    try {
+      const result = (await probe.client.callTool({
+        name: 'get_section_at',
+        arguments: { at_date: '2015-01-01', citation: '4.125' },
+      })) as ToolCallResult;
+      expect(result.isError).toBe(true);
+      expect(String(result.content?.[0]?.text)).toContain('archive');
     } finally {
       await probe.close();
     }
@@ -837,7 +879,14 @@ describe('MCP redline tool (ecfr injected)', () => {
     return {
       getFullTitleXml: async (issueDate: string) => {
         const xml = xmlByDate[issueDate];
-        if (xml === undefined) throw new Error(`HTTP 404 for ${issueDate}`);
+        if (xml === undefined) {
+          // The real client throws an HttpError carrying the status; the
+          // historical read maps a 404 to a clean not_found, so the stub
+          // must be faithful about it.
+          const error = new Error(`HTTP 404 for ${issueDate}`) as Error & { status?: number };
+          error.status = 404;
+          throw error;
+        }
         return xml;
       },
     } as unknown as EcfrApi;
@@ -874,6 +923,7 @@ describe('MCP redline tool (ecfr injected)', () => {
         'browse_title38',
         'diff_issues',
         'get_section',
+        'get_section_at',
         'health',
         'index_status',
         'list_parts',
