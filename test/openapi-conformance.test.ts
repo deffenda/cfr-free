@@ -291,6 +291,7 @@ const KNOWN_PATHS = [
   '/api/v1/sections/{citation}',
   '/api/v1/browse',
   '/api/v1/diff',
+  '/api/v1/redline',
 ] as const;
 
 interface OperationEntry {
@@ -387,6 +388,10 @@ function responseBindingViolations(label: string, entry: unknown): string[] {
 const CONDITIONAL_FIELDS: Readonly<Record<string, readonly string[]>> = {
   Error: ['available'],
   Health: ['diskFree', 'diskTotal'],
+  // The core omits these keys when the provision did not exist on that date
+  // (added/removed) — the same "absent when not applicable" shape as Health's
+  // disk fields and browse's `available`.
+  RedlineResult: ['fromText', 'toText'],
 };
 
 describe('OpenAPI spec well-formedness (docs/openapi.yaml)', () => {
@@ -563,6 +568,10 @@ const ROUTE_PROBES: Readonly<
   '/api/v1/sections/{citation}': { requestPath: '/api/v1/sections/4.125' },
   '/api/v1/browse': { requestPath: '/api/v1/browse' },
   '/api/v1/diff': { requestPath: '/api/v1/diff', query: 'from=2026-01-01&to=2026-06-01' },
+  '/api/v1/redline': {
+    requestPath: '/api/v1/redline',
+    query: 'from=2026-01-01&to=2026-06-01&citation=4.125',
+  },
 };
 
 /**
@@ -583,6 +592,48 @@ function makeDiffEcfr(): EcfrApi {
       const doc = byDate[issueDate];
       if (doc === undefined) throw new Error(`HTTP 404 for ${issueDate}`);
       return doc;
+    },
+  } as unknown as EcfrApi;
+}
+
+/**
+ * Offline eCFR stub for the `/api/v1/redline` probes (D2's makeDiffEcfr
+ * mirrored): the same two probe dates, one section amended between them, plus
+ * a second section absent from BOTH dates so the 404 probe (a citation
+ * missing from both parses) is exercised for real.
+ */
+function makeRedlineEcfr(): EcfrApi {
+  const xml = (body: string): string =>
+    `<ECFR><DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD><DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD><DIV5 N="4" TYPE="PART"><HEAD>Part 4</HEAD><DIV8 N="4.125" TYPE="SECTION"><HEAD>§ 4.125 Test.</HEAD><P>${body}</P></DIV8></DIV5></DIV3></DIV1>`;
+  const byDate: Readonly<Record<string, string>> = {
+    '2026-01-01': xml('Original body.'),
+    '2026-06-01': xml('Amended body.'),
+  };
+  return {
+    getFullTitleXml: async (issueDate: string) => {
+      const doc = byDate[issueDate];
+      if (doc === undefined) throw new Error(`HTTP 404 for ${issueDate}`);
+      return doc;
+    },
+  } as unknown as EcfrApi;
+}
+
+/**
+ * Date-keyed stub merge: the happy probe for `/api/v1/diff` and the probes for
+ * `/api/v1/redline` share the same two dates, so one client serves both — each
+ * stub owns its own date registry, and the first to answer wins.
+ */
+function mergeEcfr(...clients: readonly EcfrApi[]): EcfrApi {
+  return {
+    getFullTitleXml: async (issueDate: string) => {
+      for (const client of clients) {
+        try {
+          return await client.getFullTitleXml(issueDate);
+        } catch {
+          // Fall through to the next stub's registry.
+        }
+      }
+      throw new Error(`HTTP 404 for ${issueDate}`);
     },
   } as unknown as EcfrApi;
 }
@@ -662,6 +713,22 @@ const ERROR_PROBES: readonly ErrorProbeRow[] = [
     expectedStatus: 400,
   },
   {
+    label: 'redline GET without required params',
+    specPath: '/api/v1/redline',
+    operation: 'get',
+    method: 'GET',
+    url: '/api/v1/redline',
+    expectedStatus: 400,
+  },
+  {
+    label: 'redline GET with a citation missing from both dates',
+    specPath: '/api/v1/redline',
+    operation: 'get',
+    method: 'GET',
+    url: '/api/v1/redline?from=2026-01-01&to=2026-06-01&citation=99.999',
+    expectedStatus: 404,
+  },
+  {
     label: 'sections GET unknown citation',
     specPath: '/api/v1/sections/{citation}',
     operation: 'get',
@@ -704,10 +771,10 @@ describe('OpenAPI response conformance (in-process server vs spec)', () => {
 
   beforeAll(async () => {
     temp = openTempStore();
-    // The happy probe for /api/v1/diff needs a fetching client, so this server
-    // carries the stub diff stack — every other route still reads the fixture
-    // store exactly as before.
-    const ecfr = makeDiffEcfr();
+    // The happy probes for /api/v1/diff and /api/v1/redline need a fetching
+    // client, so this server carries the merged stub stack — every other route
+    // still reads the fixture store exactly as before.
+    const ecfr = mergeEcfr(makeDiffEcfr(), makeRedlineEcfr());
     server = createHttpServer(
       new CFRService(temp.store, 7, ecfr, createTestLogger()),
       createTestLogger(),

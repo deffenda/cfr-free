@@ -4,16 +4,17 @@ import type { Logger } from '../logger.js';
 import { CHANGE_LIST_CAP } from '../core/changes.js';
 import { diffIssues } from '../core/diff.js';
 import type { EcfrApi } from '../core/ecfr.js';
+import { redlineSection } from '../core/redline.js';
 import type { CFRService } from '../core/service.js';
 import { clientSafeMessage } from './client-safe.js';
 
 /**
  * MCP tool registrations. Every tool is read-only (never destructive,
  * idempotent). Six read the local index with zero network access during tool
- * calls; `diff_issues` is the one deliberate network exception — it is
- * read-only everywhere, but fetches two issue dates' full-title XML from eCFR
- * on demand (see its registration below), which is why the server registers
- * it only when an eCFR client is injected.
+ * calls; `diff_issues` and `redline` are the deliberate network exceptions —
+ * read-only everywhere, but each fetches two issue dates' full-title XML from
+ * eCFR on demand (see their registrations below), which is why the server
+ * registers them only when an eCFR client is injected.
  */
 
 const READ_ONLY_ANNOTATIONS = {
@@ -23,7 +24,7 @@ const READ_ONLY_ANNOTATIONS = {
   openWorldHint: false,
 } as const;
 
-// diff_issues hits the live eCFR versioner on every call — openWorld stays true while the other hints stay read-only.
+// diff_issues and redline hit the live eCFR versioner on every call — openWorld stays true while the other hints stay read-only.
 const DIFF_ANNOTATIONS = {
   ...READ_ONLY_ANNOTATIONS,
   openWorldHint: true,
@@ -151,6 +152,31 @@ const changeReportOutputSchema = z.object({
     .describe(`true when any citation list was cut at the ${CHANGE_LIST_CAP}-citation cap`),
 });
 
+/**
+ * Mirrors the core's SectionRedline (src/core/redline.ts) verbatim — the core
+ * is the contract, so the wire adds nothing and caps nothing (the core's own
+ * MAX_REDLINE_LINES coarse fallback is the only bound). `fromText`/`toText`
+ * are optional because the core omits them when the provision did not exist on
+ * that date.
+ */
+const redlineOutputSchema = z.object({
+  fromIssueDate: z.string(),
+  toIssueDate: z.string(),
+  citation: z.string(),
+  status: z.enum(['changed', 'added', 'removed', 'unchanged']),
+  fromText: z.string().optional(),
+  toText: z.string().optional(),
+  hunks: z.array(
+    z.object({
+      fromLine: z.number().nullable(),
+      toLine: z.number().nullable(),
+      type: z.enum(['same', 'add', 'del']),
+      text: z.string(),
+    }),
+  ),
+  coarse: z.boolean(),
+});
+
 type SearchOutput = z.infer<typeof searchOutputSchema>;
 type SectionOutput = z.infer<typeof sectionOutputSchema>;
 type BrowseOutput = z.infer<typeof browseOutputSchema>;
@@ -158,12 +184,13 @@ type StatusOutput = z.infer<typeof statusOutputSchema>;
 type ListPartsOutput = z.infer<typeof listPartsOutputSchema>;
 type HealthOutput = z.infer<typeof healthOutputSchema>;
 type ChangeReportOutput = z.infer<typeof changeReportOutputSchema>;
+type RedlineOutput = z.infer<typeof redlineOutputSchema>;
 
 function textContent(payload: unknown): string {
   return JSON.stringify(payload, null, 2);
 }
 
-/** Register all tools on the server; `deps.ecfr` gates the diff tool. */
+/** Register all tools on the server; `deps.ecfr` gates the diff and redline tools. */
 export function registerTools(
   server: McpServer,
   service: CFRService,
@@ -444,8 +471,8 @@ export function registerTools(
   );
 
   // Registered only when an eCFR client is injected: without one there is no
-  // honest way to serve a point-in-time diff, so the tool stays off the
-  // server's tools/list instead of existing as a guaranteed failure.
+  // honest way to serve a point-in-time diff or redline, so the tools stay off
+  // the server's tools/list instead of existing as guaranteed failures.
   const ecfr = deps?.ecfr;
   if (ecfr !== undefined) {
     server.registerTool(
@@ -489,6 +516,71 @@ export function registerTools(
           };
         } catch (error) {
           logger.error('tool diff_issues failed', {
+            message: error instanceof Error ? error.message : String(error),
+          });
+          return {
+            content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    server.registerTool(
+      'redline',
+      {
+        title: 'Line redline of one provision between two eCFR issue dates',
+        description:
+          'Line-level redline of one Title 38 provision between two eCFR issue dates: which lines of ' +
+          '`citation` changed, were added, or were removed between `from_date` and `to_date` (both ' +
+          'YYYY-MM-DD, both required — this tool has no default-to). The dates are SELECTORS — eCFR ' +
+          'serves the revision in force on the requested date; they are not a verified stamp of which ' +
+          "issue date was served. Returns the status (changed/added/removed/unchanged), both sides' raw " +
+          "text, and one hunk per line (same/add/del with 1-based anchors into each side's text). " +
+          'Identical or impossible dates (e.g. month 13) are rejected as errors before any fetch; a ' +
+          'citation missing from BOTH dates is a not_found error after the fetches. Stateless: both ' +
+          "dates' full-title XML is fetched from eCFR per call — no local index needed, no cache. " +
+          "When either side exceeds the core's line cap the per-line walk is replaced by two whole-text " +
+          "coarse blocks (`coarse: true`) — passed through uncapped here, the core's own bound.",
+        inputSchema: {
+          from_date: dateArgSchema,
+          to_date: dateArgSchema,
+          citation: z
+            .string()
+            .min(1)
+            .max(120)
+            .describe('the citation to redline, e.g. "38 CFR 4.125" (≤ 120 chars)'),
+        },
+        outputSchema: redlineOutputSchema,
+        annotations: DIFF_ANNOTATIONS,
+      },
+      async (args) => {
+        try {
+          const redline = await redlineSection(
+            { ecfr, logger },
+            args.from_date,
+            args.to_date,
+            args.citation,
+          );
+          // Passthrough verbatim: the core's SectionRedline IS the wire contract —
+          // no wire-layer caps (the core's coarse fallback at MAX_REDLINE_LINES is
+          // the only bound).
+          const structuredContent: RedlineOutput = {
+            fromIssueDate: redline.fromIssueDate,
+            toIssueDate: redline.toIssueDate,
+            citation: redline.citation,
+            status: redline.status,
+            fromText: redline.fromText,
+            toText: redline.toText,
+            hunks: redline.hunks.map((hunk) => ({ ...hunk })),
+            coarse: redline.coarse,
+          };
+          return {
+            content: [{ type: 'text', text: textContent(structuredContent) }],
+            structuredContent,
+          };
+        } catch (error) {
+          logger.error('tool redline failed', {
             message: error instanceof Error ? error.message : String(error),
           });
           return {

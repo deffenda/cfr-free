@@ -21,9 +21,10 @@ keys, no telemetry — one Node process and one SQLite file.
   `[image content not included: <path>]` marker where the graphic belongs,
   so a missing table is never mistaken for complete text. Nothing is
   fetched or transcribed — the service stays fully offline.
-- **MCP server** with six read-only tools any MCP client can use:
-  `search_regulations`, `get_section`, `browse_title38`, `index_status`,
-  `list_parts`, `health`.
+- **MCP server** with eight read-only tools any MCP client can use: six
+  offline index-backed ones (`search_regulations`, `get_section`,
+  `browse_title38`, `index_status`, `list_parts`, `health`) plus two that
+  fetch the live eCFR versioner per call (`diff_issues`, `redline`).
 - **HTTP JSON API** for scripts and apps: search, read sections, browse the
   CFR hierarchy, health check, Prometheus metrics.
 - **Freshness tracking**: the index records the eCFR issue date it was built
@@ -115,11 +116,14 @@ disorders?"_ or _"Search Title 38 for traumatic brain injury compensation."_
 | `index_status`       | —                                      | Issue date, last sync, row counts, staleness, drift flag, and what the last sync amended/added/removed                                                                                                           |
 | `list_parts`         | —                                      | Parts in the index with titles and section/appendix counts                                                                                                                                                       |
 | `health`             | —                                      | One-call readiness verdict: `ready`, `stale`, `degraded` (structure drift), or `empty`                                                                                                                           |
+| `diff_issues`        | `from_date`, `to_date`                 | Provision-level diff between two eCFR issue dates: changed/added/removed citations (capped, with a truncation flag)                                                                                              |
+| `redline`            | `from_date`, `to_date`, `citation`     | Line-level redline of one provision between two eCFR issue dates: status, both sides' text, and per-line hunks                                                                                                   |
 
-All tools are **read-only** and query only the local index — they never hit
-the network. Search and section responses carry a freshness envelope
-(`indexStale` + a `notice` when the local index has aged out) so a client can
-never unknowingly quote a lapsed version.
+All tools are **read-only**; the six index tools query only the local index and
+never hit the network, while `diff_issues` and `redline` fetch the two issue
+dates' full-title XML from eCFR on each call. Search and section responses
+carry a freshness envelope (`indexStale` + a `notice` when the local index has
+aged out) so a client can never unknowingly quote a lapsed version.
 
 Beyond tools, the server exposes three MCP **resources** that clients can read
 directly — `cfr://index/status` (freshness JSON: issue date, last sync, row
