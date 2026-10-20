@@ -23,8 +23,9 @@ keys, no telemetry — one Node process and one SQLite file.
   CFR hierarchy, health check, Prometheus metrics.
 - **Freshness tracking**: the index records the eCFR issue date it was built
   from and warns when it goes stale or drifts from the structure tree.
-- **Backup-friendly**: `cfr-free export <path>` writes a consistent snapshot
-  of the index you can copy anywhere.
+- **Backup-friendly**: `cfr-free export <path> [jsonl|md]` writes a consistent
+  snapshot of the index you can copy anywhere (sqlite default; `jsonl` and `md`
+  for pipeline ingestion).
 
 ## Requirements
 
