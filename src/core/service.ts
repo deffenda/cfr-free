@@ -114,6 +114,14 @@ export interface SectionDetail {
   readonly markdown: string;
   readonly text: string;
   readonly sourceUrl: string;
+  /**
+   * The same provision at the revision THIS index was built from — the
+   * eCFR point-in-time URL for the index's issue date. `sourceUrl` points
+   * at the CURRENT text (for navigation and verification); this one points
+   * at the text the index actually holds, so a reader (or an agent) can
+   * open exactly the words that were quoted.
+   */
+  readonly sourceUrlAtIndexDate: string;
   /** Citations referenced from this text, with local-availability flags. */
   readonly references: ReadonlyArray<{ readonly citation: string; readonly available: boolean }>;
   /**
@@ -189,6 +197,29 @@ function sourceUrlFor(kind: 'section' | 'appendix', citation: string): string {
     return `https://www.ecfr.gov/search?searchTerm=${encodeURIComponent(citation)}&titles=38`;
   }
   return `https://www.ecfr.gov/current/title-38/section-${encodeURIComponent(citation)}`;
+}
+
+/**
+ * Permalink to the SAME provision at a DATED revision on ecfr.gov — the
+ * `/on/<date>/…` form, which keeps the date in the canonical path (the
+ * `/current/` form drops it).
+ *
+ * Verified 2026-10-20 against the live site: both forms answer 302 to a
+ * canonical path that PRESERVES the date, e.g.
+ *   /on/2026-10-16/title-38/section-4.125
+ *     -> /on/2026-10-16/title-38/chapter-I/part-4/subpart-B/subject-group-…/section-4.125
+ * The appendix form needs the citation URL-ENCODED (the unencoded form
+ * answers 404):
+ *   /on/2026-10-16/title-38/appendix-Appendix%20A%20to%20Part%204
+ *     -> /on/2026-10-16/title-38/chapter-I/part-4/appendix-Appendix%20A%20to%20Part%204
+ */
+function datedSourceUrlFor(
+  kind: 'section' | 'appendix',
+  citation: string,
+  issueDate: string,
+): string {
+  const kindSegment = kind === 'appendix' ? 'appendix' : 'section';
+  return `https://www.ecfr.gov/on/${issueDate}/title-38/${kindSegment}-${encodeURIComponent(citation)}`;
 }
 
 /** Sections are numeric citations; everything else is an appendix name. */
@@ -410,6 +441,7 @@ export class CFRService {
       markdown: row.markdown,
       text: row.text,
       sourceUrl: sourceUrlFor(row.kind, row.citation),
+      sourceUrlAtIndexDate: datedSourceUrlFor(row.kind, row.citation, row.issueDate),
       references: extractReferences(row.text).map((citation) => ({
         citation,
         available: this.store.hasSection(citation),

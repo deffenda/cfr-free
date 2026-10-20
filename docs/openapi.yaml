@@ -601,6 +601,7 @@ components:
         - markdown
         - text
         - sourceUrl
+        - sourceUrlAtIndexDate
         - references
         - citedBy
         - indexStale
@@ -617,6 +618,14 @@ components:
         markdown: { type: string }
         text: { type: string }
         sourceUrl: { type: string, format: uri }
+        sourceUrlAtIndexDate:
+          type: string
+          format: uri
+          description: >-
+            The same provision at the revision this index was built from (the
+            eCFR point-in-time URL for the index's issue date). `sourceUrl`
+            points at the CURRENT text; this one points at the text the
+            index actually holds.
         references:
           type: array
           items:

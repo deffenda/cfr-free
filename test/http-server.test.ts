@@ -222,6 +222,15 @@ describe('Titan HTTP API', () => {
     expect(body['citation']).toBe('4.125');
   });
 
+  it('serves the dated source URL alongside the current one (M2(a))', async () => {
+    const { status, body } = await get('/api/v1/sections/4.125');
+    expect(status).toBe(200);
+    expect(body['sourceUrl']).toBe('https://www.ecfr.gov/current/title-38/section-4.125');
+    expect(String(body['sourceUrlAtIndexDate'])).toMatch(
+      /^https:\/\/www\.ecfr\.gov\/on\/\d{4}-\d{2}-\d{2}\/title-38\/section-4\.125$/,
+    );
+  });
+
   it('surfaces citedBy backlinks on the wire', async () => {
     // Self-contained store: the shared fixture seed has no citation edges, so
     // a real backlink needs its own two-section index (4.131 → § 4.130).

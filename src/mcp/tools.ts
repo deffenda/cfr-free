@@ -68,6 +68,7 @@ const sectionOutputSchema = z.object({
   markdown: z.string(),
   text: z.string(),
   sourceUrl: z.string(),
+  sourceUrlAtIndexDate: z.string(),
   references: z.array(z.object({ citation: z.string(), available: z.boolean() })),
   citedBy: z.array(z.string()),
   indexStale: z.boolean(),

@@ -82,6 +82,20 @@ describe('CFRService.getSection', () => {
       expect(displayed).toBe('38 C.F.R. \u00a7 4.130');
       expect(service.getSection(String(displayed)).citation).toBe('4.130');
 
+      // M2(a): the section carries BOTH urls — the current one (navigation
+      // and verification) and the dated one (the revision the index holds).
+      const dated = service.getSection('38 CFR 4.125');
+      expect(dated.sourceUrl).toBe('https://www.ecfr.gov/current/title-38/section-4.125');
+      expect(dated.sourceUrlAtIndexDate).toMatch(
+        /^https:\/\/www\.ecfr\.gov\/on\/\d{4}-\d{2}-\d{2}\/title-38\/section-4\.125$/,
+      );
+      expect(dated.sourceUrlAtIndexDate).toContain(dated.issueDate);
+      // The appendix form is URL-ENCODED (the unencoded form 404s upstream).
+      const datedAppendix = service.getSection('Appendix A to Part 4');
+      expect(datedAppendix.sourceUrlAtIndexDate).toContain(
+        '/title-38/appendix-Appendix%20A%20to%20Part%204',
+      );
+
       const section = service.getSection('38 CFR 4.125');
       expect(section.citation).toBe('4.125');
       expect(section.kind).toBe('section');
