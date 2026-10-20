@@ -164,6 +164,20 @@ describe('MCP server (in-memory transport)', () => {
     expect(result.structuredContent?.['citation']).toBe('4.125');
   });
 
+  it('get_section returns the dated source URL alongside the current one (M2(a))', async () => {
+    const result = (await client.callTool({
+      name: 'get_section',
+      arguments: { citation: '38 CFR 4.125' },
+    })) as ToolCallResult;
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent?.['sourceUrl']).toBe(
+      'https://www.ecfr.gov/current/title-38/section-4.125',
+    );
+    expect(String(result.structuredContent?.['sourceUrlAtIndexDate'])).toMatch(
+      /^https:\/\/www\.ecfr\.gov\/on\/\d{4}-\d{2}-\d{2}\/title-38\/section-4\.125$/,
+    );
+  });
+
   it('get_section surfaces citedBy backlinks on the wire', async () => {
     // Self-contained store: the shared fixture seed cites nothing, so a real
     // edge needs its own two-section index (4.131 → § 4.130).

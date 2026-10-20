@@ -80,6 +80,25 @@ places a paragraph inside a container with its own text keeps that
 paragraph as its own block instead of silently folding it into a
 phrase.
 
+**Dated source URL (M2(a)):** every section response carries TWO links to
+the same provision on ecfr.gov: `sourceUrl` points at the CURRENT text
+(`/current/title-38/section-<citation>`) for navigation and verification,
+and `sourceUrlAtIndexDate` points at the SAME provision at the revision the
+index was built from — the eCFR point-in-time form
+(`/on/<issue date>/title-38/section-<citation>`, appendix form
+`/on/<issue date>/title-38/appendix-<citation>`, URL-encoded). The
+`/current/` form drops the revision, so a reader who opened it could not
+tell which text they were looking at; the dated form keeps the date, and
+the index's issue date IS the revision the indexed text was parsed from.
+Verified 2026-10-20 against the live site: both forms answer 302 to a
+canonical path that preserves the date. **Retention limit (also measured
+2026-10-20):** eCFR serves the point-in-time archive only from 2017
+onward for Title 38 — `/on/2017-01-01/…` answers 302, `/on/2016-06-01/…`
+answers 404. The link therefore names the revision the index holds (which
+is always true), but for an index older than the archive window it will
+not resolve; the index's own issue date remains the authority, and the
+existing staleness notice already tells the reader the index may be old.
+
 **Labelling supplementary text (M1(b2)):** a footnote (`<FP>`) and an
 extract (`<EXTRACT>`) carry text that is NOT the provision's own regulatory
 prose — a footnote is supplementary text attached to a paragraph, an extract
