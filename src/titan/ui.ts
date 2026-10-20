@@ -14,14 +14,15 @@
  *   still not execute.
  * - The client JS builds every dynamic node with `createElement` +
  *   `textContent`; server-provided regulatory text (snippets, headings,
- *   citations, section text) is never assigned to `innerHTML`/`outerHTML`,
- *   so the UI cannot become an HTML-injection vector for index content.
+ *   citations, section text) is never assigned to HTML sinks (`innerHTML`,
+ *   `outerHTML`, …), so the UI cannot become an HTML-injection vector for
+ *   index content.
  * - No frameworks, no CDN links, no external fonts, no storage/session use.
  */
 
 /** CSP sent with the HTML shell (and HEAD twin) at `/`. Subresource routes (`/ui.js`, `/ui.css`) deliberately send no CSP of their own: a policy on a stylesheet/script response would only apply if that resource were rendered as a document, which the UI never does. */
 export const UI_CSP =
-  "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+  "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
 /** The single-page HTML shell: static structure only, no dynamic content. */
 export const UI_HTML = `<!doctype html>
@@ -37,6 +38,10 @@ export const UI_HTML = `<!doctype html>
     <header class="site-header">
       <h1><a href="#/search">cfr-free</a></h1>
       <p>Read-only search over the local Title 38 CFR index.</p>
+      <nav class="site-tabs" aria-label="Views">
+        <a href="#/search">Search</a>
+        <a href="#/browse">Browse</a>
+      </nav>
     </header>
     <noscript>
       <p>This page needs JavaScript. The JSON API stays available at /api/v1/… without it.</p>
@@ -76,6 +81,12 @@ export const UI_HTML = `<!doctype html>
         <ul id="section-references"></ul>
         <h3>Cited by</h3>
         <ul id="section-citedby"></ul>
+      </section>
+      <section id="browse-view" hidden>
+        <p id="browse-error" role="status"></p>
+        <nav id="browse-crumbs" class="breadcrumb" aria-label="Breadcrumb"></nav>
+        <h2 id="browse-heading"></h2>
+        <ul id="browse-list"></ul>
       </section>
     </main>
     <script src="/ui.js"></script>
@@ -126,6 +137,15 @@ export const UI_JS = String.raw`(function () {
   var sectionText = byId('section-text');
   var sectionReferences = byId('section-references');
   var sectionCitedBy = byId('section-citedby');
+  var browseView = byId('browse-view');
+  var browseError = byId('browse-error');
+  var browseCrumbs = byId('browse-crumbs');
+  var browseHeading = byId('browse-heading');
+  var browseList = byId('browse-list');
+  // Tree navigation state: one entry per level, deepest last. It lives HERE,
+  // never in the hash — #/browse is a single route and the stack is
+  // depth-limited (root → chapter → part → subpart).
+  var browseLevels = [];
 
   function clampInt(raw, fallback, max) {
     var value = parseInt(raw === null ? '' : raw, 10);
@@ -136,6 +156,9 @@ export const UI_JS = String.raw`(function () {
 
   function parseHash() {
     var hash = window.location.hash;
+    // Single browse route: no query params — the tree state stays in the click
+    // handlers below. Any other unknown hash falls through to the search view.
+    if (hash === '#/browse') return { view: 'browse' };
     var sectionPrefix = '#/section/';
     if (hash.indexOf(sectionPrefix) === 0) {
       var raw = hash.slice(sectionPrefix.length);
@@ -326,6 +349,7 @@ export const UI_JS = String.raw`(function () {
   function renderSearch(state) {
     searchView.hidden = false;
     sectionView.hidden = true;
+    browseView.hidden = true;
     qInput.value = state.q;
     kindSelect.value = state.kind === 'section' || state.kind === 'appendix' ? state.kind : '';
     chapterInput.value = state.chapter;
@@ -398,6 +422,7 @@ export const UI_JS = String.raw`(function () {
   function renderSection(citation) {
     searchView.hidden = true;
     sectionView.hidden = false;
+    browseView.hidden = true;
     clear(sectionReferences);
     clear(sectionCitedBy);
     clear(sectionText);
@@ -434,6 +459,167 @@ export const UI_JS = String.raw`(function () {
       });
   }
 
+  // ---- #/browse: lazy chapter/part/subpart tree over /api/v1/browse ----
+
+  /** Node text: the entry's label, or a "type: identifier" fallback. */
+  function browseLabel(entry) {
+    var label = typeof entry.label === 'string' ? entry.label : '';
+    if (label !== '') return label;
+    return String(entry.type) + ': ' + String(entry.identifier);
+  }
+
+  /** URL for one browse level; omitted levels mean "stop here". */
+  function browseUrl(level) {
+    var params = new URLSearchParams();
+    if (level.chapter !== '') params.set('chapter', level.chapter);
+    if (level.part !== '') params.set('part', level.part);
+    if (level.subpart !== '') params.set('subpart', level.subpart);
+    var query = params.toString();
+    return '/api/v1/browse' + (query === '' ? '' : '?' + query);
+  }
+
+  /** The next level reached by opening 'entry' from 'parent'. */
+  function childLevel(parent, entry) {
+    var type = String(entry.type);
+    var next = { chapter: parent.chapter, part: parent.part, subpart: parent.subpart };
+    if (type === 'chapter') next.chapter = String(entry.identifier);
+    else if (type === 'part') next.part = String(entry.identifier);
+    else if (type === 'subpart') next.subpart = String(entry.identifier);
+    return next;
+  }
+
+  function appendBrowseEntry(item, entry, level) {
+    var type = String(entry.type);
+    var text = browseLabel(entry);
+    if (type === 'section' || type === 'appendix') {
+      // Leaf-linking rule: both identifiers are citations the reader route
+      // accepts — appendix identifiers are full citations ("Appendix A to
+      // Part 4"), section identifiers bare citations ("18.1").
+      var leaf = document.createElement('a');
+      leaf.href = sectionHref(String(entry.identifier));
+      leaf.textContent = text;
+      item.appendChild(leaf);
+      return;
+    }
+    if (type === 'chapter' || type === 'part' || type === 'subpart') {
+      var nav = document.createElement('button');
+      nav.type = 'button';
+      nav.textContent = text;
+      nav.addEventListener('click', function () {
+        loadBrowseLevel(childLevel(level, entry));
+      });
+      item.appendChild(nav);
+      return;
+    }
+    // subject_group (and any future type the wire cannot descend into): browse
+    // takes only chapter/part/subpart params and entries are flat
+    // {type, identifier, label} — no deeper fetch exists, so the row renders
+    // expanded in place: label only, no link, no request, no dead end.
+    item.textContent = text;
+  }
+
+  /** Breadcrumb from the deepest response's path; back-links restore the stack. */
+  function renderBrowseCrumbs(levels) {
+    clear(browseCrumbs);
+    var deepest = levels[levels.length - 1];
+    // path includes the deepest node as its last entry, and levels[0].node is
+    // the root the path never contains — so crumbs[i] always maps to levels[i].
+    var entries = [levels[0].result.node].concat(deepest.result.path);
+    for (var i = 0; i < entries.length; i += 1) {
+      if (i > 0) browseCrumbs.appendChild(document.createTextNode(' › '));
+      var text = browseLabel(entries[i]);
+      if (i === entries.length - 1) {
+        browseCrumbs.appendChild(el('span', 'crumb-current', text));
+        continue;
+      }
+      var back = document.createElement('a');
+      back.href = '#/browse';
+      back.textContent = text;
+      back.addEventListener(
+        'click',
+        (function (index) {
+          return function (event) {
+            // Back-links pop the cached stack — they never trigger a fetch.
+            event.preventDefault();
+            browseLevels = browseLevels.slice(0, index + 1);
+            renderBrowseLevel();
+          };
+        })(i),
+      );
+      browseCrumbs.appendChild(back);
+    }
+  }
+
+  /** Render the deepest cached level: node heading, breadcrumb, children list. */
+  function renderBrowseLevel() {
+    var level = browseLevels[browseLevels.length - 1];
+    clear(browseError);
+    clear(browseList);
+    browseHeading.textContent = browseLabel(level.result.node);
+    renderBrowseCrumbs(browseLevels);
+    var children = Array.isArray(level.result.children) ? level.result.children : [];
+    if (children.length === 0) {
+      browseList.appendChild(el('li', '', 'No children at this level.'));
+      return;
+    }
+    for (var i = 0; i < children.length; i += 1) {
+      var item = document.createElement('li');
+      appendBrowseEntry(item, children[i], level);
+      browseList.appendChild(item);
+    }
+  }
+
+  function showBrowseError(message) {
+    if (browseLevels.length > 0) renderBrowseLevel();
+    else browseHeading.textContent = '';
+    browseError.textContent = message;
+  }
+
+  /** Fetch one level (root first) and push it onto the navigation stack. */
+  function loadBrowseLevel(level) {
+    clear(browseError);
+    clear(browseCrumbs);
+    clear(browseList);
+    browseHeading.textContent = 'Loading…';
+    fetch(browseUrl(level))
+      .then(function (response) {
+        return response.json().then(function (body) {
+          return { ok: response.ok, body: body };
+        });
+      })
+      .then(function (result) {
+        if (!result.ok || typeof result.body.error === 'string') {
+          showBrowseError(
+            'Browse failed (' + String(result.body.error) + '): ' + String(result.body.message),
+          );
+          return;
+        }
+        browseLevels.push({
+          chapter: level.chapter,
+          part: level.part,
+          subpart: level.subpart,
+          result: result.body,
+        });
+        renderBrowseLevel();
+      })
+      .catch(function (error) {
+        showBrowseError(
+          'Request failed: ' + String(error && error.message ? error.message : error),
+        );
+      });
+  }
+
+  function renderBrowse() {
+    searchView.hidden = true;
+    sectionView.hidden = true;
+    browseView.hidden = false;
+    if (browseLevels.length > 0) {
+      renderBrowseLevel();
+      return;
+    }
+    loadBrowseLevel({ chapter: '', part: '', subpart: '' });
+  }
+
   searchForm.addEventListener('submit', function (event) {
     event.preventDefault();
     window.location.hash = hashForSearch({
@@ -449,6 +635,7 @@ export const UI_JS = String.raw`(function () {
   function renderRoute() {
     var state = parseHash();
     if (state.view === 'section') renderSection(state.citation);
+    else if (state.view === 'browse') renderBrowse();
     else renderSearch(state);
   }
 
@@ -506,6 +693,12 @@ a {
 .site-header h1 a {
   color: inherit;
   text-decoration: none;
+}
+
+.site-tabs {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
 }
 
 form {
