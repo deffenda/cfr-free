@@ -682,7 +682,10 @@ components:
         changed:
           type: array
           items: { type: string }
-          description: Citations present at both dates whose text differs, sorted. Capped at 100.
+          description: >-
+            Citations present at both dates whose content differs — the text
+            or the heading — sorted. Capped at 100. A provision retitled with
+            an unchanged body counts as changed.
         added:
           type: array
           items: { type: string }

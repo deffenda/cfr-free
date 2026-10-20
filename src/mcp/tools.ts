@@ -141,7 +141,7 @@ const changeReportOutputSchema = z.object({
   toIssueDate: z.string(),
   changed: z
     .array(z.string())
-    .describe(`citations whose text changed — capped at ${CHANGE_LIST_CAP}`),
+    .describe(`citations whose content changed — text or heading — capped at ${CHANGE_LIST_CAP}`),
   added: z
     .array(z.string())
     .describe(`citations added at the to-date — capped at ${CHANGE_LIST_CAP}`),
