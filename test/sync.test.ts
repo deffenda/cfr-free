@@ -589,4 +589,39 @@ describe('Store.replaceAllWithBaseline', () => {
       temp.cleanup();
     }
   });
+  it('reports provisions whose image content is not included (P1-01)', async () => {
+    // A corpus whose provisions carry eCFR graphics: the count must be
+    // derived from the parsed corpus, and persisted, so a fresh index never
+    // implies complete textual coverage (review finding P1-01).
+    const xml = FULL_XML.replace(
+      '</DIV5>',
+      '<DIV8 N="4.85" TYPE="SECTION"><HEAD>&#xA7; 4.85 Evaluation of hearing impairment.</HEAD>' +
+        '<P>(a) An examination for hearing impairment.</P>' +
+        '<img src="/graphics/er11my99.005.gif"/>' +
+        '<img src="/graphics/er11my99.006.gif"/>' +
+        '</DIV8></DIV5>',
+    );
+    const deps = makeDeps(makeFetch({ xml }));
+    try {
+      const report = await syncIndex(deps);
+      expect(report.imageContentSections).toBe(1);
+      expect(deps.store.getMeta('image_content_sections')).toBe('1');
+      // The unaffected provision is not counted.
+      const stored = deps.store.getSection('4.85', 'section');
+      expect(stored?.text).toContain('[image content not included: /graphics/er11my99.005.gif]');
+    } finally {
+      deps.temp.cleanup();
+    }
+  });
+
+  it('reports zero image-content provisions for a text-only corpus', async () => {
+    const deps = makeDeps(makeFetch());
+    try {
+      const report = await syncIndex(deps);
+      expect(report.imageContentSections).toBe(0);
+      expect(deps.store.getMeta('image_content_sections')).toBe('0');
+    } finally {
+      deps.temp.cleanup();
+    }
+  });
 });

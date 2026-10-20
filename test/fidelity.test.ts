@@ -259,3 +259,68 @@ describe('regulatory-text fidelity (verified eCFR fixtures)', () => {
     });
   });
 });
+
+/**
+ * § 4.85 — VERBATIM from the eCFR versioner API
+ * (https://www.ecfr.gov/api/versioner/v1/full/2026-10-16/title-38.xml,
+ * title 38 issue date 2026-10-16, retrieved 2026-10-20).
+ *
+ * The provision's rating tables (Tables VI, VIA* and VII) are published as
+ * <img> elements. Their content cannot be included offline, so the parser
+ * must stand in with an explicit "not included" marker that names the
+ * source path — a reader (or an agent) must never mistake a missing
+ * graphic for complete text (review finding P1-01).
+ */
+const SECTION_4_85 = `<DIV8 N="4.85" TYPE="SECTION" VOLUME="1">
+<HEAD>§ 4.85   Evaluation of hearing impairment.</HEAD>
+<P>(a) An examination for hearing impairment for VA purposes must be conducted by a state-licensed audiologist and must include a controlled speech discrimination test (Maryland CNC) and a puretone audiometry test. Examinations will be conducted without the use of hearing aids.
+</P>
+<P>(b) Table VI, “Numeric Designation of Hearing Impairment Based on Puretone Threshold Average and Speech Discrimination,” is used to determine a Roman numeral designation (I through XI) for hearing impairment based on a combination of the percent of speech discrimination (horizontal rows) and the puretone threshold average (vertical columns). The Roman numeral designation is located at the point where the percentage of speech discrimination and puretone threshold average intersect.
+</P>
+<P>(c) Table VIa, “Numeric Designation of Hearing Impairment Based Only on Puretone Threshold Average,” is used to determine a Roman numeral designation (I through XI) for hearing impairment based only on the puretone threshold average. Table VIa will be used when the examiner certifies that use of the speech discrimination test is not appropriate because of language difficulties, inconsistent speech discrimination scores, etc., or when indicated under the provisions of § 4.86.
+</P>
+<P>(d) “Puretone threshold average,” as used in Tables VI and VIa, is the sum of the puretone thresholds at 1000, 2000, 3000 and 4000 Hertz, divided by four. This average is used in all cases (including those in § 4.86) to determine the Roman numeral designation for hearing impairment from Table VI or VIa.
+</P>
+<P>(e) Table VII, “Percentage Evaluations for Hearing Impairment,” is used to determine the percentage evaluation by combining the Roman numeral designations for hearing impairment of each ear. The horizontal rows represent the ear having the better hearing and the vertical columns the ear having the poorer hearing. The percentage evaluation is located at the point where the row and column intersect.
+</P>
+<P>(f) If impaired hearing is service-connected in only one ear, in order to determine the percentage evaluation from Table VII, the non-service-connected ear will be assigned a Roman Numeral designation for hearing impairment of I, subject to the provisions of § 3.383 of this chapter.
+</P>
+<P>(g) When evaluating any claim for impaired hearing, refer to § 3.350 of this chapter to determine whether the veteran may be entitled to special monthly compensation due either to deafness, or to deafness in combination with other specified disabilities.
+</P>
+<P>(h) <I>Numeric tables VI, VIA*, and VII.</I>
+</P>
+<img src="/graphics/er11my99.005.gif"/>
+<img src="/graphics/er11my99.006.gif"/>
+<CITA TYPE="N">[64 FR 25206, May 11, 1999]
+
+
+
+</CITA>
+</DIV8>`;
+
+describe('§ 4.85 image content is flagged, never dropped (P1-01)', () => {
+  const [section] = parseTitleXml(SECTION_4_85);
+
+  it('keeps both rating-table references in the text representation', () => {
+    expect(section?.citation).toBe('4.85');
+    expect(section?.text).toContain('[image content not included: /graphics/er11my99.005.gif]');
+    expect(section?.text).toContain('[image content not included: /graphics/er11my99.006.gif]');
+  });
+
+  it('keeps both rating-table references in the markdown representation', () => {
+    expect(section?.markdown).toContain('[image content not included: /graphics/er11my99.005.gif]');
+    expect(section?.markdown).toContain('[image content not included: /graphics/er11my99.006.gif]');
+  });
+
+  it('leaves the surrounding regulatory prose intact', () => {
+    expect(section?.text).toContain('Numeric tables VI, VIA*, and VII.');
+    expect(section?.text).toContain('(a) An examination for hearing impairment for VA purposes');
+    expect(section?.heading).toBe('Evaluation of hearing impairment.');
+  });
+
+  it('never claims the graphic content is present', () => {
+    expect(section?.text).not.toMatch(/!\[/);
+    expect(section?.markdown).not.toMatch(/!\[/);
+    expect(section?.text).not.toContain('](http');
+  });
+});
