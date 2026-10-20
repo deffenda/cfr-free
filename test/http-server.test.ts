@@ -175,6 +175,24 @@ describe('Titan HTTP API', () => {
     expect(body['part']).toBeUndefined();
   });
 
+  it('supports kind and chapter search filters', async () => {
+    const { status, body } = await get('/api/v1/search?q=rating+schedule&kind=appendix&chapter=I');
+    expect(status).toBe(200);
+    expect(body['total']).toBe(1);
+    const hits = body['hits'] as Array<{ citation: string }>;
+    expect(hits.map((hit) => hit.citation)).toEqual(['Appendix A to Part 4']);
+  });
+
+  it('rejects invalid kind and chapter search filters', async () => {
+    // Both fail the service's input schema → the standard 400 invalid_input path.
+    const kind = await get('/api/v1/search?q=mental+disorder&kind=policy');
+    expect(kind.status).toBe(400);
+    expect(kind.body['error']).toBe('invalid_input');
+    const chapter = await get('/api/v1/search?q=mental+disorder&chapter=4');
+    expect(chapter.status).toBe(400);
+    expect(chapter.body['error']).toBe('invalid_input');
+  });
+
   it('rejects missing or invalid search input', async () => {
     expect((await get('/api/v1/search')).status).toBe(400);
     expect((await get('/api/v1/search?q=no')).status).toBe(400);

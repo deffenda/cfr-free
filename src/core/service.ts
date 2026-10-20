@@ -36,6 +36,13 @@ const searchInputSchema = z.object({
     .string()
     .regex(/^\d{1,3}$/)
     .optional(),
+  kind: z.enum(['section', 'appendix']).optional(),
+  chapter: z
+    .string()
+    .min(1)
+    .max(8)
+    .regex(/^[IVXLCDM]+$/)
+    .optional(),
 });
 
 export interface SearchInput {
@@ -43,6 +50,8 @@ export interface SearchInput {
   readonly page?: number | undefined;
   readonly perPage?: number | undefined;
   readonly part?: string | undefined;
+  readonly kind?: 'section' | 'appendix' | undefined;
+  readonly chapter?: string | undefined;
 }
 
 /** A search hit dressed for human/legal consumption. */
@@ -234,9 +243,9 @@ export class CFRService {
   search(input: SearchInput): SearchResponse {
     const parsed = searchInputSchema.safeParse(input);
     if (!parsed.success) toServiceError(parsed.error);
-    const { query, page, perPage, part } = parsed.data;
-    const outcome = this.store.search({ query, page, perPage, part });
-    const direct = this.directHit(query, part, outcome.matchMode);
+    const { query, page, perPage, part, kind, chapter } = parsed.data;
+    const outcome = this.store.search({ query, page, perPage, part, kind, chapter });
+    const direct = this.directHit(query, { part, kind, chapter }, outcome.matchMode);
 
     let hits = outcome.hits.map((hit) => this.presentHit(hit, false));
     let total = outcome.total;
@@ -271,19 +280,25 @@ export class CFRService {
    * paste `38 CFR 4.130(a)` constantly, and keyword noise above the exact
    * section would be a correctness failure. Computed on every page so the
    * pin-adjusted `total` stays consistent across the pagination sequence;
-   * only page 1 prepends the hit itself. Honors the part filter; `total`
-   * only counts the pin when FTS did not already return it.
+   * only page 1 prepends the hit itself. Honors the part/kind/chapter
+   * filters; `total` only counts the pin when FTS did not already return it.
    */
   private directHit(
     query: string,
-    part: string | undefined,
+    filters: {
+      readonly part: string | undefined;
+      readonly kind: 'section' | 'appendix' | undefined;
+      readonly chapter: string | undefined;
+    },
     matchMode: MatchMode,
   ): (PresentedHit & { readonly inResults: boolean }) | null {
     const normalized = normalizeCitation(stripParagraphSuffix(query));
     if (normalized === null) return null;
     const row = this.store.getSection(normalized.citation, normalized.kind);
     if (row === null) return null;
-    if (part !== undefined && row.part !== part) return null;
+    if (filters.part !== undefined && row.part !== filters.part) return null;
+    if (filters.kind !== undefined && row.kind !== filters.kind) return null;
+    if (filters.chapter !== undefined && row.chapter !== filters.chapter) return null;
     const inResults = this.store.hasSearchMatch(matchMode, query, row.citation);
     const snippet = excerpt(row.text);
     const hit = this.presentHit(

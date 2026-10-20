@@ -55,6 +55,8 @@ export interface SearchQuery {
   readonly page: number;
   readonly perPage: number;
   readonly part?: string | undefined;
+  readonly kind?: SectionKind | undefined;
+  readonly chapter?: string | undefined;
 }
 
 export interface SearchOutcome {
@@ -160,12 +162,44 @@ WHERE sections_fts MATCH ?
 ORDER BY score
 LIMIT ? OFFSET ?`;
 
-const SELECT_MATCHES_PART_SQL = `
+/**
+ * Optional search filters map to FIXED column names. The WHERE tail is
+ * assembled from this map only — never from user input — and every filter
+ * value is a bound parameter, so no filter value ever reaches SQL text.
+ * The prepared-statement cache is keyed by SQL text, so each of the ≤8
+ * filter combinations compiles exactly once.
+ */
+const SEARCH_FILTER_COLUMNS = {
+  part: 's.part',
+  kind: 's.kind',
+  chapter: 's.chapter',
+} as const;
+
+type SearchFilterName = keyof typeof SEARCH_FILTER_COLUMNS;
+
+/** A present search filter: fixed column key plus its (bound) value. */
+type SearchFilter = readonly [name: SearchFilterName, value: string];
+
+/** Present filters in a fixed order so statement shapes stay deterministic. */
+function presentFilters(query: SearchQuery): SearchFilter[] {
+  const filters: SearchFilter[] = [];
+  if (query.part !== undefined) filters.push(['part', query.part]);
+  if (query.kind !== undefined) filters.push(['kind', query.kind]);
+  if (query.chapter !== undefined) filters.push(['chapter', query.chapter]);
+  return filters;
+}
+
+/** ` AND s.x = ? …` WHERE tail for the filters; values bind separately. */
+function filterClause(filters: readonly SearchFilter[]): string {
+  return filters.map(([name]) => ` AND ${SEARCH_FILTER_COLUMNS[name]} = ?`).join('');
+}
+
+const SELECT_MATCHES_FILTERED_SQL = (where: string): string => `
 SELECT s.citation, s.heading, s.part, s.path, ${SNIPPET_EXPR} AS snippet,
        ${SCORE_EXPR}
 FROM sections_fts
 JOIN sections s ON s.id = sections_fts.rowid
-WHERE sections_fts MATCH ? AND s.part = ?
+WHERE sections_fts MATCH ?${where}
 ORDER BY score
 LIMIT ? OFFSET ?`;
 
@@ -174,11 +208,11 @@ SELECT count(*) AS n
 FROM sections_fts
 WHERE sections_fts MATCH ?`;
 
-const COUNT_MATCHES_PART_SQL = `
+const COUNT_MATCHES_FILTERED_SQL = (where: string): string => `
 SELECT count(*) AS n
 FROM sections_fts
 JOIN sections s ON s.id = sections_fts.rowid
-WHERE sections_fts MATCH ? AND s.part = ?`;
+WHERE sections_fts MATCH ?${where}`;
 
 const DIRECT_MATCH_SQL = `
 SELECT 1
@@ -551,13 +585,14 @@ export class Store {
     return hashes;
   }
 
-  private countMatches(match: MatchMode, query: string, part?: string): number {
+  private countMatches(match: MatchMode, query: string, filters: readonly SearchFilter[]): number {
     const ftsQuery = toFtsQuery(query, match);
     if (ftsQuery === null) return 0;
-    const sql = part === undefined ? COUNT_MATCHES_SQL : COUNT_MATCHES_PART_SQL;
-    const row =
-      part === undefined ? this.stmt(sql).get(ftsQuery) : this.stmt(sql).get(ftsQuery, part);
-    return row ? Number((row as Record<string, unknown>)['n'] ?? 0) : 0;
+    const sql =
+      filters.length === 0 ? COUNT_MATCHES_SQL : COUNT_MATCHES_FILTERED_SQL(filterClause(filters));
+    const row = this.stmt(sql).get(ftsQuery, ...filters.map(([, value]) => value)) as
+      Record<string, unknown> | undefined;
+    return row ? Number(row['n'] ?? 0) : 0;
   }
 
   /**
@@ -565,15 +600,18 @@ export class Store {
    *
    * Tries an AND query first for precision; falls back to OR once when AND
    * finds nothing. Each attempt is a separate prepared statement execution.
+   * Optional `part`/`kind`/`chapter` filters are exact column matches
+   * applied to both the count and the ranked rows.
    */
   search(query: SearchQuery): SearchOutcome {
     const perPage = Math.max(1, query.perPage);
     const offset = (Math.max(1, query.page) - 1) * perPage;
+    const filters = presentFilters(query);
 
     let mode: MatchMode = 'and';
-    let total = this.countMatches('and', query.query, query.part);
+    let total = this.countMatches('and', query.query, filters);
     if (total === 0) {
-      const orTotal = this.countMatches('or', query.query, query.part);
+      const orTotal = this.countMatches('or', query.query, filters);
       if (orTotal > 0) {
         mode = 'or';
         total = orTotal;
@@ -585,12 +623,16 @@ export class Store {
     if (ftsQuery === null)
       return { hits: [], total: 0, page: query.page, perPage, matchMode: mode };
 
-    const sql = query.part === undefined ? SELECT_MATCHES_SQL : SELECT_MATCHES_PART_SQL;
-    const statement = this.stmt(sql);
-    const rows =
-      query.part === undefined
-        ? statement.all(ftsQuery, perPage, offset)
-        : statement.all(ftsQuery, query.part, perPage, offset);
+    const sql =
+      filters.length === 0
+        ? SELECT_MATCHES_SQL
+        : SELECT_MATCHES_FILTERED_SQL(filterClause(filters));
+    const rows = this.stmt(sql).all(
+      ftsQuery,
+      ...filters.map(([, value]) => value),
+      perPage,
+      offset,
+    );
 
     const queryTokens = query.query
       .toLowerCase()

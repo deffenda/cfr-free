@@ -136,7 +136,9 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
         'Full-text search across the local Title 38 (VA) CFR index using ranked keyword matching. ' +
         'Returns section citations, headings, relevance snippets, bm25 scores (lower is better) ' +
         'and the query terms visible in each hit. ' +
-        'Use `part` to scope results to a single CFR part (e.g. "4" for ratings, "17" for prosthetics). ' +
+        'Use `part` to scope results to a single CFR part (e.g. "4" for ratings, "17" for prosthetics), ' +
+        '`kind` to restrict results to one provision kind ("section" or "appendix"), and ' +
+        '`chapter` to scope to one chapter by its Roman-numeral identifier (e.g. "I"; exact, case-sensitive). ' +
         'Follow up with get_section to read a hit in full. ' +
         'If the query itself is a citation (e.g. "4.130" or "38 CFR 4.16"), that exact ' +
         'section is pinned to the top of page 1 (totals include the pin on every page) ' +
@@ -168,6 +170,17 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
           .regex(/^\d{1,3}$/)
           .optional()
           .describe('restrict to one CFR part number'),
+        kind: z
+          .enum(['section', 'appendix'])
+          .optional()
+          .describe('restrict to one provision kind: section or appendix'),
+        chapter: z
+          .string()
+          .min(1)
+          .max(8)
+          .regex(/^[IVXLCDM]+$/)
+          .optional()
+          .describe('restrict to one chapter, exact case-sensitive Roman numeral (e.g. "I")'),
       },
       outputSchema: searchOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,
@@ -179,6 +192,8 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
           page: args.page,
           perPage: args.per_page,
           part: args.part,
+          kind: args.kind,
+          chapter: args.chapter,
         });
         const structuredContent: SearchOutput = {
           ...response,
