@@ -1,0 +1,362 @@
+import { describe, expect, it } from 'vitest';
+import { runInNewContext } from 'node:vm';
+import { UI_JS } from '../src/titan/ui.js';
+
+/**
+ * Behavioural harness for the served UI script (review finding P1-02).
+ *
+ * The shipped UI is one flat file of browser JavaScript served at /ui.js.
+ * The suite cannot drive a real browser (no browser library is a dependency,
+ * and none may be installed), so this harness EXECUTES the served script
+ * itself — the same string the HTTP server sends — against a minimal DOM
+ * and fetch stub, with fully controllable response ordering.
+ *
+ * What it proves: a response may only paint the view that is still current.
+ * A late success, a late error or a late body parse must never repaint a
+ * route the user has already left, must never mix references from an
+ * obsolete response into the current view, and must never push a level
+ * into a tree the user has left.
+ */
+
+/** Minimal DOM node: the surface the served script actually uses. */
+class StubNode {
+  nodeType = 1;
+  tagName: string;
+  id = '';
+  className = '';
+  hidden = false;
+  value = '';
+  type = '';
+  href = '';
+  disabled = false;
+  textContent = '';
+  childNodes: StubNode[] = [];
+  private handlers = new Map<string, Array<(event: unknown) => void>>();
+
+  constructor(tagName: string) {
+    this.tagName = tagName.toUpperCase();
+  }
+
+  get firstChild(): StubNode | null {
+    return this.childNodes[0] ?? null;
+  }
+
+  appendChild(child: StubNode): StubNode {
+    this.childNodes.push(child);
+    return child;
+  }
+
+  removeChild(child: StubNode): StubNode {
+    this.childNodes = this.childNodes.filter((node) => node !== child);
+    return child;
+  }
+
+  addEventListener(type: string, handler: (event: unknown) => void): void {
+    const list = this.handlers.get(type) ?? [];
+    list.push(handler);
+    this.handlers.set(type, list);
+  }
+
+  /** Fire a listener the way a user gesture would. */
+  dispatch(type: string, event: unknown = { preventDefault: () => undefined }): void {
+    for (const handler of this.handlers.get(type) ?? []) handler(event);
+  }
+
+  setAttribute(name: string, value: string): void {
+    if (name === 'href') this.href = value;
+    else if (name === 'class') this.className = value;
+    else (this as unknown as Record<string, string>)[name] = value;
+  }
+
+  /** All text under this node (the script never reads it back; tests do). */
+  get allText(): string {
+    let out = this.textContent;
+    for (const child of this.childNodes) out += child.allText;
+    return out;
+  }
+}
+
+/** One in-flight request the test resolves on its own schedule. */
+interface PendingCall {
+  readonly url: string;
+  /** Resolve the response AND its body immediately. */
+  respond(ok: boolean, body: unknown): void;
+  /** Resolve the response now, the body later (delayed JSON parsing). */
+  respondLater(ok: boolean): void;
+  resolveBody(body: unknown): void;
+  rejectBody(error: Error): void;
+  /** Reject the request itself (network failure). */
+  reject(error: Error): void;
+}
+
+interface Harness {
+  readonly element: (id: string) => StubNode;
+  readonly calls: PendingCall[];
+  navigate(hash: string): Promise<void>;
+  flush(): Promise<void>;
+}
+
+function makeHarness(): Harness {
+  const elements = new Map<string, StubNode>();
+  const calls: PendingCall[] = [];
+  const hashListeners: Array<() => void> = [];
+
+  const element = (id: string): StubNode => {
+    let node = elements.get(id);
+    if (node === undefined) {
+      node = new StubNode('div');
+      node.id = id;
+      elements.set(id, node);
+    }
+    return node;
+  };
+
+  const location = {
+    current: '',
+    get hash(): string {
+      return location.current;
+    },
+    set hash(value: string) {
+      location.current = value;
+      // Browsers fire hashchange asynchronously; the harness does the same
+      // so the test cannot accidentally depend on synchronous dispatch.
+      queueMicrotask(() => {
+        for (const listener of hashListeners) listener();
+      });
+    },
+  };
+
+  const windowStub = {
+    location,
+    addEventListener(type: string, handler: () => void): void {
+      if (type === 'hashchange') hashListeners.push(handler);
+    },
+  };
+
+  const documentStub = {
+    getElementById(id: string): StubNode {
+      return element(id);
+    },
+    createElement(tag: string): StubNode {
+      return new StubNode(tag);
+    },
+    createTextNode(text: string): StubNode {
+      const node = new StubNode('#text');
+      node.textContent = text;
+      return node;
+    },
+  };
+
+  const fetchStub = (url: string): Promise<unknown> => {
+    let settleResponse!: (response: unknown) => void;
+    let failResponse!: (error: Error) => void;
+    let settleBody!: (body: unknown) => void;
+    let failBody!: (error: Error) => void;
+    const bodyPromise = new Promise((resolve, reject) => {
+      settleBody = resolve;
+      failBody = reject;
+    });
+    const call: PendingCall = {
+      url,
+      respond: (ok, body) => {
+        settleResponse({ ok, json: () => bodyPromise });
+        settleBody(body);
+      },
+      respondLater: (ok) => {
+        settleResponse({ ok, json: () => bodyPromise });
+      },
+      resolveBody: (body) => settleBody(body),
+      rejectBody: (error) => failBody(error),
+      reject: (error) => failResponse(error),
+    };
+    calls.push(call);
+    return new Promise((resolve, reject) => {
+      settleResponse = resolve;
+      failResponse = reject;
+    });
+  };
+
+  runInNewContext(UI_JS, {
+    window: windowStub,
+    document: documentStub,
+    fetch: fetchStub,
+    URLSearchParams,
+    console,
+  });
+
+  const flush = async (): Promise<void> => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+
+  const navigate = async (hash: string): Promise<void> => {
+    location.hash = hash;
+    await flush();
+  };
+
+  return { element, calls, navigate, flush };
+}
+
+function sectionBody(citation: string, heading: string): Record<string, unknown> {
+  return {
+    citation,
+    kind: 'section',
+    heading,
+    chapter: 'I',
+    part: '4',
+    subpart: 'B',
+    path: '/title:38/chapter:I/part:4/subpart:B',
+    issueDate: '2026-10-16',
+    text: `Body ${citation}.`,
+    markdown: `Body ${citation}.`,
+    references: [{ citation: '4.125', available: true }],
+    citedBy: ['4.16'],
+  };
+}
+
+function searchBody(citation: string, heading: string): Record<string, unknown> {
+  return {
+    total: 1,
+    page: 1,
+    matchMode: 'and',
+    hits: [
+      {
+        citation,
+        citationDisplay: `38 C.F.R. § ${citation}`,
+        heading,
+        snippet: `Snippet for ${citation}.`,
+        matches: [],
+        direct: false,
+        part: '4',
+      },
+    ],
+  };
+}
+
+describe('UI route ownership (P1-02)', () => {
+  it('lets the newest route win when responses resolve out of order', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.125');
+    await harness.navigate('#/section/4.130');
+    expect(harness.calls.map((call) => call.url)).toEqual([
+      '/api/v1/sections/4.125',
+      '/api/v1/sections/4.130',
+    ]);
+
+    // The NEWER request resolves first, then the obsolete one lands late.
+    harness.calls[1]?.respond(true, sectionBody('4.130', 'Heading 4.130'));
+    await harness.flush();
+    harness.calls[0]?.respond(true, sectionBody('4.125', 'Heading 4.125'));
+    await harness.flush();
+
+    const heading = harness.element('section-heading').textContent;
+    expect(heading).toBe('Heading 4.130');
+    expect(harness.element('section-text').textContent).toBe('Body 4.130.');
+    expect(harness.element('section-text').textContent).not.toContain('4.125');
+  });
+
+  it('does not let a late section error paint over the current view', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.125');
+    await harness.navigate('#/section/4.130');
+    harness.calls[1]?.respond(true, sectionBody('4.130', 'Heading 4.130'));
+    await harness.flush();
+    harness.calls[0]?.reject(new Error('network down'));
+    await harness.flush();
+
+    expect(harness.element('section-heading').textContent).toBe('Heading 4.130');
+    expect(harness.element('section-error').textContent).toBe('');
+  });
+
+  it('does not let a late body parse repaint the current view', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.125');
+    await harness.navigate('#/section/4.130');
+    // The obsolete response arrives; its BODY is still pending.
+    harness.calls[0]?.respondLater(true);
+    await harness.flush();
+    harness.calls[1]?.respond(true, sectionBody('4.130', 'Heading 4.130'));
+    await harness.flush();
+    // Now the obsolete body finally parses.
+    harness.calls[0]?.resolveBody(sectionBody('4.125', 'Heading 4.125'));
+    await harness.flush();
+
+    expect(harness.element('section-heading').textContent).toBe('Heading 4.130');
+    expect(harness.element('section-text').textContent).toBe('Body 4.130.');
+  });
+
+  it('does not let a late search response overwrite a newer search', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/search?q=alpha');
+    await harness.navigate('#/search?q=beta');
+    harness.calls[1]?.respond(true, searchBody('4.16', 'Heading 4.16'));
+    await harness.flush();
+    harness.calls[0]?.respond(true, searchBody('4.130', 'Heading 4.130'));
+    await harness.flush();
+
+    const hits = harness.element('search-hits');
+    expect(hits.allText).toContain('Heading 4.16');
+    expect(hits.allText).not.toContain('Heading 4.130');
+  });
+
+  it('does not let a late search response paint into another view', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/search?q=alpha');
+    await harness.navigate('#/section/4.130');
+    harness.calls[0]?.respond(true, searchBody('4.16', 'Heading 4.16'));
+    await harness.flush();
+
+    expect(harness.element('search-hits').allText).toBe('');
+    expect(harness.element('section-heading').textContent).toBe('4.130');
+  });
+
+  it('does not let a late search response repaint a cleared query', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/search?q=alpha');
+    await harness.navigate('#/search');
+    harness.calls[0]?.respond(true, searchBody('4.16', 'Heading 4.16'));
+    await harness.flush();
+
+    expect(harness.element('search-hits').allText).toBe('');
+    expect(harness.element('search-status').textContent).toContain('at least 3 characters');
+  });
+
+  it('does not accumulate references from an obsolete response', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.125');
+    await harness.navigate('#/section/4.130');
+    harness.calls[0]?.respond(true, sectionBody('4.125', 'Heading 4.125'));
+    await harness.flush();
+
+    // The obsolete response carried a reference; it must not appear.
+    expect(harness.element('section-references').allText).toBe('');
+    expect(harness.element('section-citedby').allText).toBe('');
+  });
+
+  it('does not let a late browse response push a level into the tree', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/browse');
+    await harness.navigate('#/search?q=alpha');
+    harness.calls[0]?.respond(true, {
+      node: { type: 'title', identifier: '38', label: 'Title 38' },
+      path: [],
+      children: [{ type: 'chapter', identifier: 'I', label: 'Chapter I' }],
+    });
+    await harness.flush();
+
+    // The obsolete response must not push a level or paint the tree.
+    expect(harness.element('browse-list').allText).toBe('');
+    expect(harness.element('browse-heading').textContent).not.toContain('Title 38');
+    expect(harness.element('browse-view').hidden).toBe(true);
+  });
+
+  it('still renders a response that belongs to the current route', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.130');
+    harness.calls[0]?.respond(true, sectionBody('4.130', 'Heading 4.130'));
+    await harness.flush();
+
+    expect(harness.element('section-heading').textContent).toBe('Heading 4.130');
+    expect(harness.element('section-path').textContent).toContain('Chapter I');
+    expect(harness.element('section-references').allText).toContain('4.125');
+  });
+});

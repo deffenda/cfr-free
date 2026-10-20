@@ -676,6 +676,15 @@ describe('Titan web UI routes', () => {
     expect(html).toContain('id="browse-list"');
   });
 
+  it('pinned posture: ui.js guards route ownership (a late response cannot repaint a route the user left)', async () => {
+    // Behaviour is proven in test/ui.test.ts, which EXECUTES this served
+    // script against a DOM/fetch stub; these string pins keep the guard
+    // from being deleted silently (the served script is what ships).
+    const { text: uiJs } = await fetchUi('/ui.js');
+    expect(uiJs).toContain('routeGeneration');
+    expect(uiJs).toContain('if (generation !== routeGeneration) return;');
+  });
+
   it('pinned posture: ui.js pins both hash routes and builds the /api/v1/browse URL from all three query names', async () => {
     const { text: uiJs } = await fetchUi('/ui.js');
     // The two hash routes that must resolve in parseHash (unknown hashes fall

@@ -137,6 +137,9 @@ export const UI_JS = String.raw`(function () {
   var sectionText = byId('section-text');
   var sectionReferences = byId('section-references');
   var sectionCitedBy = byId('section-citedby');
+  // Incremented on every navigation; a response may only mutate the DOM
+  // while the generation it captured is still current.
+  var routeGeneration = 0;
   var browseView = byId('browse-view');
   var browseError = byId('browse-error');
   var browseCrumbs = byId('browse-crumbs');
@@ -346,7 +349,7 @@ export const UI_JS = String.raw`(function () {
     renderPager(state, total);
   }
 
-  function renderSearch(state) {
+  function renderSearch(state, generation) {
     searchView.hidden = false;
     sectionView.hidden = true;
     browseView.hidden = true;
@@ -368,9 +371,13 @@ export const UI_JS = String.raw`(function () {
         });
       })
       .then(function (result) {
+        // Ownership check AFTER the body has been parsed: a slow parse
+        // must not let a superseded response repaint the current view.
+        if (generation !== routeGeneration) return;
         renderSearchResult(state, result.ok, result.body);
       })
       .catch(function (error) {
+        if (generation !== routeGeneration) return;
         clear(hitsList);
         clear(pager);
         statusLine.textContent =
@@ -419,7 +426,7 @@ export const UI_JS = String.raw`(function () {
     if (citedBy.length === 0) sectionCitedBy.appendChild(el('li', '', 'None indexed.'));
   }
 
-  function renderSection(citation) {
+  function renderSection(citation, generation) {
     searchView.hidden = true;
     sectionView.hidden = false;
     browseView.hidden = true;
@@ -441,6 +448,7 @@ export const UI_JS = String.raw`(function () {
         });
       })
       .then(function (result) {
+        if (generation !== routeGeneration) return;
         if (!result.ok || typeof result.body.error === 'string') {
           sectionError.textContent =
             'Failed to load ' +
@@ -454,6 +462,7 @@ export const UI_JS = String.raw`(function () {
         fillSection(result.body);
       })
       .catch(function (error) {
+        if (generation !== routeGeneration) return;
         sectionError.textContent =
           'Request failed: ' + String(error && error.message ? error.message : error);
       });
@@ -506,7 +515,10 @@ export const UI_JS = String.raw`(function () {
       nav.type = 'button';
       nav.textContent = text;
       nav.addEventListener('click', function () {
-        loadBrowseLevel(childLevel(level, entry));
+        // A click is not a navigation, but the level it starts must still
+        // belong to the CURRENT route: a click after the user left the
+        // browse view must not push a level or paint the tree.
+        loadBrowseLevel(childLevel(level, entry), routeGeneration);
       });
       item.appendChild(nav);
       return;
@@ -576,7 +588,7 @@ export const UI_JS = String.raw`(function () {
   }
 
   /** Fetch one level (root first) and push it onto the navigation stack. */
-  function loadBrowseLevel(level) {
+  function loadBrowseLevel(level, generation) {
     clear(browseError);
     clear(browseCrumbs);
     clear(browseList);
@@ -588,6 +600,7 @@ export const UI_JS = String.raw`(function () {
         });
       })
       .then(function (result) {
+        if (generation !== routeGeneration) return;
         if (!result.ok || typeof result.body.error === 'string') {
           showBrowseError(
             'Browse failed (' + String(result.body.error) + '): ' + String(result.body.message),
@@ -603,13 +616,14 @@ export const UI_JS = String.raw`(function () {
         renderBrowseLevel();
       })
       .catch(function (error) {
+        if (generation !== routeGeneration) return;
         showBrowseError(
           'Request failed: ' + String(error && error.message ? error.message : error),
         );
       });
   }
 
-  function renderBrowse() {
+  function renderBrowse(generation) {
     searchView.hidden = true;
     sectionView.hidden = true;
     browseView.hidden = false;
@@ -617,7 +631,7 @@ export const UI_JS = String.raw`(function () {
       renderBrowseLevel();
       return;
     }
-    loadBrowseLevel({ chapter: '', part: '', subpart: '' });
+    loadBrowseLevel({ chapter: '', part: '', subpart: '' }, generation);
   }
 
   searchForm.addEventListener('submit', function (event) {
@@ -633,10 +647,18 @@ export const UI_JS = String.raw`(function () {
   });
 
   function renderRoute() {
+    // Route ownership: every navigation (including an empty search, the
+    // browse tree and a repeat of the same route) invalidates the work
+    // started by the previous one. A response may only touch the DOM while
+    // its generation is still the current one — a late success, a late
+    // error or a late body parse must never repaint a view the user has
+    // already left (review finding P1-02).
+    routeGeneration += 1;
+    var generation = routeGeneration;
     var state = parseHash();
-    if (state.view === 'section') renderSection(state.citation);
-    else if (state.view === 'browse') renderBrowse();
-    else renderSearch(state);
+    if (state.view === 'section') renderSection(state.citation, generation);
+    else if (state.view === 'browse') renderBrowse(generation);
+    else renderSearch(state, generation);
   }
 
   window.addEventListener('hashchange', renderRoute);
