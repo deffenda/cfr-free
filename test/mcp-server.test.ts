@@ -141,6 +141,33 @@ describe('MCP server (in-memory transport)', () => {
     expect(result.structuredContent?.['sourceUrl']).toContain('ecfr.gov');
   });
 
+  it('get_section surfaces citedBy backlinks on the wire', async () => {
+    // Self-contained store: the shared fixture seed cites nothing, so a real
+    // edge needs its own two-section index (4.131 → § 4.130).
+    const seeded = openTempStore({
+      sections: [
+        makeSection({ citation: '4.130', text: 'Evaluation rules for mental disorder claims.' }),
+        makeSection({ citation: '4.131', text: 'See § 4.130 for the evaluation procedure.' }),
+      ],
+    });
+    const server = buildMcpServer(new CFRService(seeded.store, 7), createTestLogger());
+    const probe = new Client({ name: 'probe', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), probe.connect(clientTransport)]);
+    try {
+      const result = (await probe.callTool({
+        name: 'get_section',
+        arguments: { citation: '4.130' },
+      })) as ToolCallResult;
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent?.['citedBy']).toEqual(['4.131']);
+    } finally {
+      await probe.close();
+      await server.close();
+      seeded.cleanup();
+    }
+  });
+
   it('get_section returns tool errors for unknown citations', async () => {
     const result = (await client.callTool({
       name: 'get_section',

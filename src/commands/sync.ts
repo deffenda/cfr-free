@@ -6,7 +6,11 @@ import { createEcfrApi } from './ensure-index.js';
 
 /** `cfr-free sync` — force a full rebuild of the local index. */
 export async function runSyncCommand(config: AppConfig, logger: Logger): Promise<SyncReport> {
-  const store = Store.open(config.indexPath);
+  // allowSchemaUpgrade: sync's whole job is a wholesale rebuild, so it may
+  // adopt an older on-disk schema version (syncIndex repopulates every row,
+  // including the section_references edges) instead of refusing to open the
+  // very file it exists to rebuild. Downgrades still fail inside open().
+  const store = Store.open(config.indexPath, { allowSchemaUpgrade: true });
   try {
     return await syncIndex({ ecfr: createEcfrApi(), store, logger });
   } finally {

@@ -112,6 +112,12 @@ export interface SectionDetail {
   readonly sourceUrl: string;
   /** Citations referenced from this text, with local-availability flags. */
   readonly references: ReadonlyArray<{ readonly citation: string; readonly available: boolean }>;
+  /**
+   * Citations of indexed sections whose text references this one (reverse
+   * direction of `references`, served from the materialized edge table).
+   * Sorted lexicographically; empty array when nothing cites it.
+   */
+  readonly citedBy: ReadonlyArray<string>;
   /** True when the local index backing this read is older than CFR_MAX_AGE_DAYS. */
   readonly indexStale: boolean;
   /** Warning to surface when the index is stale; null otherwise. */
@@ -395,6 +401,9 @@ export class CFRService {
         citation,
         available: this.store.hasSection(citation),
       })),
+      // Reverse edges keyed by the section's canonical (lowercase) citation —
+      // the exact form extractReferences() stored at rebuild time.
+      citedBy: this.store.citedBy(row.citation),
       indexStale: status.stale,
       notice: noticeFor(status),
     };

@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { hashText } from './changes.js';
+import { extractReferences } from './references.js';
 import type { SectionKind, RawSection } from './xml.js';
 
 /**
@@ -89,6 +90,21 @@ CREATE TABLE IF NOT EXISTS sections (
   issue_date TEXT NOT NULL
 );
 
+-- Reverse cross-reference edges ("what cites X"), the materialized
+-- counterpart of the forward "references" list a section read computes on
+-- the fly. Populated inside the rebuild transaction from the same
+-- extractReferences() pass the service uses, so both directions always
+-- describe the same corpus. citing_id cascades with its section row;
+-- cited_citation stores the lowercase form extractReferences() emits,
+-- matching the (lowercase) section citations the corpus actually uses.
+CREATE TABLE IF NOT EXISTS section_references (
+  citing_id INTEGER NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
+  cited_citation TEXT NOT NULL,
+  PRIMARY KEY (citing_id, cited_citation)
+) WITHOUT ROWID;
+
+CREATE INDEX IF NOT EXISTS section_references_cited ON section_references(cited_citation);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS sections_fts USING fts5(
   citation, heading, text,
   content = 'sections',
@@ -127,6 +143,21 @@ INSERT INTO sections (
   subject_group, path, text, markdown, issue_date
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
+// citing_id comes from the section INSERT's lastInsertRowid; cited_citation
+// is one already-lowercased extractReferences() entry (deduped by the
+// PRIMARY KEY below, which also bounds self-citations to one row each).
+const INSERT_SECTION_REFERENCE_SQL = `
+INSERT INTO section_references (citing_id, cited_citation) VALUES (?, ?)`;
+
+// Reverse lookup: which sections cite `cited_citation`. Deterministic order
+// (citing citation, lexicographic) so wire consumers see a stable list.
+const CITED_BY_SQL = `
+SELECT s.citation
+FROM section_references r
+JOIN sections s ON s.id = r.citing_id
+WHERE r.cited_citation = ?
+ORDER BY s.citation`;
+
 const UPSERT_META_SQL = `
 INSERT INTO meta (key, value) VALUES (?, ?)
 ON CONFLICT(key) DO UPDATE SET value = excluded.value`;
@@ -138,8 +169,10 @@ const SNIPPET_TEXT = `snippet(sections_fts, 2, '', '', '…', 36)`;
 const SNIPPET_HEADING = `snippet(sections_fts, 1, '', '', '…', 36)`;
 const SNIPPET_EXPR = `CASE WHEN ${SNIPPET_TEXT} = '' THEN ${SNIPPET_HEADING} ELSE ${SNIPPET_TEXT} END`;
 
-/** Current schema version, stored in `PRAGMA user_version`. */
-const SCHEMA_VERSION = 1;
+/** Current schema version, stored in `PRAGMA user_version`.
+ *  v2: section_references reverse-reference edge table added. v1 files are
+ *  not migrated in place — the version-mismatch path guides a rebuild. */
+export const SCHEMA_VERSION = 2;
 
 /** How long a connection waits on a locked database before failing. */
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
@@ -147,6 +180,15 @@ const DEFAULT_BUSY_TIMEOUT_MS = 5000;
 export interface StoreOpenOptions {
   /** Override the busy-wait timeout (tests use a short one). */
   readonly busyTimeoutMs?: number;
+  /**
+   * Adopt an OLDER schema version (0 < version < SCHEMA_VERSION) instead of
+   * failing. Only the sync path may set this: `syncIndex` immediately
+   * wholesale-rebuilds every row via replaceAllWithBaseline (which also
+   * populates the new section_references edge table), so adoption is never
+   * left holding stale-shaped data. Downgrade (version > SCHEMA_VERSION)
+   * always fails regardless of this flag.
+   */
+  readonly allowSchemaUpgrade?: boolean;
 }
 
 // Column weights (citation 10, heading 5, body 1): exact-citation and
@@ -292,16 +334,37 @@ export function tidySnippet(raw: string): string {
   return snippet;
 }
 
-/** Ensure the on-disk schema version is compatible; adopt legacy files. */
-function ensureSchemaVersion(db: DatabaseSync): void {
+/**
+ * Ensure the on-disk schema version is compatible; adopt legacy files.
+ *
+ * Adoption rules: version 0 (pre-versioning) always adopts; an OLDER
+ * versioned file adopts only when `allowSchemaUpgrade` vouches for an
+ * immediate wholesale rebuild (the sync path, the only permitted caller —
+ * replaceAllWithBaseline repopulates every row, including the new
+ * section_references edges); a NEWER version always fails — downgrade is
+ * unsupported, flag or not.
+ */
+function ensureSchemaVersion(db: DatabaseSync, allowSchemaUpgrade: boolean): void {
   const versionRow = db.prepare('PRAGMA user_version').get() as Record<string, unknown> | undefined;
   const version = Number(versionRow?.['user_version'] ?? 0);
-  if (version !== 0 && version !== SCHEMA_VERSION) {
+  if (version === SCHEMA_VERSION) return;
+  if (version > SCHEMA_VERSION) {
+    throw new StoreError(
+      `index schema version ${version} is not supported (expected ${SCHEMA_VERSION}) — ` +
+        'downgrade is unsupported; delete the index file and run `cfr-free sync`',
+    );
+  }
+  if (version !== 0 && !allowSchemaUpgrade) {
     throw new StoreError(
       `index schema version ${version} is not supported (expected ${SCHEMA_VERSION}) — rebuild it with \`cfr-free sync\``,
     );
   }
-  if (version !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+  // Adopting version 0 (pre-versioning) or an older versioned file whose
+  // caller vouches for a full rebuild. Failure window: if that rebuild then
+  // fails, the file is marked SCHEMA_VERSION with pre-upgrade rows and an
+  // empty section_references table — reads stay servable (citedBy answers
+  // []) and the next successful sync completes the edge population.
+  db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
 /** True for SQLITE_BUSY/SQLITE_LOCKED failures (concurrent writer). */
@@ -385,6 +448,10 @@ export class Store {
       db = new DatabaseSync(filePath);
       db.exec('PRAGMA journal_mode = WAL');
       db.exec('PRAGMA synchronous = NORMAL');
+      // Pinned explicitly (node:sqlite currently defaults it on, but the
+      // section_references ON DELETE CASCADE wipe depends on it — never let
+      // that hinge on a driver default).
+      db.exec('PRAGMA foreign_keys = ON');
       // Wait for a concurrent writer (e.g. a second sync) instead of failing
       // instantly with a cryptic SQLITE_BUSY.
       db.exec(`PRAGMA busy_timeout = ${options.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS}`);
@@ -392,7 +459,7 @@ export class Store {
       const result = check ? String(Object.values(check)[0] ?? '') : '';
       if (result !== 'ok') throw new StoreError(`integrity check failed: ${result || 'no result'}`);
       db.exec(SCHEMA_SQL);
-      ensureSchemaVersion(db);
+      ensureSchemaVersion(db, options.allowSchemaUpgrade ?? false);
     } catch (error) {
       if (error instanceof StoreError) {
         throw new StoreError(`cannot open index at ${filePath}: ${error.message}`);
@@ -485,10 +552,13 @@ export class Store {
     let result!: T;
     this.transaction(() => {
       result = baseline(this);
+      // The sections wipe also clears every edge: citing_id cascades
+      // (PRAGMA foreign_keys is pinned ON in open()).
       this.db.exec('DELETE FROM sections');
       const insert = this.stmt(INSERT_SECTION_SQL);
+      const insertReference = this.stmt(INSERT_SECTION_REFERENCE_SQL);
       for (const section of sections) {
-        insert.run(
+        const { lastInsertRowid } = insert.run(
           section.citation,
           section.kind,
           section.heading,
@@ -502,6 +572,13 @@ export class Store {
           section.markdown,
           issueDate,
         );
+        // Reverse-reference edges, materialized in the SAME transaction as
+        // the sections they describe (extractReferences is the exact pass
+        // the service runs on read, so both directions stay consistent).
+        const citingId = Number(lastInsertRowid);
+        for (const cited of extractReferences(section.text)) {
+          insertReference.run(citingId, cited);
+        }
       }
       const upsert = this.stmt(UPSERT_META_SQL);
       for (const [key, value] of Object.entries(meta)) upsert.run(key, value);
@@ -559,6 +636,18 @@ export class Store {
       citation,
     );
     return row !== undefined;
+  }
+
+  /**
+   * Citations of indexed sections whose text references `citation` — the
+   * reverse of the forward `references` list on a section read. Sorted
+   * lexicographically by citing citation (deterministic wire output); empty
+   * array when nothing cites it. `citation` is bound as a parameter and
+   * matched exactly against the lowercase form extractReferences emits.
+   */
+  citedBy(citation: string): string[] {
+    const rows = this.stmt(CITED_BY_SQL).all(citation) as Record<string, unknown>[];
+    return rows.map((row) => String(row['citation']));
   }
 
   /** sha256 of every indexed section's text — the pre-sync snapshot. */
