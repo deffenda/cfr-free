@@ -53,6 +53,19 @@ describe('parseArgs', () => {
     });
   });
 
+  it('parses export with an optional jsonl|md format', () => {
+    expect(parseArgs(['export', './a', 'jsonl'])).toEqual({
+      command: 'export',
+      exportPath: './a',
+      exportFormat: 'jsonl',
+    });
+    expect(parseArgs(['export', './a', 'md'])).toEqual({
+      command: 'export',
+      exportPath: './a',
+      exportFormat: 'md',
+    });
+  });
+
   it('rejects unknown commands and options', () => {
     expect(() => parseArgs(['bogus'])).toThrow(CliError);
     expect(() => parseArgs(['--frobnicate'])).toThrow(CliError);
@@ -61,8 +74,18 @@ describe('parseArgs', () => {
 
   it('rejects export without exactly one target', () => {
     expect(() => parseArgs(['export'])).toThrow(/exactly one target path/);
-    expect(() => parseArgs(['export', 'a', 'b'])).toThrow(/exactly one target path/);
     expect(() => parseArgs(['export', '-o'])).toThrow(/exactly one target path/);
+    expect(() => parseArgs(['export', '-o', 'jsonl'])).toThrow(/exactly one target path/);
+  });
+
+  it('rejects export with an invalid format, a flag, or extra args', () => {
+    expect(() => parseArgs(['export', './a', 'xml'])).toThrow(CliError);
+    expect(() => parseArgs(['export', './a', 'xml'])).toThrow(/export format must be/);
+    // Dash-prefixed 2nd arg is an invalid format, not a flag.
+    expect(() => parseArgs(['export', './a', '--flag'])).toThrow(CliError);
+    expect(() => parseArgs(['export', './a', 'b', 'c'])).toThrow(/exactly one target path/);
+    // Two positionals: target + a non-format 2nd arg (was the old arity error).
+    expect(() => parseArgs(['export', 'a', 'b'])).toThrow(/export format must be/);
   });
 
   it('parses diff with one or two dates', () => {
@@ -92,6 +115,7 @@ describe('main', () => {
     expect(code).toBe(0);
     expect(out.join('')).toContain('Usage:');
     expect(out.join('')).toContain('cfr-free diff <from> [to]');
+    expect(out.join('')).toContain('cfr-free export <path> [jsonl|md]');
     expect(err.join('')).toBe('');
   });
 

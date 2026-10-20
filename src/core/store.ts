@@ -158,6 +158,11 @@ JOIN sections s ON s.id = r.citing_id
 WHERE r.cited_citation = ?
 ORDER BY s.citation`;
 
+// Full-corpus read for the export command: same row shape as getSection
+// (SELECT * + toSectionRow), citation-ordered like the repo's other
+// citation listing (CITED_BY_SQL).
+const SELECT_ALL_SECTIONS_SQL = 'SELECT * FROM sections ORDER BY citation';
+
 const UPSERT_META_SQL = `
 INSERT INTO meta (key, value) VALUES (?, ?)
 ON CONFLICT(key) DO UPDATE SET value = excluded.value`;
@@ -590,6 +595,22 @@ export class Store {
     const row = this.stmt('SELECT count(*) AS n FROM sections').get() as
       Record<string, unknown> | undefined;
     return row ? Number(row['n'] ?? 0) : 0;
+  }
+
+  /**
+   * Every indexed row (section + appendix) in citation order — the export
+   * read path. Same SELECT/row mapping as {@link getSection}, applied to
+   * the whole table.
+   *
+   * Materializes the corpus once: at Title 38 scale that is 2 970 rows /
+   * ~16 MB of text+markdown (measured on the live index), which the export
+   * writers serialize immediately. Unlike `captureTextHashes` (folded into
+   * a hash map, so it batches to bound memory), callers here need the text
+   * itself, so the rows are returned in one array by design.
+   */
+  allSections(): SectionRow[] {
+    const rows = this.stmt(SELECT_ALL_SECTIONS_SQL).all() as Record<string, unknown>[];
+    return rows.map(toSectionRow);
   }
 
   /**

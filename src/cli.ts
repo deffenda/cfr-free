@@ -20,7 +20,8 @@ Usage:
   cfr-free diff <from> [to]  Show provision changes between two eCFR issue dates
                              (to defaults to the index's issue date)
   cfr-free serve          Start the Titan HTTP API (default http://127.0.0.1:8787)
-  cfr-free export <path>  Save a consistent snapshot of the local index
+  cfr-free export <path> [jsonl|md]  Snapshot the index (sqlite default;
+                                     jsonl/md for pipeline ingestion)
   cfr-free help           Show this help
   cfr-free version        Show the version
 
@@ -49,19 +50,31 @@ export type Command = 'mcp' | 'sync' | 'diff' | 'serve' | 'export' | 'help' | 'v
 
 /** Parsed argv: `export` and `diff` carry their positional arguments. */
 export type ParsedCommand =
-  | { readonly command: 'export'; readonly exportPath: string }
+  | {
+      readonly command: 'export';
+      readonly exportPath: string;
+      readonly exportFormat?: 'jsonl' | 'md';
+    }
   | { readonly command: 'diff'; readonly fromDate: string; readonly toDate?: string }
   | { readonly command: Exclude<Command, 'export' | 'diff'> };
 
-/** Validate `export`'s required single target path. */
+/** Validate `export`'s required target path and optional output format. */
 function parseExportTarget(rest: readonly string[]): ParsedCommand {
   const target = rest[0];
-  if (rest.length !== 1 || target === undefined || target.startsWith('-')) {
+  const format = rest[1];
+  if (rest.length < 1 || rest.length > 2 || target === undefined || target.startsWith('-')) {
     throw new CliError(
       'export requires exactly one target path (e.g. `cfr-free export ./backup.sqlite`)',
     );
   }
-  return { command: 'export', exportPath: target };
+  if (format !== undefined && format !== 'jsonl' && format !== 'md') {
+    throw new CliError(
+      'export format must be `jsonl` or `md` (e.g. `cfr-free export ./backup.sqlite jsonl`)',
+    );
+  }
+  return format === undefined
+    ? { command: 'export', exportPath: target }
+    : { command: 'export', exportPath: target, exportFormat: format };
 }
 
 /** Validate `diff`'s required from-date and optional to-date. */
@@ -137,8 +150,11 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
       return 0;
     }
     if (command === 'export') {
-      const report = runExportCommand(config, parsed.exportPath, logger);
-      io.out(`exported ${report.bytes} bytes to ${report.path}\n`);
+      const report = runExportCommand(config, parsed.exportPath, logger, parsed.exportFormat);
+      io.out(
+        `exported ${report.provisions} provisions as ${report.format} ` +
+          `(${report.bytes} bytes) to ${report.path}\n`,
+      );
       return 0;
     }
     if (command === 'diff') {
