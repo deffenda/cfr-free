@@ -80,6 +80,19 @@ places a paragraph inside a container with its own text keeps that
 paragraph as its own block instead of silently folding it into a
 phrase.
 
+**Labelling supplementary text (M1(b2)):** a footnote (`<FP>`) and an
+extract (`<EXTRACT>`) carry text that is NOT the provision's own regulatory
+prose — a footnote is supplementary text attached to a paragraph, an extract
+is quoted material from elsewhere — and the upstream document labels
+neither. Both are therefore labelled in the document's own style (the
+`NOTE`/`EDNOTE` headings read "Note:" / "Editorial Note:"): a footnote
+renders as a `Footnote:` block followed by its text, an extract as an
+`Extract:` block followed by its content, and the labelled content keeps
+the structure it had (an extract's list items stay list items). A sub-heading
+(`<HD2>`) renders as a heading. Notes and editorial notes are NOT
+re-labelled: the upstream wording already labels them ("Note:",
+"Editorial Note:").
+
 **Image content (P1-01):** some provisions publish their rating tables as `<img>` elements (15 in the 2026-10-16 document, across 9 provisions — 1.9, 4.71, 4.71a, 4.76a, 4.77, 4.85, 17.610, 45.605, 59.50). The parser cannot include image content offline and must never drop it silently: every `<img>` — inline in a paragraph, nested in a container, or a direct content child — is replaced IN PLACE by the explicit marker `[image content not included: <path>]` in BOTH the text and the markdown representation. Only a vetted relative eCFR graphics path (`/graphics/<file>`, safe charset, no traversal) is named; any other source (scheme-qualified, host-qualified, outside `/graphics/`, or missing) yields `[image content not included: unrecognized image source]` and is never echoed. Nothing is fetched, OCR'd, or transcribed: the service stays fully offline, and a matching section count never implies complete textual coverage — the sync report states how many provisions carry the marker (`meta.image_content_sections`).
 
 Sync is a single transaction: `DELETE FROM sections` + bulk insert (FTS5 external-content triggers keep the index consistent). Sync is atomic — readers never see a half-built index (SQLite WAL mode).

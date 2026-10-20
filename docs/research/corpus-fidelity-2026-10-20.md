@@ -40,6 +40,13 @@ decompressed the body).
 `intact` = the provision keeps **all** of that construct's text; `partial` =
 some survives; `lost` = none does.
 
+**Correction (M1(b2)):** this table first reported **274** footnotes. That
+count was wrong: it counted `<FP-1>` and `<FP-2>` as footnotes, and those
+are not footnotes — they are list items inside an `<EXTRACT>` (212 of them,
+175 inside extracts). The real footnote count is **62** (56 provisions).
+The probe now matches element names EXACTLY, so `<FP>` no longer absorbs
+`<FP-1>`/`<FP-2>`.
+
 **The two columns measure different populations, deliberately.** _Occurrences_
 counts the elements present in the document; _Provisions_ counts the
 provisions from which the probe could EXTRACT fragments to compare. They
@@ -52,7 +59,7 @@ total.
 
 | Construct                      | Occurrences | Provisions | Intact | Partial | Lost |
 | ------------------------------ | ----------- | ---------- | ------ | ------- | ---- |
-| footnotes (`<FP>`)             | 274         | 56         | 56     | 0       | 0    |
+| footnotes (`<FP>`)             | 62          | 56         | 56     | 0       | 0    |
 | notes (`<NOTE>`)               | 70          | 49         | 49     | 0       | 0    |
 | editorial notes (`<EDNOTE>`)   | 33          | 28         | 28     | 0       | 0    |
 | sub-headings (`<HD2>`)         | 3           | 1          | 1      | 0       | 0    |
@@ -119,43 +126,55 @@ VA will charge fees consistent with the salary scale published by the Office of 
 The same pattern splits "For **Federal Register** citations" in § 2.6's
 editorial note into three lines.
 
-### G2 — Footnotes are preserved but not anchored, and not labelled
+### G2 — Footnotes: RESOLVED by M1(b2) (labelled; anchoring is impossible)
 
-**Harm:** a reader cannot tell which claim a footnote qualifies, and may
-read the footnote's own words as part of the rule.
+**Harm (before the fix):** a reader could not tell a footnote from the
+rule, and could not tell which claim a footnote qualifies.
 
-§ 1.916 renders as: body paragraphs, then (unlabelled) the footnote text
-"A notice of the right to request this information will be sent with the
-notice described in paragraph (d)(1) of this section." — with no marker
-tying it to the sentence it belongs to. The upstream footnote block carries
-no reference number either, so the anchor has to come from position alone.
+§ 1.916 rendered as body paragraphs and then, unlabelled, the footnote
+text "A notice of the right to request this information will be sent with
+the notice described in paragraph (d)(1) of this section." — with no
+marker tying it to the sentence it belongs to.
 
-### G3 — Editorial notes read as regulatory prose
+**Now labelled:** a footnote renders as its own `Footnote:` block followed
+by its text (the document's own label style — the NOTE/EDNOTE headings
+read "Note:" / "Editorial Note:"). **Anchoring is not possible and is not
+attempted:** the upstream footnote block carries no reference number, so
+there is nothing to anchor to except position — inventing one would be
+worse than not having it.
 
-**Harm:** an _editorial_ note (a Federal Register pointer, a finding-aid
-note) can be mistaken for the regulation's own text — the opposite of what
-it is.
+### G3 — Editorial notes: CORRECTED (they were already self-labelling)
 
-§ 2.6 renders "Editorial Note: For Federal Register citations affecting
-§ 2.6, see the List of CFR Sections Affected…" as ordinary paragraphs
-with no label beyond the word "Editorial Note:" itself (which does survive,
-inline-split per G1).
+**This gap was overstated.** Measured: all **33** editorial notes carry a
+`<HED>` reading "Editorial Note:" — the document labels itself, and that
+label survived the parser (it was only split by the inline bug of G1, now
+fixed). So the note cannot be mistaken for the regulation's own text: the
+words "Editorial Note:" are right there.
 
-### G4 — Notes and extracts are not labelled
+What remains true: an editorial note is a Federal Register pointer or a
+finding-aid note, and a reader skimming for the rule has to read past it —
+a readability point, not a mislabelling one. No code change is warranted;
+the inventory records the correction rather than a fix.
 
-**Harm:** a reader cannot distinguish a note to a paragraph from the
-paragraph it annotates, and an extract from surrounding text.
+### G4 — Notes: CORRECTED (they were already self-labelling); extracts RESOLVED by M1(b2)
 
-§ 1.561's "Note to paragraph (g)(1): …" is rendered as plain text with no
-"Note" label of its own beyond the upstream wording, and `<EXTRACT>` blocks
-(36 occurrences) are rendered as plain paragraphs with no marker.
+**Notes:** measured, all **70** notes carry a `<HED>` — "Note:" or
+"Note to paragraph (g)(1):" — so the upstream wording labels them. The
+claim that notes were unlabelled was wrong; recorded as a correction.
 
-### G5 — Sub-headings are rendered as ordinary text
+**Extracts (the real gap here):** `<EXTRACT>` blocks (36 occurrences) hold
+quoted material from elsewhere and carried no marker at all, so a reader
+could take the quotation for the provision's own text. An extract now
+renders as its own `Extract:` block, and its content keeps the structure it
+had (an extract's list items stay list items).
 
-**Harm:** a subsection heading reads as a run-on sentence.
+### G5 — Sub-headings: RESOLVED by M1(b2) (rendered as headings)
 
-`<HD2>` occurs 3 times (e.g. § 17.395 "Live Donor Follow-Up Means"); the text
-survives but is rendered inline, not as a heading.
+**Harm (before the fix):** a subsection heading read as a run-on sentence.
+
+`<HD2>` occurs 3 times (e.g. § 17.395 "Live Donor Follow-Up Means"); the
+text survived but was rendered inline. It now renders as its own block, and
+as a heading in the markdown (`### …`), like a `<HEAD>`.
 
 ## 3. What is already handled (no work needed)
 
