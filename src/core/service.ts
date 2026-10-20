@@ -3,6 +3,7 @@ import { normalizeCitation } from './citations.js';
 import { extractReferences } from './references.js';
 import type { SyncChanges } from './changes.js';
 import { diffIssues, type IssueDiff } from './diff.js';
+import { redlineSection, type SectionRedline } from './redline.js';
 import type { EcfrApi } from './ecfr.js';
 import type { Logger } from '../logger.js';
 import {
@@ -244,8 +245,9 @@ export class CFRService {
   private readonly store: Store;
   private readonly maxAgeDays: number;
   /**
-   * Optional diff stack (batch-7 D2): injected by `serve`/`mcp`, absent in
-   * plain index readers and tests — the facade below fails closed without it.
+   * Optional point-in-time stack (batch-7 D2 diff, batch-8 E1 redline):
+   * injected by `serve`/`mcp`, absent in plain index readers and tests — the
+   * facades below fail closed without it.
    */
   private readonly ecfr: EcfrApi | undefined;
   private readonly logger: Logger | undefined;
@@ -558,5 +560,37 @@ export class CFRService {
       throw new ServiceError('diff unavailable — no eCFR client injected', 'invalid_input');
     }
     return diffIssues({ ecfr, logger }, fromDate, toDate);
+  }
+
+  /**
+   * Facade over `redlineSection` (batch-8 E1), mirroring `diffBetween`: the
+   * guard fails closed without the injected client and logger, delegating to
+   * the core otherwise. BOTH dates are required on the wire (no default-to
+   * resolution); the core owns every validation (malformed/impossible/identical
+   * dates, non-citation) and the `not_found` tripwire for a citation missing
+   * from BOTH dates. Stateless by design: every call fetches both dates'
+   * full-title XML from eCFR — no prefetch, no cache.
+   *
+   * Every `serve`/`mcp` entrypoint injects the client and logger together;
+   * the guard fails closed for test-constructed services without the redline
+   * stack, so both wire surfaces answer a clean mapped error instead of a
+   * crash.
+   *
+   * @throws {ServiceError} (`invalid_input`) when no eCFR client was
+   *   injected, or when a date is malformed/impossible, the two dates are
+   *   identical, or the citation is not recognizable; (`not_found`) when the
+   *   citation is missing from BOTH dates' parse results; upstream fetch
+   *   failures surface as `HttpError`.
+   */
+  async redlineBetween(
+    fromDate: string,
+    toDate: string,
+    citation: string,
+  ): Promise<SectionRedline> {
+    const { ecfr, logger } = this;
+    if (ecfr === undefined || logger === undefined) {
+      throw new ServiceError('redline unavailable — no eCFR client injected', 'invalid_input');
+    }
+    return redlineSection({ ecfr, logger }, fromDate, toDate, citation);
   }
 }

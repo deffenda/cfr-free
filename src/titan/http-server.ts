@@ -8,10 +8,10 @@ import { UI_CSP, UI_CSS, UI_HTML, UI_JS } from './ui.js';
 
 /**
  * Titan HTTP API: a tiny GET-only JSON surface over the local index, plus
- * the stateless `/api/v1/diff` point-in-time comparison (two issue dates
- * fetched from eCFR per call — see handleDiff), plus
- * the read-only web UI at the serve root (`/`, `/ui.js`, `/ui.css` — see
- * ui.ts) that consumes the same surface.
+ * the stateless `/api/v1/diff` and `/api/v1/redline` point-in-time
+ * comparisons (two issue dates fetched from eCFR per call — see
+ * handleDiff/handleRedline), plus the read-only web UI at the serve root
+ * (`/`, `/ui.js`, `/ui.css` — see ui.ts) that consumes the same surface.
  *
  * Deliberately dependency-free (`node:http`) and hardened by construction:
  * no request bodies, no templating, no dynamic SQL, validated query strings,
@@ -28,6 +28,7 @@ const SEARCH_PREFIX = '/api/v1/search';
 const SECTIONS_PREFIX = '/api/v1/sections/';
 const BROWSE_PATH = '/api/v1/browse';
 const DIFF_PATH = '/api/v1/diff';
+const REDLINE_PATH = '/api/v1/redline';
 const HEALTH_PATH = '/health';
 const METRICS_PATH = '/metrics';
 const UI_PATH = '/';
@@ -239,6 +240,56 @@ async function handleDiff(
   );
 }
 
+/**
+ * `GET /api/v1/redline?from=<YYYY-MM-DD>&to=<YYYY-MM-DD>&citation=<cite>` —
+ * all three params required on the wire: missing/empty params are a 400
+ * BEFORE the service is touched, same pre-service gate as handleDiff. The
+ * body is the core's `SectionRedline` passed through verbatim — the wire adds
+ * no fields and caps nothing (the core's coarse fallback at MAX_REDLINE_LINES
+ * is the only bound).
+ *
+ * The `await` rejects into the same catch every sync handler uses:
+ * `ServiceError` maps through `statusFor` (invalid_input → 400, not_found →
+ * 404 — a citation missing from BOTH dates), anything else (`HttpError` from
+ * an upstream fetch, `SyncError`) falls to the generic 500 path with the
+ * detail logged server-side only.
+ */
+async function handleRedline(
+  service: CFRService,
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  url: URL,
+): Promise<void> {
+  const fromDate = url.searchParams.get('from');
+  const toDate = url.searchParams.get('to');
+  const citation = url.searchParams.get('citation');
+  if (
+    fromDate === null ||
+    fromDate === '' ||
+    toDate === null ||
+    toDate === '' ||
+    citation === null ||
+    citation === ''
+  ) {
+    sendJson(
+      req,
+      res,
+      400,
+      errorBody(
+        'invalid_input',
+        "all of 'from', 'to' and 'citation' query parameters are required (YYYY-MM-DD dates)",
+      ),
+    );
+    return;
+  }
+  const redline = await service.redlineBetween(fromDate, toDate, citation);
+  // Pure function of two fixed dates + one citation: cacheable like the diff
+  // route. 5 min (not 3600) because a redline spans two upstream fetches and
+  // the from/to window is only rarely an identical document; errors below carry
+  // no cache-control (matching handleDiff's shape).
+  sendJson(req, res, 200, { ...redline }, 'public, max-age=300');
+}
+
 function statusFor(error: ServiceError | StructureError): { status: number; code: string } {
   if (error instanceof StructureError) return { status: 404, code: 'not_found' };
   return error.code === 'not_found'
@@ -355,6 +406,10 @@ async function dispatch(
     await handleDiff(service, req, res, url);
     return;
   }
+  if (pathname === REDLINE_PATH) {
+    await handleRedline(service, req, res, url);
+    return;
+  }
   if (pathname === UI_PATH) {
     sendStatic(req, res, HTML_HEADER, UI_HTML, UI_CSP);
     return;
@@ -450,12 +505,12 @@ export function createHttpServer(
   const limiter =
     options.rateLimit === undefined ? null : new RateLimiter({ ...options.rateLimit });
   const server = http.createServer((req, res) => {
-    // `dispatch` is async since the diff route awaits the eCFR facade, so one
-    // async task wraps the whole cycle: precheck runs first (it answers its
-    // own errors synchronously and never throws), then `await dispatch` puts
-    // async rejections in front of the SAME catch the sync handlers have
-    // always used — ServiceError/StructureError → statusFor (400/404 +
-    // client-safe message), anything else → logged + generic 500.
+    // `dispatch` is async since the diff and redline routes await the eCFR
+    // facade, so one async task wraps the whole cycle: precheck runs first (it
+    // answers its own errors synchronously and never throws), then `await
+    // dispatch` puts async rejections in front of the SAME catch the sync
+    // handlers have always used — ServiceError/StructureError → statusFor
+    // (400/404 + client-safe message), anything else → logged + generic 500.
     void (async () => {
       const url = precheck(req, res, limiter);
       if (url === null) return;
