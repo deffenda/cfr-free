@@ -96,6 +96,30 @@ describe('MCP server (in-memory transport)', () => {
     expect((result.structuredContent?.['hits'] as unknown[]).length).toBeLessThanOrEqual(1);
   });
 
+  it('search_regulations forwards kind and chapter filters to the store', async () => {
+    const result = (await client.callTool({
+      name: 'search_regulations',
+      arguments: { query: 'rating schedule', kind: 'appendix', chapter: 'I' },
+    })) as ToolCallResult;
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent?.['total']).toBe(1);
+    const hits = result.structuredContent?.['hits'] as Array<{ citation: string }>;
+    expect(hits.map((hit) => hit.citation)).toEqual(['Appendix A to Part 4']);
+  });
+
+  it('search_regulations rejects invalid kind and chapter values', async () => {
+    // Both fail the tool's own input schema; the SDK surfaces the rejection
+    // as an isError result carrying the InvalidParams message.
+    for (const args of [{ kind: 'policy' }, { chapter: '4' }]) {
+      const result = (await client.callTool({
+        name: 'search_regulations',
+        arguments: { query: 'mental disorder', ...args },
+      })) as ToolCallResult;
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toMatch(/invalid arguments/i);
+    }
+  });
+
   it('search_regulations reports validation errors as tool errors', async () => {
     const result = (await client.callTool({
       name: 'search_regulations',

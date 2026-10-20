@@ -42,10 +42,26 @@ describe('CFRService.search', () => {
     [{ query: 'mental disorder', page: 1.5 }],
     [{ query: 'mental disorder', perPage: 21 }],
     [{ query: 'mental disorder', part: 'abc' }],
+    // 'policy' is not one of the two section kinds; '4' is not a Roman numeral.
+    [{ query: 'mental disorder', kind: 'policy' as never }],
+    [{ query: 'mental disorder', chapter: '4' }],
     [{ query: 'x'.repeat(201) }],
   ])('rejects invalid input %#', (input) => {
     withService((service) => {
       expect(() => service.search(input)).toThrow(/invalid input/);
+    });
+  });
+
+  it('constrains ranked results by kind and chapter', () => {
+    withService((service) => {
+      const appendixOnly = service.search({ query: 'rating schedule', kind: 'appendix' });
+      expect(appendixOnly.hits.map((hit) => hit.citation)).toEqual(['Appendix A to Part 4']);
+      const sectionOnly = service.search({ query: 'rating schedule', kind: 'section' });
+      expect(sectionOnly.hits.map((hit) => hit.citation)).toEqual(['4.130']);
+      // No fixture row lives in chapter II — the filter empties the result set.
+      expect(service.search({ query: 'rating schedule', chapter: 'II' }).total).toBe(0);
+      // All fixture rows live in chapter I.
+      expect(service.search({ query: 'rating schedule', chapter: 'I' }).total).toBe(2);
     });
   });
 });
@@ -378,6 +394,31 @@ describe('CFRService citation-direct search', () => {
     withService((service) => {
       const result = service.search({ query: '38 CFR 17.15', part: '4' });
       expect(result.hits.some((hit) => hit.direct)).toBe(false);
+    });
+  });
+
+  it('suppresses the pin when the kind filter excludes it', () => {
+    withService((service) => {
+      // 4.130 is a section; kind=appendix must keep the pin suppressed.
+      const result = service.search({ query: '38 CFR 4.130', kind: 'appendix' });
+      expect(result.hits.some((hit) => hit.direct)).toBe(false);
+    });
+  });
+
+  it('suppresses the pin when the chapter filter excludes it', () => {
+    withService((service) => {
+      // 4.130 lives in chapter I; chapter=II has no rows at all.
+      const result = service.search({ query: '38 CFR 4.130', chapter: 'II' });
+      expect(result.hits.some((hit) => hit.direct)).toBe(false);
+      expect(result.total).toBe(0);
+    });
+  });
+
+  it('keeps the pin when kind and chapter match it', () => {
+    withService((service) => {
+      const result = service.search({ query: '38 CFR 4.130', kind: 'section', chapter: 'I' });
+      expect(result.hits[0]?.citation).toBe('4.130');
+      expect(result.hits[0]?.direct).toBe(true);
     });
   });
 

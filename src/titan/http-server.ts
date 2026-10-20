@@ -102,6 +102,9 @@ function handleSearch(
     page: parseOptionalInt(url.searchParams.get('page')),
     perPage: parseOptionalInt(url.searchParams.get('per_page')),
     part: url.searchParams.get('part') ?? undefined,
+    // Kind is validated by the service's zod schema: invalid values must reach it (400 invalid_input).
+    kind: (url.searchParams.get('kind') ?? undefined) as 'section' | 'appendix' | undefined,
+    chapter: url.searchParams.get('chapter') ?? undefined,
   });
   sendJson(req, res, 200, { ...result }, 'public, max-age=300');
 }

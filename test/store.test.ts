@@ -231,6 +231,160 @@ describe('Store', () => {
     }
   });
 
+  it('filters by kind', () => {
+    const temp = openTempStore();
+    try {
+      // "rating schedule" matches 4.130 (section) and Appendix A to Part 4.
+      const sections = temp.store.search({
+        query: 'rating schedule',
+        page: 1,
+        perPage: 10,
+        kind: 'section',
+      });
+      expect(sections.total).toBe(1);
+      expect(sections.hits.map((hit) => hit.citation)).toEqual(['4.130']);
+      const appendices = temp.store.search({
+        query: 'rating schedule',
+        page: 1,
+        perPage: 10,
+        kind: 'appendix',
+      });
+      expect(appendices.total).toBe(1);
+      expect(appendices.hits.map((hit) => hit.citation)).toEqual(['Appendix A to Part 4']);
+      // Unfiltered: both kinds still match.
+      const all = temp.store.search({ query: 'rating schedule', page: 1, perPage: 10 });
+      expect(all.total).toBe(2);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('filters by chapter with exact, case-sensitive matching', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '9.1',
+          chapter: 'II',
+          part: '9',
+          subpart: null,
+          path: '/title:38/chapter:II/part:9',
+          text: 'Disorder provisions enacted under chapter two authority.',
+        }),
+        makeSection({
+          citation: '9.2',
+          chapter: 'II',
+          part: '9',
+          subpart: null,
+          kind: 'appendix',
+          path: '/title:38/chapter:II/part:9',
+          text: 'Disorder provisions tabled under chapter two authority.',
+        }),
+        makeSection({
+          citation: '8.1',
+          chapter: 'I',
+          part: '8',
+          subpart: null,
+          path: '/title:38/chapter:I/part:8',
+          text: 'Disorder provisions enacted under chapter one authority.',
+        }),
+      ],
+    });
+    try {
+      const chapterTwo = temp.store.search({
+        query: 'disorder',
+        page: 1,
+        perPage: 10,
+        chapter: 'II',
+      });
+      expect(chapterTwo.total).toBe(2);
+      expect(chapterTwo.hits.map((hit) => hit.citation).sort()).toEqual(['9.1', '9.2']);
+      // Exact and case-sensitive: neither "ii" nor a decimal form matches.
+      expect(
+        temp.store.search({ query: 'disorder', page: 1, perPage: 10, chapter: 'ii' }).total,
+      ).toBe(0);
+      expect(
+        temp.store.search({ query: 'disorder', page: 1, perPage: 10, chapter: '2' }).total,
+      ).toBe(0);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('combines kind, chapter, and part filters', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '9.1',
+          chapter: 'II',
+          part: '9',
+          subpart: null,
+          path: '/title:38/chapter:II/part:9',
+          text: 'Disorder provisions enacted under chapter two authority.',
+        }),
+        makeSection({
+          citation: '9.2',
+          chapter: 'II',
+          part: '9',
+          subpart: null,
+          kind: 'appendix',
+          path: '/title:38/chapter:II/part:9',
+          text: 'Disorder provisions tabled under chapter two authority.',
+        }),
+        makeSection({
+          citation: '8.1',
+          chapter: 'I',
+          part: '8',
+          subpart: null,
+          path: '/title:38/chapter:I/part:8',
+          text: 'Disorder provisions enacted under chapter one authority.',
+        }),
+      ],
+    });
+    try {
+      const sectionOnly = temp.store.search({
+        query: 'disorder',
+        page: 1,
+        perPage: 10,
+        kind: 'section',
+        chapter: 'II',
+      });
+      expect(sectionOnly.total).toBe(1);
+      expect(sectionOnly.hits.map((hit) => hit.citation)).toEqual(['9.1']);
+      const appendixOnly = temp.store.search({
+        query: 'disorder',
+        page: 1,
+        perPage: 10,
+        kind: 'appendix',
+        chapter: 'II',
+      });
+      expect(appendixOnly.total).toBe(1);
+      expect(appendixOnly.hits.map((hit) => hit.citation)).toEqual(['9.2']);
+      // All three filters together: the part filter prunes a chapter-II row
+      // away even though kind and chapter alone would match it.
+      const partPruned = temp.store.search({
+        query: 'disorder',
+        page: 1,
+        perPage: 10,
+        kind: 'appendix',
+        chapter: 'II',
+        part: '8',
+      });
+      expect(partPruned.total).toBe(0);
+      const combined = temp.store.search({
+        query: 'disorder',
+        page: 1,
+        perPage: 10,
+        kind: 'appendix',
+        chapter: 'II',
+        part: '9',
+      });
+      expect(combined.total).toBe(1);
+      expect(combined.hits.map((hit) => hit.citation)).toEqual(['9.2']);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
   it('paginates results', () => {
     const temp = openTempStore();
     try {
