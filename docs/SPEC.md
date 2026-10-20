@@ -169,6 +169,19 @@ CREATE VIRTUAL TABLE sections_fts USING fts5(
 
 **FTS query safety:** user input never passes through raw. `toFtsQuery()` tokenizes on `[^\p{L}\p{N}]`, emits `"tok"*` terms joined by `AND`; service retries once with `OR` if `AND` yields 0 rows. Bound inputs: query 3–200 chars, `per_page` 1–20, page ≥ 1. Results deduped by citation (eCFR search returns one row per change event).
 
+**Retrieval evaluation (M3):** `test/fixtures/retrieval/` holds a frozen
+query set (30 development + 20 holdout queries across citations, display
+citations, abbreviations, natural phrasing, quoted phrases, ambiguous topics,
+appendices and no-answer cases) and a runner that reports exact-citation
+success, recall@5, mean reciprocal rank, no-answer violations and warm-search
+latency with machine/runtime/corpus provenance. Run it against an isolated
+copy of an index:
+`CFR_INDEX_PATH=/tmp/eval-index.sqlite npx tsx test/fixtures/retrieval/run.ts dev`.
+The baseline report is `docs/research/retrieval-baseline-2026-10-20.md`. The
+set's expectations are provisional (the orchestrator's assumptions) until an
+expert adjudicates them; a change to the set is a change to the benchmark and
+must be visible in the diff. The holdout set is not tuned on.
+
 ## 5. Titan HTTP API (GET-only; JSON + two text exceptions, bind 127.0.0.1)
 
 | Route                            | Params                                                                                                                | Returns                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
