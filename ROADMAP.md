@@ -1,5 +1,11 @@
 # cfr-free — Top 20 build items (groomed)
 
+## Open review findings — dispatch first
+
+The four P1 findings from the 2026-10-20 review are **OPEN**. Implementation
+packets, evidence, acceptance criteria, and gates are recorded in
+[the review handoff](docs/research/review-2026-10-20.md) (issue #62).
+
 Mission filter: **accuracy and information quality for veteran support
 officers and claims adjudicators evaluating a veteran's claim.** Every item
 must make it easier to find, verify, quote, or trust the governing Title 38
