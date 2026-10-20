@@ -76,6 +76,9 @@ export const UI_HTML = `<!doctype html>
         <h2 id="section-heading"></h2>
         <p id="section-path" class="breadcrumb"></p>
         <p id="section-meta" class="breadcrumb"></p>
+        <p id="section-copy"><button type="button" id="copy-citation">Copy citation</button>
+          <span id="copy-status" role="status"></span></p>
+        <textarea id="citation-block" rows="6" readonly aria-label="Citation block to copy"></textarea>
         <blockquote id="section-text"></blockquote>
         <h3>References</h3>
         <ul id="section-references"></ul>
@@ -132,6 +135,9 @@ export const UI_JS = String.raw`(function () {
   var pager = byId('search-pager');
   var sectionError = byId('section-error');
   var sectionHeading = byId('section-heading');
+  var copyButton = byId('copy-citation');
+  var copyStatus = byId('copy-status');
+  var citationBlock = byId('citation-block');
   var sectionPath = byId('section-path');
   var sectionMeta = byId('section-meta');
   var sectionText = byId('section-text');
@@ -405,6 +411,7 @@ export const UI_JS = String.raw`(function () {
       sectionMeta.appendChild(document.createTextNode(' — ' + section.notice));
     }
     sectionText.textContent = String(section.text);
+    fillCitationBlock(section);
     var references = Array.isArray(section.references) ? section.references : [];
     for (var i = 0; i < references.length; i += 1) {
       var reference = references[i];
@@ -425,6 +432,46 @@ export const UI_JS = String.raw`(function () {
     }
     if (citedBy.length === 0) sectionCitedBy.appendChild(el('li', '', 'None indexed.'));
   }
+
+  /**
+   * The M5 copy block: the citation, heading, source date, the DATED
+   * verification URL (the revision this text came from), and — when the
+   * text carries an image marker — an explicit incompleteness warning, so
+   * a copied citation can never imply complete coverage. Keyboard-reachable
+   * button; the block is also shown in a readonly textarea, so it works
+   * without clipboard permission.
+   */
+  function fillCitationBlock(section) {
+    var citation = String(section.citation);
+    var kind = String(section.kind);
+    var display = kind === 'appendix' ? citation : '38 C.F.R. § ' + citation;
+    var lines = [];
+    lines.push(display);
+    if (typeof section.heading === 'string' && section.heading !== '') {
+      lines.push(section.heading);
+    }
+    lines.push('Source: 38 CFR ' + citation + ' (issue date ' + String(section.issueDate) + ')');
+    if (typeof section.sourceUrlAtIndexDate === 'string' && section.sourceUrlAtIndexDate !== '') {
+      lines.push('Verify at the indexed revision: ' + section.sourceUrlAtIndexDate);
+    }
+    var body = String(section.text);
+    if (body.indexOf('[image content not included:') !== -1) {
+      lines.push(
+        'NOTE: this provision contains graphic content (rating tables) that is NOT included in this text — verify the rating table at eCFR.',
+      );
+    }
+    citationBlock.value = lines.join('\n');
+  }
+
+  copyButton.addEventListener('click', function () {
+    var text = citationBlock.value;
+    if (navigator.clipboard !== undefined && navigator.clipboard.writeText !== undefined) {
+      navigator.clipboard.writeText(text);
+      copyStatus.textContent = 'Copied — the block below is also selectable.';
+    } else {
+      copyStatus.textContent = 'Select the block below and copy it (clipboard unavailable).';
+    }
+  });
 
   function renderSection(citation, generation) {
     searchView.hidden = true;
@@ -799,6 +846,17 @@ blockquote {
   margin: 1rem 0;
   padding: 0.5rem 1rem;
   border-left: 4px solid #b9b9b9;
+  white-space: pre-wrap;
+}
+
+#citation-block {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0.5rem 0 1rem;
+  padding: 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
   white-space: pre-wrap;
 }
 
