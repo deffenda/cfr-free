@@ -7,6 +7,7 @@ import { runServeCommand } from './commands/serve.js';
 import { runSyncCommand } from './commands/sync.js';
 import { runExportCommand } from './commands/export.js';
 import { formatIssueDiff, runDiffCommand } from './commands/diff.js';
+import { formatSectionRedline, runRedlineCommand } from './commands/redline.js';
 import { CommandError, EXIT } from './exit-codes.js';
 import { createLogger } from './logger.js';
 import { VERSION } from './version.js';
@@ -19,6 +20,8 @@ Usage:
   cfr-free sync           Rebuild the local index from eCFR
   cfr-free diff <from> [to]  Show provision changes between two eCFR issue dates
                              (to defaults to the index's issue date)
+  cfr-free redline <from> <to> <citation>  Line-level redline of one provision between
+                                           two eCFR issue dates
   cfr-free serve          Start the Titan HTTP API (default http://127.0.0.1:8787)
   cfr-free export <path> [jsonl|md]  Snapshot the index (sqlite default;
                                      jsonl/md for pipeline ingestion)
@@ -46,9 +49,9 @@ export class CliError extends CommandError {
   }
 }
 
-export type Command = 'mcp' | 'sync' | 'diff' | 'serve' | 'export' | 'help' | 'version';
+export type Command = 'mcp' | 'sync' | 'diff' | 'redline' | 'serve' | 'export' | 'help' | 'version';
 
-/** Parsed argv: `export` and `diff` carry their positional arguments. */
+/** Parsed argv: `export`, `diff` and `redline` carry their positional arguments. */
 export type ParsedCommand =
   | {
       readonly command: 'export';
@@ -56,7 +59,13 @@ export type ParsedCommand =
       readonly exportFormat?: 'jsonl' | 'md';
     }
   | { readonly command: 'diff'; readonly fromDate: string; readonly toDate?: string }
-  | { readonly command: Exclude<Command, 'export' | 'diff'> };
+  | {
+      readonly command: 'redline';
+      readonly fromDate: string;
+      readonly toDate: string;
+      readonly citation: string;
+    }
+  | { readonly command: Exclude<Command, 'export' | 'diff' | 'redline'> };
 
 /** Validate `export`'s required target path and optional output format. */
 function parseExportTarget(rest: readonly string[]): ParsedCommand {
@@ -96,14 +105,45 @@ function parseDiffArgs(rest: readonly string[]): ParsedCommand {
     : { command: 'diff', fromDate: from, toDate: to };
 }
 
+/** Parse `redline`'s three required positionals: from-date, to-date, citation. */
+function parseRedlineArgs(rest: readonly string[]): ParsedCommand {
+  const [from, to, citation] = rest;
+  if (
+    rest.length !== 3 ||
+    from === undefined ||
+    to === undefined ||
+    citation === undefined ||
+    from.startsWith('-') ||
+    to.startsWith('-') ||
+    citation.startsWith('-')
+  ) {
+    throw new CliError(
+      'redline requires a from-date, a to-date and a citation ' +
+        '(usage: `cfr-free redline <from> <to> <citation>`)',
+    );
+  }
+  return { command: 'redline', fromDate: from, toDate: to, citation };
+}
+
+/**
+ * Commands that carry positional arguments, mapped to their parser. A Map
+ * (not a plain object): `parseArgs(['toString'])` must still fall through to
+ * "unknown command" — object literals inherit prototype keys, Maps don't.
+ */
+const ARG_PARSERS = new Map<string, (rest: readonly string[]) => ParsedCommand>([
+  ['export', parseExportTarget],
+  ['diff', parseDiffArgs],
+  ['redline', parseRedlineArgs],
+]);
+
 /** Parse argv (without node/script) into a command. Default: `mcp`. */
 export function parseArgs(argv: readonly string[]): ParsedCommand {
   const [first, ...rest] = argv;
   if (first === undefined) return { command: 'mcp' };
   if (first === '-h' || first === '--help' || first === 'help') return { command: 'help' };
   if (first === '-v' || first === '--version' || first === 'version') return { command: 'version' };
-  if (first === 'export') return parseExportTarget(rest);
-  if (first === 'diff') return parseDiffArgs(rest);
+  const parseArgv = ARG_PARSERS.get(first);
+  if (parseArgv !== undefined) return parseArgv(rest);
   if (first === 'mcp' || first === 'sync' || first === 'serve') {
     if (rest.length > 0)
       throw new CliError(`unexpected arguments after '${first}': ${rest.join(' ')}`);
@@ -162,6 +202,18 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
       // (bad dates, missing index for the default `to`) surface as throws.
       const report = await runDiffCommand(config, logger, parsed.fromDate, parsed.toDate);
       io.out(formatIssueDiff(report));
+      return 0;
+    }
+    if (command === 'redline') {
+      // A redline WITH changes is a success: exit 0 regardless of content
+      // (same policy as `diff`). Validation/lookup errors surface as throws.
+      const report = await runRedlineCommand(
+        logger,
+        parsed.fromDate,
+        parsed.toDate,
+        parsed.citation,
+      );
+      io.out(formatSectionRedline(report));
       return 0;
     }
     if (command === 'serve') return await runServeCommand(config, logger);

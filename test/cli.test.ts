@@ -376,3 +376,116 @@ describe('main: diff output', () => {
     }
   });
 });
+
+describe('parseArgs: redline', () => {
+  it('parses redline with exactly three positionals', () => {
+    expect(parseArgs(['redline', '2026-01-01', '2026-06-01', '4.125'])).toEqual({
+      command: 'redline',
+      fromDate: '2026-01-01',
+      toDate: '2026-06-01',
+      citation: '4.125',
+    });
+  });
+
+  it('rejects redline with too few, too many, or dash-prefixed arguments', () => {
+    const usage = /cfr-free redline <from> <to> <citation>/;
+    expect(() => parseArgs(['redline'])).toThrow(CliError);
+    expect(() => parseArgs(['redline', '2026-01-01', '2026-06-01'])).toThrow(usage);
+    expect(() => parseArgs(['redline', '2026-01-01', '2026-06-01', '4.125', 'extra'])).toThrow(
+      usage,
+    );
+    expect(() => parseArgs(['redline', '--flag', '2026-06-01', '4.125'])).toThrow(CliError);
+  });
+
+  it('mentions the redline command in the help output', async () => {
+    const { out, io, err } = makeIo();
+    const code = await main(['--help'], io);
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('cfr-free redline <from> <to> <citation>');
+    expect(err.join('')).toBe('');
+  });
+});
+
+// Tiny known seed for redline: 4.125 amends its second paragraph, 4.130 is
+// byte-identical on both dates.
+const REDLINE_FROM_XML = `<ECFR><DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD><DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD><DIV5 N="4" TYPE="PART"><HEAD>Part 4</HEAD><DIV8 N="4.125" TYPE="SECTION"><HEAD>§ 4.125 Diagnosis of mental disorders.</HEAD><P>Line one.</P><P>Line two.</P></DIV8><DIV8 N="4.130" TYPE="SECTION"><HEAD>§ 4.130 Evaluation of residual functional capacity.</HEAD><P>RFC text.</P></DIV8></DIV5></DIV3></ECFR>`;
+const REDLINE_TO_XML = `<ECFR><DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD><DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD><DIV5 N="4" TYPE="PART"><HEAD>Part 4</HEAD><DIV8 N="4.125" TYPE="SECTION"><HEAD>§ 4.125 Diagnosis of mental disorders.</HEAD><P>Line one.</P><P>Line two amended.</P></DIV8><DIV8 N="4.130" TYPE="SECTION"><HEAD>§ 4.130 Evaluation of residual functional capacity.</HEAD><P>RFC text.</P></DIV8></DIV5></DIV3></ECFR>`;
+
+describe('main: redline output', () => {
+  it('pins the summary, legend and per-hunk lines on a small seed, exiting 0', async () => {
+    vi.stubGlobal(
+      'fetch',
+      makeDiffFetch({ [DIFF_FROM]: REDLINE_FROM_XML, [DIFF_TO]: REDLINE_TO_XML }),
+    );
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-cli-redline-'));
+    const { out, io, err } = makeIo({
+      CFR_INDEX_PATH: path.join(dir, 'index.sqlite'), // redline never opens the index
+      CFR_LOG_LEVEL: 'error',
+    });
+    try {
+      const code = await main(['redline', DIFF_FROM, DIFF_TO, '4.125'], io);
+      expect(code).toBe(0);
+      expect(out.join('')).toBe(
+        [
+          `Section 4.125: changed between ${DIFF_FROM} and ${DIFF_TO}`,
+          `        | ${DIFF_FROM} | ${DIFF_TO} | text`,
+          // prefix: '-' delete, '+' insert, ' ' unchanged — the empty same-line
+          // renders as its prefix space (trailing space intentional).
+          'L1 | L1 |  Line one.',
+          'L2 | L2 |  ',
+          'L3 | L- | -Line two.',
+          'L- | L3 | +Line two amended.',
+          '',
+        ].join('\n'),
+      );
+      expect(err.join('')).toBe('');
+    } finally {
+      vi.unstubAllGlobals();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('prints only the summary line for an unchanged provision, still exit 0', async () => {
+    vi.stubGlobal(
+      'fetch',
+      makeDiffFetch({ [DIFF_FROM]: REDLINE_FROM_XML, [DIFF_TO]: REDLINE_TO_XML }),
+    );
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-cli-redline-'));
+    const { out, io, err } = makeIo({
+      CFR_INDEX_PATH: path.join(dir, 'index.sqlite'),
+      CFR_LOG_LEVEL: 'error',
+    });
+    try {
+      const code = await main(['redline', DIFF_FROM, DIFF_TO, '4.130'], io);
+      expect(code).toBe(0);
+      expect(out.join('')).toBe(`Section 4.130: unchanged between ${DIFF_FROM} and ${DIFF_TO}\n`);
+      expect(err.join('')).toBe('');
+    } finally {
+      vi.unstubAllGlobals();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns exit code 1 for a citation missing from both dates', async () => {
+    vi.stubGlobal(
+      'fetch',
+      makeDiffFetch({ [DIFF_FROM]: REDLINE_FROM_XML, [DIFF_TO]: REDLINE_TO_XML }),
+    );
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-cli-redline-'));
+    const { out, io, err } = makeIo({
+      CFR_INDEX_PATH: path.join(dir, 'index.sqlite'),
+      CFR_LOG_LEVEL: 'error',
+    });
+    try {
+      const code = await main(['redline', DIFF_FROM, DIFF_TO, '4.999'], io);
+      expect(code).toBe(1);
+      expect(out.join('')).toBe('');
+      expect(err.join('')).toContain('4.999');
+      expect(err.join('')).toContain(DIFF_FROM);
+      expect(err.join('')).toContain(DIFF_TO);
+    } finally {
+      vi.unstubAllGlobals();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
