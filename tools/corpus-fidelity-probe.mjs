@@ -108,7 +108,15 @@ async function resolveIssueDate() {
   return title.up_to_date_as_of ?? title.latest_issue_date;
 }
 
-/** Element name -> the text it contains, with tags stripped and whitespace collapsed. */
+/**
+ * Element name -> the text it contains, with tags stripped and whitespace collapsed.
+ *
+ * Limitation (stated in the inventory): this extracts text nested directly
+ * under the element. A construct that wraps its text in non-standard nested
+ * markup yields NO fragment, so the provision is not part of the survival
+ * comparison — the "provisions" figure is therefore a floor for such classes
+ * (the "occurrences" figure still counts every element in the document).
+ */
 function elementText(block, tag) {
   const out = [];
   const pattern = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`, 'gi');

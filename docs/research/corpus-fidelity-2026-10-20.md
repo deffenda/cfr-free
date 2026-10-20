@@ -40,6 +40,16 @@ decompressed the body).
 `intact` = the provision keeps **all** of that construct's text; `partial` =
 some survives; `lost` = none does.
 
+**The two columns measure different populations, deliberately.** _Occurrences_
+counts the elements present in the document; _Provisions_ counts the
+provisions from which the probe could EXTRACT fragments to compare. They
+differ where a construct nests its text in markup the probe does not extract
+(e.g. an `<EXTRACT>` wrapping non-standard nested tags): EXTRACT shows 36
+occurrences across 29 extractable provisions, CITA 1,910 across 1,895. The
+occurrences figure is the complete count; the provisions figure is the
+population the survival check could actually test — so it is a floor, not a
+total.
+
 | Construct                      | Occurrences | Provisions | Intact | Partial | Lost |
 | ------------------------------ | ----------- | ---------- | ------ | ------- | ---- |
 | footnotes (`<FP>`)             | 274         | 56         | 56     | 0       | 0    |
@@ -72,8 +82,12 @@ g
 The eCFR marks inline text with `<E T="01">` elements. The parser renders an
 inline element's text but keeps the XML's pretty-print whitespace around it,
 so the text is split by blank lines. Measured on the snapshot above: **407
-inline `<E>` elements across 136 provisions; 71 provisions have at least one
-mid-token split.**
+inline `<E>` elements across 136 provisions**, and **at least 71 provisions
+have at least one mid-token split** — a lower bound, not a total: the
+detection used here (a blank line whose two sides are both word/bracket
+characters) is strict, and a looser detection (any mid-token blank-line
+boundary) finds 94 provisions affected. The gap is real either way; the
+exact figure depends on the detection rule, so treat 71 as the floor.
 
 Verbatim upstream (§ 1.561, NOTE):
 
