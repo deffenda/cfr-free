@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type http from 'node:http';
 import { CFRService } from '../src/core/service.js';
 import { createHttpServer, type HttpServerOptions } from '../src/titan/http-server.js';
-import { createTestLogger, openTempStore, type TempStore } from './helpers.js';
+import { createTestLogger, makeSection, openTempStore, type TempStore } from './helpers.js';
 
 interface Json {
   [key: string]: unknown;
@@ -207,7 +207,35 @@ describe('Titan HTTP API', () => {
     const { status, body, headers } = await get('/api/v1/sections/4.125');
     expect(status).toBe(200);
     expect(body['citation']).toBe('4.125');
+    // Fixture sections cite nothing: the backlink list is present but empty.
+    expect(body['citedBy']).toEqual([]);
     expect(headers.get('cache-control')).toBe('public, max-age=3600');
+  });
+
+  it('surfaces citedBy backlinks on the wire', async () => {
+    // Self-contained store: the shared fixture seed has no citation edges, so
+    // a real backlink needs its own two-section index (4.131 → § 4.130).
+    const seeded = openTempStore({
+      sections: [
+        makeSection({ citation: '4.130', text: 'Evaluation rules for mental disorder claims.' }),
+        makeSection({ citation: '4.131', text: 'See § 4.130 for the evaluation procedure.' }),
+      ],
+    });
+    const custom = createHttpServer(new CFRService(seeded.store, 7), createTestLogger());
+    await new Promise<void>((resolve) => custom.listen(0, '127.0.0.1', resolve));
+    const port = (custom.address() as AddressInfo).port;
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/v1/sections/4.130`);
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as Json;
+      expect(body['citedBy']).toEqual(['4.131']);
+    } finally {
+      await new Promise<void>((resolve) => {
+        custom.close(() => resolve());
+        custom.closeAllConnections();
+      });
+      seeded.cleanup();
+    }
   });
 
   it('handles URL-encoded citations', async () => {

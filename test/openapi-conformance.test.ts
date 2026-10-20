@@ -758,6 +758,21 @@ describe('OpenAPI response conformance (in-process server vs spec)', () => {
     expect(body).not.toHaveProperty('diskFree');
   });
 
+  it('/api/v1/sections covers every schema-required field (incl. citedBy)', async () => {
+    const response = await fetch(`${base}/api/v1/sections/4.125`);
+    const text = await response.text();
+    expect(response.status).toBe(200);
+    const body = parseJsonBody('GET /api/v1/sections/4.125', text) as Record<string, unknown>;
+    const sectionSchema = specSchemas()['SectionDetail'];
+    if (sectionSchema === undefined) throw new Error('components.schemas.SectionDetail missing');
+    const required = sectionSchema['required'];
+    expect(Array.isArray(required), 'SectionDetail.required must be an array').toBe(true);
+    const missing = (required as string[]).filter((field) => !(field in body));
+    expect(missing, 'section body is missing schema-required fields').toEqual([]);
+    // Fixtures cite nothing: the backlink list must still be present, empty.
+    expect(body['citedBy']).toEqual([]);
+  });
+
   it('serves hit items that conform to the SearchHit schema (fixture query)', async () => {
     const response = await fetch(`${base}/api/v1/search?q=mental+disorder&per_page=1`);
     const text = await response.text();

@@ -599,6 +599,43 @@ describe('CFRService.getSection references', () => {
   });
 });
 
+describe('CFRService.getSection citedBy', () => {
+  it('lists inbound citations sorted by citing citation', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({ citation: '4.130', text: 'Evaluation rules for mental disorder claims.' }),
+        makeSection({ citation: '4.131', text: 'See § 4.130 for the evaluation procedure.' }),
+        makeSection({ citation: '4.128', text: 'See § 4.130 as well.' }),
+      ],
+    });
+    try {
+      const section = new CFRService(temp.store, 7).getSection('4.130');
+      expect(section.citedBy).toEqual(['4.128', '4.131']);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('returns an empty list when nothing cites the section', () => {
+    withService((service) => {
+      // Fixture sections cite nothing, so 4.125 has no inbound edges.
+      expect(service.getSection('4.125').citedBy).toEqual([]);
+    });
+  });
+
+  it('maps unknown citations to not_found before any backlink lookup', () => {
+    withService((service) => {
+      expect(() => service.getSection('99.999')).toThrow(ServiceError);
+      try {
+        service.getSection('99.999');
+      } catch (error) {
+        expect(error).toBeInstanceOf(ServiceError);
+        if (error instanceof ServiceError) expect(error.code).toBe('not_found');
+      }
+    });
+  });
+});
+
 describe('CFRService.health', () => {
   it('reports ready on a fresh seeded index', () => {
     withService((service) => {

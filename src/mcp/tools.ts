@@ -55,6 +55,7 @@ const sectionOutputSchema = z.object({
   text: z.string(),
   sourceUrl: z.string(),
   references: z.array(z.object({ citation: z.string(), available: z.boolean() })),
+  citedBy: z.array(z.string()),
   indexStale: z.boolean(),
   notice: z.string().nullable(),
 });
@@ -235,6 +236,7 @@ export function registerTools(server: McpServer, service: CFRService, logger: Lo
         const result: SectionOutput = {
           ...section,
           references: section.references.map((reference) => ({ ...reference })),
+          citedBy: [...section.citedBy],
         };
         return {
           content: [{ type: 'text', text: textContent(result) }],

@@ -3,8 +3,23 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { Store, StoreError, MAX_TERMS, toFtsQuery, tidySnippet } from '../src/core/store.js';
-import { FIXTURE_SECTIONS, makeSection, openTempStore } from './helpers.js';
+import {
+  Store,
+  StoreError,
+  MAX_TERMS,
+  SCHEMA_VERSION,
+  toFtsQuery,
+  tidySnippet,
+} from '../src/core/store.js';
+import { syncIndex } from '../src/core/sync.js';
+import type { EcfrApi } from '../src/core/ecfr.js';
+import {
+  createTestLogger,
+  FIXTURE_SECTIONS,
+  FIXTURE_STRUCTURE,
+  makeSection,
+  openTempStore,
+} from './helpers.js';
 
 describe('toFtsQuery', () => {
   it('builds quoted prefix terms joined by AND', () => {
@@ -418,6 +433,17 @@ describe('Store resilience', () => {
 });
 
 describe('Store schema versioning', () => {
+  /** A raw file stamped with `version` (only the version gate inspects it). */
+  function makeVersionedFile(version: number): { file: string; cleanup: () => void } {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-free-version-'));
+    const file = path.join(dir, 'index.sqlite');
+    const raw = new DatabaseSync(file);
+    raw.exec('CREATE TABLE dummy(x)');
+    raw.exec(`PRAGMA user_version = ${version}`);
+    raw.close();
+    return { file, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+
   it('rejects indexes written by a newer schema version', () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-free-version-'));
     const file = path.join(dir, 'index.sqlite');
@@ -433,7 +459,7 @@ describe('Store schema versioning', () => {
     }
   });
 
-  it('adopts pre-versioning index files as schema v1', () => {
+  it(`adopts pre-versioning index files as schema v${SCHEMA_VERSION}`, () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-free-version-'));
     const file = path.join(dir, 'index.sqlite');
     try {
@@ -443,10 +469,177 @@ describe('Store schema versioning', () => {
       const store = Store.open(file);
       store.close();
       const check = new DatabaseSync(file);
-      expect(check.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: 1 });
+      expect(check.prepare('PRAGMA user_version').get()).toMatchObject({
+        user_version: SCHEMA_VERSION,
+      });
       check.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('adopts an older schema version when the caller vouches for a rebuild', () => {
+    const v1 = makeVersionedFile(1);
+    try {
+      const store = Store.open(v1.file, { allowSchemaUpgrade: true });
+      store.close();
+      const check = new DatabaseSync(v1.file);
+      expect(check.prepare('PRAGMA user_version').get()).toMatchObject({
+        user_version: SCHEMA_VERSION,
+      });
+      check.close();
+    } finally {
+      v1.cleanup();
+    }
+  });
+
+  it('refuses an older schema version without the rebuild flag', () => {
+    const v1 = makeVersionedFile(1);
+    try {
+      // The unchanged fail-open message: sync can now actually rebuild.
+      expect(() => Store.open(v1.file)).toThrow(/schema version 1 is not supported/);
+      expect(() => Store.open(v1.file)).toThrow(/cfr-free sync/);
+    } finally {
+      v1.cleanup();
+    }
+  });
+
+  it('never adopts a newer schema version, flag or not', () => {
+    const future = makeVersionedFile(99);
+    try {
+      expect(() => Store.open(future.file, { allowSchemaUpgrade: true })).toThrow(
+        /schema version 99/,
+      );
+      expect(() => Store.open(future.file, { allowSchemaUpgrade: true })).toThrow(
+        /downgrade is unsupported/,
+      );
+    } finally {
+      future.cleanup();
+    }
+  });
+
+  it('rebuilds a v1 index end-to-end: sync adopts the version and fills the edge table', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-free-version-'));
+    const file = path.join(dir, 'index.sqlite');
+    try {
+      // A faithful v1 file: real schema + old rows, then section_references
+      // dropped (v1 predates it) and the version stamped back to 1.
+      const seed = Store.open(file);
+      seed.replaceAll(
+        [makeSection({ citation: '4.125', text: 'Old v1 body text.' })],
+        '2026-01-01',
+        {},
+      );
+      seed.close();
+      const raw = new DatabaseSync(file);
+      raw.exec('DROP TABLE section_references');
+      raw.exec('PRAGMA user_version = 1');
+      raw.close();
+
+      // Offline eCFR: two sections, 4.130 cites § 4.125.
+      const ecfr = {
+        getTitleSchedule: async () => ({ upToDateAsOf: '2026-10-09' }),
+        getStructureJson: async () => FIXTURE_STRUCTURE,
+        getFullTitleXml: async () => `<?xml version="1.0" encoding="UTF-8"?>
+<ECFR>
+<DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD>
+<DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD>
+<DIV5 N="4" TYPE="PART"><HEAD>Part 4</HEAD>
+<DIV8 N="4.125" TYPE="SECTION"><HEAD>§ 4.125 Diagnosis.</HEAD><P>New v2 body text.</P></DIV8>
+<DIV8 N="4.130" TYPE="SECTION"><HEAD>§ 4.130 Evaluation.</HEAD><P>See § 4.125 for details.</P></DIV8>
+</DIV5>
+</DIV3>
+</ECFR>`,
+      } as unknown as EcfrApi;
+
+      const store = Store.open(file, { allowSchemaUpgrade: true });
+      try {
+        const report = await syncIndex({ ecfr, store, logger: createTestLogger() });
+        expect(report.sections).toBe(2);
+        // The adopted (recreated) edge table was filled by the rebuild, and
+        // the old v1 row is gone — wholesale replacement, not a merge.
+        expect(store.citedBy('4.125')).toEqual(['4.130']);
+        expect(store.getSection('4.125', 'section')?.text).toContain('New v2 body text');
+      } finally {
+        store.close();
+      }
+      const check = new DatabaseSync(file);
+      expect(check.prepare('PRAGMA user_version').get()).toMatchObject({
+        user_version: SCHEMA_VERSION,
+      });
+      check.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Store section backlinks', () => {
+  it('materializes reverse-reference edges during replaceAllWithBaseline', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({ citation: '4.105', text: 'Basic entitlement criteria apply.' }),
+        makeSection({
+          citation: '4.106',
+          text: 'Special monthly compensation criteria. See § 4.105 for basic entitlement.',
+        }),
+      ],
+    });
+    try {
+      expect(temp.store.citedBy('4.105')).toEqual(['4.106']);
+      expect(temp.store.citedBy('4.106')).toEqual([]);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('clears stale edges on rebuild (sections wipe cascades)', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({ citation: '4.105', text: 'Basic entitlement criteria apply.' }),
+        makeSection({
+          citation: '4.106',
+          text: 'Special monthly compensation criteria. See § 4.105 for basic entitlement.',
+        }),
+      ],
+    });
+    try {
+      expect(temp.store.citedBy('4.105')).toEqual(['4.106']);
+      // Rebuild with text that no longer references 4.105. A surviving edge
+      // would reattach to whichever section reuses the freed rowid — the
+      // empty result proves the wipe cleared the edge table too.
+      temp.store.replaceAll(
+        [
+          makeSection({ citation: '4.105', text: 'Basic entitlement criteria apply.' }),
+          makeSection({ citation: '4.106', text: 'Special monthly compensation criteria only.' }),
+        ],
+        '2026-10-16',
+        {},
+      );
+      expect(temp.store.citedBy('4.105')).toEqual([]);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('cascades edge deletion with its section row (FK ON DELETE CASCADE)', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({ citation: '4.105', text: 'Basic entitlement criteria apply.' }),
+        makeSection({ citation: '4.106', text: 'See § 4.105 for basic entitlement.' }),
+        makeSection({ citation: '4.107', text: 'Also see § 4.105 for details.' }),
+      ],
+    });
+    try {
+      expect(temp.store.citedBy('4.105')).toEqual(['4.106', '4.107']);
+      // Delete one citing section directly: only ITS edge may vanish — the
+      // per-row cascade constraint is live, not a wipe-shaped coincidence.
+      const raw = new DatabaseSync(temp.indexPath);
+      raw.exec("DELETE FROM sections WHERE citation = '4.106'");
+      raw.close();
+      expect(temp.store.citedBy('4.105')).toEqual(['4.107']);
+    } finally {
+      temp.cleanup();
     }
   });
 });

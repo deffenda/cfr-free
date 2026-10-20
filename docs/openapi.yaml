@@ -416,6 +416,7 @@ components:
         - text
         - sourceUrl
         - references
+        - citedBy
         - indexStale
         - notice
       properties:
@@ -439,6 +440,10 @@ components:
               citation: { type: string }
               available: { type: boolean, description: Whether the cited provision is indexed. }
               additionalProperties: false
+        citedBy:
+          type: array
+          items: { type: string }
+          description: 'Citations of indexed sections whose text references this one (reverse cross-references), sorted.'
         indexStale: { type: boolean }
         notice: { type: [string, 'null'] }
       additionalProperties: false
