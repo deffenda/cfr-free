@@ -71,7 +71,10 @@ re-labelled.
 ## Holdout set (20 queries; 17 answerable, 3 no-answer)
 
 Exact-citation success 13/17 · recall@5 14/17 · mean reciprocal rank
-0.7794 · no-answer violations 2/3.
+0.7794 · no-answer violations 2/3. By category: bare-citation 2/2,
+display-citation 3/3, natural-phrasing 4/5, quoted-phrase 2/2, ambiguous
+1/2, appendix 1/2, **abbreviation 1/3** (the abbreviation weakness shows
+in the holdout too — the same vocabulary gap the dev set measures).
 
 ## What the baseline says
 
