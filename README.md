@@ -28,6 +28,9 @@ keys, no telemetry — one Node process and one SQLite file.
   `get_section_at` — one provision as it stood at a date).
 - **HTTP JSON API** for scripts and apps: search, read sections, browse the
   CFR hierarchy, health check, Prometheus metrics.
+- **Measured retrieval**: a frozen query set and runner score the search
+  over citations, abbreviations and plain-language questions — see
+  `docs/research/retrieval-baseline-2026-10-20.md`.
 - **Freshness tracking**: the index records the eCFR issue date it was built
   from and warns when it goes stale or drifts from the structure tree.
 - **Backup-friendly**: `cfr-free export <path> [jsonl|md]` writes a consistent
