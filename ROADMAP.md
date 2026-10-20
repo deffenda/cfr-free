@@ -287,6 +287,31 @@ Checks: formatting/typecheck/pre-commit validation; runtime script changes
 also require `npm run ci`. npm account setup, registration, tag/release, and
 publication remain separate operator actions with live verification.
 
+### M4 — A verified first-use path — DONE (2026-10-20)
+
+**Shipped:** PR #81 → `73606cc` — a README **verify-the-install smoke
+checklist** whose every command and output was run against a throwaway
+index on the 2026-10-16 corpus: `version`, `sync` on an isolated index,
+HTTP health/search/section, an **offline restart**, an MCP initialize +
+`tools/call` over stdio (including the dotted display-citation round
+trip), and an offline `export`. Steps 1–2 need the network; 3–6 are fully
+offline. Clean-install testing is explicitly recorded as **unverified by
+an agent** (installs are forbidden to it). Reviewer (Nemotron family,
+`nemotron-3.5-lightning-free`; the primary is provider-rate-limited):
+APPROVE_WITH_NITS 0/0/2 → APPROVE 0/0/0.
+
+**Two corrections the round forced, both recorded rather than absorbed:**
+the repo's own pre-commit security scan (semgrep `detect-non-literal-regexp`)
+failed on the M1 fidelity probe's `RegExp()` built from a variable — PR CI
+missed it because CI's scan step runs `scan:audit`, not the full local set —
+now literal patterns; and fixing that exposed that the probe had been
+reporting **wrong numbers** (an appendix-blind scan and a truncating
+alternation), which in turn revealed a real gap the wrong count masked: **4
+provisions lose their footnote text entirely** (§ 17.610, 36.4221, 36.4520,
+36.4527). The M1 report is corrected (footnotes 52 intact / 4 lost) with a
+dated note recording the under-counts; the lost-footnote gap is the next
+M1(b) candidate.
+
 ### M5 — One complete research-and-citation workflow
 
 **Dependency:** P1-02/P1-03, M2; reuse E1/E2/E4/E6 work where it exists.
