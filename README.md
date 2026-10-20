@@ -119,6 +119,59 @@ variable plus one-time trusted-publisher registration on npmjs.com. Until that
 gate is activated, `npm install -g cfr-free` resolves nothing and installing
 from a source checkout is the way to go (see Quickstart).
 
+### Verify the install (smoke checklist)
+
+Every command below was run against an isolated throwaway index
+(`CFR_INDEX_PATH=/tmp/smoke.sqlite`) on the 2026-10-16 corpus; the
+outputs are what you should see. Nothing outside `/tmp` is touched.
+**Clean-install testing is unverified by an agent** — installs are
+forbidden to it — so the sequence is verified against provisioned
+dependencies.
+
+```bash
+export CFR_INDEX_PATH=/tmp/smoke.sqlite   # never your real index
+
+# 1. the build is what you think it is
+node dist/cli.js version                  # -> 0.2.0
+
+# 2. network: build the index (~2-3 MB, ~5 s)
+node dist/cli.js sync
+# -> synced 2953 sections + 17 appendices (issue date 2026-10-16; ...
+#    9 provisions contain image content not included; 2134 ms)
+
+# 3. HTTP read (no network from here on)
+CFR_PORT=8791 node dist/cli.js serve &
+curl -s http://127.0.0.1:8791/health | head -c 80
+# -> {"status":"ok","issueDate":"2026-10-16","syncedAt":...
+curl -s 'http://127.0.0.1:8791/api/v1/search?q=4.130&per_page=1' | head -c 80
+# -> {"query":"4.130","page":1,"perPage":1,"total":42,...
+curl -s http://127.0.0.1:8791/api/v1/sections/4.130 | head -c 80
+# -> {"citation":"4.130","kind":"section","heading":"Schedule of ratings...
+
+# 4. offline restart: reads come from the local index, no network
+kill %1; CFR_PORT=8791 node dist/cli.js serve &
+# /health answers identically — that is the point
+
+# 5. MCP over stdio: initialize, then call a tool
+printf '%s\n%s\n%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"1.0"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_section","arguments":{"citation":"38 C.F.R. § 4.130"}}}' \
+  | node dist/cli.js mcp | tail -1 | head -c 120
+# -> {"result":{"content":[{"type":"text","text":"{\n  \"citation\": \"4.130\"...
+# (note: the DOTTED display citation resolves — P1-03)
+
+# 6. export: the whole corpus, offline
+node dist/cli.js export /tmp/smoke.jsonl jsonl
+# -> exported 2970 provisions as jsonl (17062107 bytes) to /tmp/smoke.jsonl
+
+kill %1; rm -f /tmp/smoke.sqlite /tmp/smoke.jsonl   # clean up
+```
+
+Only steps 1–2 need the network; 3–6 are fully offline once the index
+exists. If step 3 answers and step 4 answers identically after the
+restart, your install reads from the local index exactly as intended.
+
 ### Use with Claude (MCP)
 
 Add to your MCP client config (e.g. `claude_desktop_config.json`):
