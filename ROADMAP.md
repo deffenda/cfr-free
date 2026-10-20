@@ -3,10 +3,11 @@
 ## Open review findings — dispatch first
 
 The four P1 findings from the 2026-10-20 review were **OPEN** at the time
-of this grooming; **P1-01 and P1-02 are now CLOSED** (PR #66 → `6a3637e`,
-reviewed `a793fe1`, APPROVE 0/0/0; PR #68 → `de524f5`, reviewed `61e7b43`,
-APPROVE 0/0/2 — completion records in the review handoff), and **P1-03 and
-P1-04 remain OPEN**. Implementation packets, evidence,
+of this grooming; **all four are now CLOSED** (PR #66 → `6a3637e`, reviewed
+`a793fe1`, APPROVE 0/0/0; PR #68 → `de524f5`, reviewed `61e7b43`, APPROVE
+0/0/2; PR #69 → `405321b`, reviewed `57bc0a7`, APPROVE_WITH_NITS 0/0/1 then
+RE_AFFIRM 0/0/0; PR #71 → `94e869a`, reviewed `8282a4a`, APPROVE 0/0/0 —
+completion records in the review handoff). Implementation packets, evidence,
 acceptance criteria, and gates are recorded in
 [the review handoff](docs/research/review-2026-10-20.md) (issue #62).
 
