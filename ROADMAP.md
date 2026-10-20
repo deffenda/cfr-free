@@ -131,8 +131,10 @@ reviewer at the fixing SHA.
   </E>)(1):" rendered as "Note to paragraph (⏎⏎g⏎⏎)(1):"). Fixed with a
   structural inline rule plus an explicit block-tag guard; whole-corpus
   diff: 2 970 provisions, 57 changed, every change whitespace-only, 0 lost;
-  the defect is 55 provisions (the inventory's "at least 71" included 16
-  legitimate block boundaries). Verdict: APPROVE_WITH_NITS 0/0/1, then
+  the defect is 55 provisions (the inventory's "at least 71" included the
+  legitimate block boundaries the proxy also catches — 16 at the
+  inventory's measurement, 17 after M1(b2)'s labelling, all paragraph
+  endings, table rows and sibling list items). Verdict: APPROVE_WITH_NITS 0/0/1, then
   RE_AFFIRM 0/0/0.
 - **M1(b2) — labelling** — PR #75 → `eedd913`. Footnotes and extracts are
   labelled ("Footnote:" / "Extract:", the document's own style) and
