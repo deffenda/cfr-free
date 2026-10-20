@@ -43,18 +43,45 @@ keys, no telemetry — one Node process and one SQLite file.
 
 ## Quickstart
 
+Run from a source checkout (Node **≥ 22.5**):
+
 ```bash
-npm install -g cfr-free    # or: npx cfr-free
-cfr-free sync              # build the local index (~2-3 MB download)
-cfr-free serve             # HTTP API on http://127.0.0.1:8787
+# requires Node >= 22.5
+git clone https://github.com/deffenda/cfr-free.git
+cd cfr-free
+npm ci                  # install the pinned dependencies
+npm run build           # compile to dist/ (the CLI entry point is dist/cli.js)
+
+node dist/cli.js version        # -> 0.2.0   (verifies the build)
+node dist/cli.js sync           # build the local index (~2-3 MB download, ~5 s)
+node dist/cli.js serve          # HTTP API on http://127.0.0.1:8787
 # or
-cfr-free mcp               # MCP server on stdio (default command)
+node dist/cli.js mcp            # MCP server on stdio (default command)
 
-cfr-free export ./backup.sqlite   # consistent snapshot of the local index
+node dist/cli.js export ./backup.sqlite   # consistent snapshot of the local index
 
-cfr-free diff 2026-01-01 2026-06-01   # provision changes between two issue dates
-cfr-free redline 2026-01-01 2026-06-01 4.125   # line-level redline of one provision
+node dist/cli.js diff 2026-01-01 2026-06-01   # provision changes between two issue dates
+node dist/cli.js redline 2026-01-01 2026-06-01 4.125   # line-level redline of one provision
 ```
+
+`sync` writes the index at `~/.cfr-free/index.sqlite`. To try it against a
+throwaway index instead of your own, point `CFR_INDEX_PATH` somewhere else:
+
+```bash
+CFR_INDEX_PATH=/tmp/cfr-smoke.sqlite node dist/cli.js sync   # ~5 s, then delete the file
+```
+
+Prefer a shorter command? `npm link` in the checkout puts `cfr-free` on your
+PATH, after which the examples above work verbatim as `cfr-free …`.
+
+**npm install is not available yet.** The package is not published: the npm
+registry returns 404 for `cfr-free` (last checked 2026-10-20). Publication runs
+from the `v*`-tag release workflow with OIDC provenance and is gated behind
+trusted-publishing registration, so until that gate opens, the source
+checkout above is the installation path. Re-check with
+`curl -sS -o /dev/null -w '%{http_code}\n' https://registry.npmjs.org/cfr-free`
+— a 200 means the package is installable and `npm install -g cfr-free`
+works.
 
 ### Docker
 
@@ -84,9 +111,9 @@ download.
 
 npm publishing runs from the `v*`-tag release workflow with OIDC provenance
 (no publish tokens), gated behind the `NPM_TRUSTED_PUBLISHING` repository
-variable plus one-time trusted-publisher registration on npmjs.com; until that
+variable plus one-time trusted-publisher registration on npmjs.com. Until that
 gate is activated, `npm install -g cfr-free` resolves nothing and installing
-from a source checkout is the way to go.
+from a source checkout is the way to go (see Quickstart).
 
 ### Use with Claude (MCP)
 
@@ -96,12 +123,16 @@ Add to your MCP client config (e.g. `claude_desktop_config.json`):
 {
   "mcpServers": {
     "cfr-free": {
-      "command": "cfr-free",
+      "command": "/absolute/path/to/cfr-free/dist/cli.js",
       "args": ["mcp"]
     }
   }
 }
 ```
+
+Use the absolute path to the built CLI (MCP clients do not inherit your
+shell's `PATH` reliably, and the package is not on npm yet). If you ran
+`npm link` in the checkout, `"command": "cfr-free"` works too.
 
 Then ask things like _"What does 38 CFR 4.125 say about diagnosing mental
 disorders?"_ or _"Search Title 38 for traumatic brain injury compensation."_
