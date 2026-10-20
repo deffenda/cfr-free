@@ -290,6 +290,16 @@ describe('image content markers (P1-01)', () => {
     expect(plain?.text).toContain('(a) If the diagnosis of a mental disorder');
     expect(plain?.markdown).toContain('| Rating | Description |');
   });
+  it('refuses a source made of many short segments (total-length cap)', () => {
+    // Per-segment bounds alone would accept this; the total-length cap is
+    // what rejects it.
+    const many = '/graphics/' + 'a/'.repeat(200) + 'a.gif';
+    const xml = `<ECFR><DIV8 N="1.1" TYPE="SECTION"><HEAD>x</HEAD><P>t <img src="${many}"/></P></DIV8></ECFR>`;
+    const [section] = parseTitleXml(xml);
+    expect(section?.text).toContain('[image content not included: unrecognized image source]');
+    expect(section?.text).not.toContain(many);
+  });
+
   it('refuses an over-long image source (no index bloat)', () => {
     const long = '/graphics/' + 'a'.repeat(1000) + '.gif';
     const xml = `<ECFR><DIV8 N="1.1" TYPE="SECTION"><HEAD>x</HEAD><P>t <img src="${long}"/></P></DIV8></ECFR>`;
