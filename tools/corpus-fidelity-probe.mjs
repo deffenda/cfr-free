@@ -119,11 +119,18 @@ async function resolveIssueDate() {
  */
 function elementText(block, tag) {
   const out = [];
-  const pattern = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`, 'gi');
+  // EXACT tag name: `<FP>` must not match `<FP-1>`/`<FP-2>` (a word
+  // boundary after "FP" matches the hyphen), or the capture would span
+  // list items and the fragment would never be found in the output.
+  const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`<${escaped}(?![-\\w])[^>]*>([\\s\\S]*?)</${escaped}>`, 'gi');
   let match;
   while ((match = pattern.exec(block)) !== null) {
+    // Tags become NOTHING (not a space): the parser concatenates inline
+    // elements without a separator, so inserting one here would make a
+    // perfectly preserved construct look lost.
     const text = match[1]
-      .replace(/<[^>]+>/g, ' ')
+      .replace(/<[^>]+>/g, '')
       .replace(/&#(\d+);/g, (_all, dec) => String.fromCodePoint(Number(dec)))
       .replace(/&#x([0-9a-f]+);/gi, (_all, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
       .replace(/&amp;/g, '&')
@@ -138,8 +145,14 @@ function elementText(block, tag) {
   return out;
 }
 
+/**
+ * Count elements with EXACTLY this tag name: `<FP>` must not count the
+ * `<FP-1>`/`<FP-2>` list items (the word boundary after "FP" matches the
+ * hyphen), and `<E>` must not count `<ECFR>`.
+ */
 function countTag(xml, tag) {
-  return [...xml.matchAll(new RegExp(`<${tag}\\b`, 'gi'))].length;
+  const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return [...xml.matchAll(new RegExp(`<${escaped}(?![-\\w])`, 'gi'))].length;
 }
 
 async function main() {

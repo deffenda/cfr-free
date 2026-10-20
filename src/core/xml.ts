@@ -290,6 +290,53 @@ function collectTableRows(children: readonly unknown[], rows: string[][], depth:
   }
 }
 
+/**
+ * Content that needs its own rendering rather than the generic path:
+ *
+ * - a footnote or an extract, which carry text that is NOT the
+ *   provision's own regulatory prose (a footnote is supplementary text
+ *   attached to a paragraph, an extract is quoted material from
+ *   elsewhere). Neither is labelled by the upstream document, so a reader
+ *   could take either for the rule itself. They are labelled here, in the
+ *   document's own style (the NOTE/EDNOTE headings read "Note:" /
+ *   "Editorial Note:");
+ * - an image, which cannot be included offline: the explicit marker
+ *   stands in for it in place (P1-01).
+ *
+ * Returns null for every other element.
+ */
+function renderSpecialBlock(
+  key: string,
+  value: readonly unknown[],
+  node: OrderNode,
+  depth: number,
+): Rendered | null {
+  if (key === 'FP' || key === 'EXTRACT') {
+    return renderLabelled(key === 'FP' ? 'Footnote:' : 'Extract:', value, depth);
+  }
+  if (key === 'img') {
+    const marker = imageMarker(getAttributes(node));
+    return { markdown: marker, text: marker };
+  }
+  return null;
+}
+
+/**
+ * A labelled block: the label is its OWN block, so the labelled content
+ * keeps the structure it had (an extract's list items stay list items).
+ */
+function renderLabelled(label: string, children: readonly unknown[], depth: number): Rendered {
+  if (depth > MAX_DEPTH) throw new XmlFormatError(`XML nesting exceeds ${MAX_DEPTH} levels`);
+  const inner = renderBlocks(children, depth + 1);
+  if (inner.markdown.length === 0 && inner.text.length === 0) {
+    return { markdown: label, text: label };
+  }
+  return {
+    markdown: inner.markdown.length > 0 ? `${label}\n\n${inner.markdown}` : label,
+    text: inner.text.length > 0 ? `${label}\n\n${inner.text}` : label,
+  };
+}
+
 /** Render a list of content nodes to markdown + plain text in one pass. */
 function renderBlocks(nodes: readonly unknown[], depth: number): Rendered {
   if (depth > MAX_DEPTH) throw new XmlFormatError(`XML nesting exceeds ${MAX_DEPTH} levels`);
@@ -309,13 +356,10 @@ function renderBlocks(nodes: readonly unknown[], depth: number): Rendered {
         continue;
       }
       if (key === ATTR_KEY || !Array.isArray(value)) continue;
-      if (key === 'img') {
-        // A block-level image (a direct content child, not inline in a
-        // paragraph): the marker stands in as its own block. The
-        // attributes live on this node (P1-01).
-        const marker = imageMarker(getAttributes(node));
-        markdownParts.push(marker);
-        textParts.push(marker);
+      const special = renderSpecialBlock(key, value, node, depth);
+      if (special !== null) {
+        if (special.markdown.length > 0) markdownParts.push(special.markdown);
+        if (special.text.length > 0) textParts.push(special.text);
         continue;
       }
       const block = renderBlock(key, value, depth + 1);
@@ -398,7 +442,12 @@ function renderBlock(tag: string, children: readonly unknown[], depth: number): 
   const hasElementChildren = children.some(
     (child) => isOrderNode(child) && child[TEXT_KEY] === undefined,
   );
-  if (!hasElementChildren || tag === 'P' || tag === 'FP' || tag === 'SECAUTH' || tag === 'CITA') {
+  // A sub-heading (<HD2>) is a heading: the upstream renders it inline,
+  // so it reads as a run-on sentence. It gets the same shape as a <HEAD>.
+  if (tag === 'HD2') {
+    return { markdown: `### ${direct}`, text: direct };
+  }
+  if (!hasElementChildren || tag === 'P' || tag === 'SECAUTH' || tag === 'CITA') {
     return { markdown: direct, text: direct };
   }
   // An inline context: the container's own text and its inline elements are

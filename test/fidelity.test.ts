@@ -113,6 +113,9 @@ describe('regulatory-text fidelity (verified eCFR fixtures)', () => {
         '(3) Immobilization by cast, without surgery, of one major joint or more. (Effective as to outpatient treatment March 10, 1976.)',
         // The upstream typo "physcial" is part of the served text: fidelity
         // means reproducing it, not silently correcting it.
+        // The footnote is LABELLED since M1(b2): the upstream block carries
+        // no label of its own, so its text could read as part of the rule.
+        'Footnote:',
         'A reduction in the total rating will not be subject to § 3.105(e) of this chapter. The total rating will be followed by an open rating reflecting the appropriate schedular evaluation; where the evidence is inadequate to assign the schedular evaluation, a physcial examination will be scheduled prior to the end of the total rating period.',
         '(b) A total rating under this section will require full justification on the rating sheet and may be extended as follows:',
         '(1) Extensions of 1, 2 or 3 months beyond the initial 3 months may be made under paragraph (a) (1), (2) or (3) of this section.',
@@ -367,6 +370,52 @@ function withoutWhitespace(value: string): string {
 }
 
 describe('construct classes survive the parser (M1 inventory, behaviour only)', () => {
+  it('labels a footnote, so supplementary text is not mistaken for the rule (M1(b2))', () => {
+    // The upstream footnote block carries no label of its own, so its text
+    // could read as part of the provision. It is now labelled in the
+    // document's own style ("Note:" / "Editorial Note:").
+    const [section] = parseTitleXml(SECTION_1_916_FOOTNOTE);
+    expect(section?.text).toContain(
+      'Footnote:\n\nA notice of the right to request this information',
+    );
+    expect(section?.markdown).toContain(
+      'Footnote:\n\nA notice of the right to request this information',
+    );
+    // The regulatory prose itself is untouched.
+    expect(section?.text).toContain('(a) When an agency discloses information');
+  });
+
+  it('labels an extract, so quoted material is not mistaken for the rule (M1(b2))', () => {
+    const xml =
+      '<ECFR><DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD>' +
+      '<DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD>' +
+      '<DIV5 N="4" TYPE="PART"><HEAD>Part 4</HEAD>' +
+      '<DIV8 N="4.130" TYPE="SECTION"><HEAD>&#xA7; 4.130 Schizophrenia.</HEAD>' +
+      '<P>The schedule is set forth as follows:</P>' +
+      '<EXTRACT><FP-2>9201 Schizophrenia</FP-2><FP-2>9202 [Removed]</FP-2></EXTRACT>' +
+      '</DIV8></DIV5></DIV3></DIV1></ECFR>';
+    const [section] = parseTitleXml(xml);
+    expect(section?.text).toContain('Extract:\n\n9201 Schizophrenia');
+    // The extract's list items stay list items (the label is its own block).
+    expect(section?.text).toContain('9201 Schizophrenia\n\n9202 [Removed]');
+  });
+
+  it('renders a sub-heading as a heading, not as run-on text (M1(b2))', () => {
+    const xml =
+      '<ECFR><DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD>' +
+      '<DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD>' +
+      '<DIV5 N="17" TYPE="PART"><HEAD>Part 17</HEAD>' +
+      '<DIV8 N="17.395" TYPE="SECTION"><HEAD>&#xA7; 17.395 Definitions.</HEAD>' +
+      '<P>A term means the following.</P><HD2>Live Donor Follow-Up Means</HD2>' +
+      '<P>It means a donor who is being followed.</P>' +
+      '</DIV8></DIV5></DIV3></DIV1></ECFR>';
+    const [section] = parseTitleXml(xml);
+    // The sub-heading is its own block, and the markdown marks it as one.
+    expect(section?.text).toContain('Live Donor Follow-Up Means');
+    expect(section?.markdown).toContain('### Live Donor Follow-Up Means');
+    expect(section?.text).toContain('A term means the following.\n\nLive Donor Follow-Up Means');
+  });
+
   it("keeps a footnote's text in both representations", () => {
     const [section] = parseTitleXml(SECTION_1_916_FOOTNOTE);
     const footnote =
