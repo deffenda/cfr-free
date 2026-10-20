@@ -90,6 +90,10 @@ interface PendingCall {
 }
 
 interface Harness {
+  /** What the UI handed the clipboard (the copy-a-citation action). */
+  clipboardWrites: string[];
+  /** Make the next clipboard write reject (blocked-permission path). */
+  setClipboardRejects(value: boolean): void;
   readonly element: (id: string) => StubNode;
   readonly calls: PendingCall[];
   navigate(hash: string): Promise<void>;
@@ -176,11 +180,23 @@ function makeHarness(): Harness {
     });
   };
 
+  const clipboardWrites: string[] = [];
+  let clipboardRejects = false;
+  const navigatorStub = {
+    clipboard: {
+      writeText: (value: string): Promise<void> => {
+        clipboardWrites.push(value);
+        return clipboardRejects ? Promise.reject(new Error('blocked')) : Promise.resolve();
+      },
+    },
+  };
+
   runInNewContext(UI_JS, {
     window: windowStub,
     document: documentStub,
     fetch: fetchStub,
     URLSearchParams,
+    navigator: navigatorStub,
     console,
   });
 
@@ -193,7 +209,16 @@ function makeHarness(): Harness {
     await flush();
   };
 
-  return { element, calls, navigate, flush };
+  return {
+    element,
+    calls,
+    navigate,
+    flush,
+    clipboardWrites,
+    setClipboardRejects: (value: boolean): void => {
+      clipboardRejects = value;
+    },
+  };
 }
 
 function sectionBody(citation: string, heading: string): Record<string, unknown> {
@@ -210,6 +235,20 @@ function sectionBody(citation: string, heading: string): Record<string, unknown>
     markdown: `Body ${citation}.`,
     references: [{ citation: '4.125', available: true }],
     citedBy: ['4.16'],
+    sourceUrl: `https://www.ecfr.gov/current/title-38/section-${citation}`,
+    sourceUrlAtIndexDate: `https://www.ecfr.gov/on/2026-10-16/title-38/section-${citation}`,
+    indexStale: false,
+    notice: null,
+  };
+}
+
+/** A section whose text carries the P1-01 image marker. */
+function sectionBodyWithImage(citation: string): Record<string, unknown> {
+  return {
+    ...sectionBody(citation, 'Heading ' + citation),
+    text:
+      `Some prose.\n\nFootnote: note text.\n\n` +
+      `[image content not included: /graphics/er11my99.005.gif]\n\nMore prose.`,
   };
 }
 
@@ -358,5 +397,74 @@ describe('UI route ownership (P1-02)', () => {
     expect(harness.element('section-heading').textContent).toBe('Heading 4.130');
     expect(harness.element('section-path').textContent).toContain('Chapter I');
     expect(harness.element('section-references').allText).toContain('4.125');
+  });
+});
+
+describe('UI copy-a-citation (M5 slice 1)', () => {
+  it('builds the citation block from the loaded section', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.130');
+    harness.calls[0]?.respond(true, sectionBody('4.130', 'Schedule of ratings—Mental disorders.'));
+    await harness.flush();
+
+    const block = harness.element('citation-block');
+    expect(block.value).toContain('38 C.F.R. § 4.130');
+    expect(block.value).toContain('Schedule of ratings—Mental disorders.');
+    expect(block.value).toContain('issue date 2026-10-16');
+    // The DATED verification URL — the revision this text came from.
+    expect(block.value).toContain('https://www.ecfr.gov/on/2026-10-16/title-38/section-4.130');
+  });
+
+  it('warns that image content is not included when the text carries the marker', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.85');
+    harness.calls[0]?.respond(true, sectionBodyWithImage('4.85'));
+    await harness.flush();
+    expect(harness.element('citation-block').value).toContain(
+      'graphic content (rating tables) that is NOT included',
+    );
+  });
+
+  it('adds no incompleteness warning for a complete provision', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.130');
+    harness.calls[0]?.respond(true, sectionBody('4.130', 'Heading 4.130'));
+    await harness.flush();
+    expect(harness.element('citation-block').value).not.toContain('NOT included');
+  });
+
+  it('copies the block to the clipboard on click', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.130');
+    harness.calls[0]?.respond(true, sectionBody('4.130', 'Heading 4.130'));
+    await harness.flush();
+    harness.element('copy-citation').dispatch('click', { preventDefault: () => undefined });
+    // The write resolves on a microtask, so the confirmation lands after a flush.
+    await harness.flush();
+    expect(harness.clipboardWrites).toHaveLength(1);
+    expect(harness.clipboardWrites[0]).toContain('38 C.F.R. § 4.130');
+    // The status line confirms, and the block is selectable regardless.
+    expect(harness.element('copy-status').textContent).toContain('Copied');
+  });
+
+  it('never labels the block with a served date it cannot verify', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.130');
+    harness.calls[0]?.respond(true, sectionBody('4.130', 'Heading 4.130'));
+    await harness.flush();
+    const block = harness.element('citation-block').value;
+    expect(block).not.toMatch(/served/i);
+    expect(block).not.toMatch(/revision (was|served)/i);
+  });
+
+  it('reports a blocked clipboard write instead of failing silently', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.130');
+    harness.calls[0]?.respond(true, sectionBody('4.130', 'Heading 4.130'));
+    await harness.flush();
+    harness.setClipboardRejects(true);
+    harness.element('copy-citation').dispatch('click', { preventDefault: () => undefined });
+    await harness.flush();
+    expect(harness.element('copy-status').textContent).toContain('blocked');
   });
 });
