@@ -47,6 +47,19 @@ are not footnotes — they are list items inside an `<EXTRACT>` (212 of them,
 The probe now matches element names EXACTLY, so `<FP>` no longer absorbs
 `<FP-1>`/`<FP-2>`.
 
+**Correction (M4, 2026-10-20):** this table was originally produced by a
+probe with two measurement bugs that the repo's own security scan
+surfaced (it built `RegExp()` from a variable, which the pre-commit gate
+rejects). Once fixed with literal patterns — and once the per-class scan
+was extended to appendices, which it had been skipping entirely — the
+numbers moved and ONE REAL GAP appeared: **4 provisions lose their
+footnote text** (§ 17.610, § 36.4221, § 36.4520, § 36.4527 — signature
+blocks and one complex footnote). The original table showed footnotes as
+fully intact. The appendix-blind scan also under-counted source credits
+(1895 → 1907 provisions), authority notes (1265 → 1267), sub-headings
+(1 → 2) and images (8 → 9). Numbers below are the corrected ones,
+re-verified against the live document.
+
 **The two columns measure different populations, deliberately.** _Occurrences_
 counts the elements present in the document; _Provisions_ counts the
 provisions from which the probe could EXTRACT fragments to compare. They
@@ -59,7 +72,7 @@ total.
 
 | Construct                      | Occurrences | Provisions | Intact | Partial | Lost |
 | ------------------------------ | ----------- | ---------- | ------ | ------- | ---- |
-| footnotes (`<FP>`)             | 62          | 56         | 56     | 0       | 0    |
+| footnotes (`<FP>`)             | 62          | 56         | 52     | 0       | 4    |
 | notes (`<NOTE>`)               | 70          | 49         | 49     | 0       | 0    |
 | editorial notes (`<EDNOTE>`)   | 33          | 28         | 28     | 0       | 0    |
 | sub-headings (`<HD2>`)         | 3           | 1          | 1      | 0       | 0    |
@@ -135,6 +148,10 @@ rule, and could not tell which claim a footnote qualifies.
 text "A notice of the right to request this information will be sent with
 the notice described in paragraph (d)(1) of this section." — with no
 marker tying it to the sentence it belongs to.
+
+**Still open (measured in M4):** four provisions LOSE their footnote
+text entirely — § 17.610, § 36.4221, § 36.4520, § 36.4527 — so no label
+can help: the text is not in the index at all. The next M1(b) candidate.
 
 **Now labelled:** a footnote renders as its own `Footnote:` block followed
 by its text (the document's own label style — the NOTE/EDNOTE headings

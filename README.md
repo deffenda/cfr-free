@@ -140,7 +140,7 @@ node dist/cli.js sync
 #    9 provisions contain image content not included; 2134 ms)
 
 # 3. HTTP read (no network from here on)
-CFR_PORT=8791 node dist/cli.js serve &
+CFR_PORT=8791 node dist/cli.js serve & SERVER_PID=$!
 curl -s http://127.0.0.1:8791/health | head -c 80
 # -> {"status":"ok","issueDate":"2026-10-16","syncedAt":...
 curl -s 'http://127.0.0.1:8791/api/v1/search?q=4.130&per_page=1' | head -c 80
@@ -149,7 +149,7 @@ curl -s http://127.0.0.1:8791/api/v1/sections/4.130 | head -c 80
 # -> {"citation":"4.130","kind":"section","heading":"Schedule of ratings...
 
 # 4. offline restart: reads come from the local index, no network
-kill %1; CFR_PORT=8791 node dist/cli.js serve &
+kill "$SERVER_PID"; CFR_PORT=8791 node dist/cli.js serve & SERVER_PID=$!
 # /health answers identically — that is the point
 
 # 5. MCP over stdio: initialize, then call a tool
@@ -165,7 +165,7 @@ printf '%s\n%s\n%s\n' \
 node dist/cli.js export /tmp/smoke.jsonl jsonl
 # -> exported 2970 provisions as jsonl (17062107 bytes) to /tmp/smoke.jsonl
 
-kill %1; rm -f /tmp/smoke.sqlite /tmp/smoke.jsonl   # clean up
+kill "$SERVER_PID"; rm -f /tmp/smoke.sqlite /tmp/smoke.jsonl   # clean up
 ```
 
 Only steps 1–2 need the network; 3–6 are fully offline once the index
