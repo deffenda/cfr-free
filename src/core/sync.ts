@@ -1,4 +1,4 @@
-import { CHANGE_LIST_CAP, diffHashes, hashText, type SyncChanges } from './changes.js';
+import { CHANGE_LIST_CAP, diffHashes, hashContent, type SyncChanges } from './changes.js';
 import type { Logger } from '../logger.js';
 import type { EcfrApi } from './ecfr.js';
 import { countNodes, parseStructure, type StructureNode } from './structure.js';
@@ -164,7 +164,11 @@ export async function syncIndex(deps: SyncDeps): Promise<SyncReport> {
   // must not hold the write lock for). The rebuild transaction below then
   // only snapshots the outgoing index and swaps rows.
   const newHashes = new Map<string, string>();
-  for (const section of sections) newHashes.set(section.citation, hashText(section.text));
+  for (const section of sections) {
+    // Text AND heading — a retitled provision with an unchanged body is a
+    // change (see hashContent).
+    newHashes.set(section.citation, hashContent(section.text, section.heading));
+  }
 
   const meta: Record<string, string> = {
     issue_date: issueDate,

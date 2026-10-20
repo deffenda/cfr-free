@@ -91,6 +91,22 @@ describe('diffIssues', () => {
     expect(deps.logger.records.some((r) => r.message === 'issue diff computed')).toBe(true);
   });
 
+  it('reports a heading-only amendment between two dates (M2(b))', async () => {
+    // A retitled provision with an unchanged body: the § 3.17 case. A
+    // text-only comparison reported "no provision changes".
+    const from = fullXml(
+      `<DIV8 N="3.17" TYPE="SECTION"><HEAD>§ 3.17 Disability and death pension; Mexican.</HEAD><P>Unchanged body.</P></DIV8>`,
+    );
+    const to = fullXml(
+      `<DIV8 N="3.17" TYPE="SECTION"><HEAD>§ 3.17 Disability and survivors pension; Mexican.</HEAD><P>Unchanged body.</P></DIV8>`,
+    );
+    const deps = makeDeps(makeDiffFetch([], { [FROM_DATE]: from, [TO_DATE]: to }));
+    const report = await diffIssues(deps, FROM_DATE, TO_DATE);
+    expect(report.changed).toEqual(['3.17']);
+    expect(report.added).toEqual([]);
+    expect(report.removed).toEqual([]);
+  });
+
   it('requests the full-title XML for exactly the two given dates, in order', async () => {
     const requested: string[] = [];
     const deps = makeDeps(makeDiffFetch(requested));

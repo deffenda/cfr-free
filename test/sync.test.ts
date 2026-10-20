@@ -292,6 +292,36 @@ describe('syncIndex change reporting', () => {
     }
   });
 
+  it('reports a heading-only amendment as changed (M2(b))', async () => {
+    // The retitle case: the body is identical, the heading is not. A
+    // text-only comparison reported this as "no provision changes".
+    const temp = openTempStore({ seed: false });
+    const logger = createTestLogger();
+    const retitledXml = FULL_XML.replace(
+      '<HEAD>§ 4.125 Diagnosis of mental disorders.</HEAD>',
+      '<HEAD>§ 4.125 Diagnosis of mental and behavioral disorders.</HEAD>',
+    );
+    try {
+      await syncIndex({ ecfr: makeEcfr(makeFetch()), store: temp.store, logger });
+      const report = await syncIndex({
+        ecfr: makeEcfr(makeFetch({ xml: retitledXml })),
+        store: temp.store,
+        logger,
+      });
+      expect(report.changes.changed).toBe(1);
+      expect(report.changes.added).toBe(0);
+      expect(report.changes.removed).toBe(0);
+      // The citation lists live in the persisted change report (the returned
+      // summary carries the counts), as in the baseline test above.
+      const changes = JSON.parse(temp.store.getMeta('last_changes') ?? '{}') as {
+        changedCitations: string[];
+      };
+      expect(changes.changedCitations).toEqual(['4.125']);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
   it('diffs amended, added and removed provisions across syncs', async () => {
     const temp = openTempStore({ seed: false });
     const logger = createTestLogger();

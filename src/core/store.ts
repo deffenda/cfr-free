@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { hashText } from './changes.js';
+import { hashContent } from './changes.js';
 import { extractReferences } from './references.js';
 import type { SectionKind, RawSection } from './xml.js';
 
@@ -681,14 +681,22 @@ export class Store {
   captureTextHashes(): Map<string, string> {
     const hashes = new Map<string, string>();
     const statement = this.stmt(
-      'SELECT id, citation, text FROM sections WHERE id > ? ORDER BY id LIMIT 500',
+      'SELECT id, citation, text, heading FROM sections WHERE id > ? ORDER BY id LIMIT 500',
     );
     let cursor = -1;
     for (;;) {
       const rows = statement.all(cursor) as Record<string, unknown>[];
       if (rows.length === 0) break;
       for (const row of rows) {
-        hashes.set(String(row['citation']), hashText(String(row['text'])));
+        // TEXT AND HEADING: a heading-only amendment (a retitled section
+        // with an unchanged body) is a change to the provision, and a
+        // text-only hash reported it as "no change". The baseline is this
+        // live table, so there is no hash-compatibility transition: the
+        // previous index's rows carry their headings.
+        hashes.set(
+          String(row['citation']),
+          hashContent(String(row['text']), String(row['heading'])),
+        );
         cursor = Number(row['id']);
       }
     }

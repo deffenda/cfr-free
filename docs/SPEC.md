@@ -80,6 +80,21 @@ places a paragraph inside a container with its own text keeps that
 paragraph as its own block instead of silently folding it into a
 phrase.
 
+**What counts as a change (M2(b)):** a provision's content fingerprint
+covers its text AND its heading. A heading is part of the provision's
+meaning: § 3.17 was retitled from "Disability and death pension" to
+"Disability and survivors pension" with no change to the body, and a
+text-only hash reported that amendment as "no change" — in the sync
+change report, in `cfr-free diff`, and in the MCP `diff_issues` tool
+alike. Measured on the live corpus: one such heading-only amendment per
+~2,921 provisions per year, and it is invisible to a text-only
+comparison. The comparison's baseline is the live index table, so
+including the heading needs no hash-compatibility transition: the
+previous index's rows carry their headings. The LINE-LEVEL redline keeps
+its text-only contract (`redline` is a text diff by definition); a
+heading-only amendment is surfaced by the change-detection surfaces, not
+by the redline.
+
 **Dated source URL (M2(a)):** every section response carries TWO links to
 the same provision on ecfr.gov: `sourceUrl` points at the CURRENT text
 (`/current/title-38/section-<citation>`) for navigation and verification,

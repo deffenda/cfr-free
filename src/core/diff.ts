@@ -1,5 +1,5 @@
 import type { Logger } from '../logger.js';
-import { diffHashes, hashText } from './changes.js';
+import { diffHashes, hashContent } from './changes.js';
 import { isIssueDateString, type EcfrApi } from './ecfr.js';
 import { ServiceError } from './service.js';
 import { SyncError } from './sync.js';
@@ -64,7 +64,11 @@ function hashesByCitation(xml: string, issueDate: string): Map<string, string> {
     );
   }
   const hashes = new Map<string, string>();
-  for (const section of sections) hashes.set(section.citation, hashText(section.text));
+  for (const section of sections) {
+    // Text AND heading: a provision retitled with an unchanged body is a
+    // change between the two dates (see hashContent).
+    hashes.set(section.citation, hashContent(section.text, section.heading));
+  }
   return hashes;
 }
 
