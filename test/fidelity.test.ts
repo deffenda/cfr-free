@@ -392,18 +392,34 @@ describe('construct classes survive the parser (M1 inventory, behaviour only)', 
     expect(withoutWhitespace(section?.text ?? '')).toContain(withoutWhitespace(note));
   });
 
-  it('documents the known rendering gap: inline elements split a word across blank lines', () => {
-    // The inventory's G1 finding: the inline <E T="01">g</E> renders as
-    // "(\n\ng\n\n)" because the parser keeps the XML pretty-print
-    // whitespace around an inline element. This test pins the CURRENT
-    // behaviour on purpose — M1(b) will change it, and the change must
-    // then update this assertion deliberately.
+  it('renders an inline element inside its phrase, unbroken (M1(b1), inventory gap G1)', () => {
+    // The inventory's G1 finding, now fixed: a container that mixes its own
+    // text with an inline element (<HED>Note to paragraph (<E T="01">g</E>)
+    // (1):</HED>) is an INLINE context, so the phrase renders as one block
+    // instead of being split across a blank line.
     const [section] = parseTitleXml(SECTION_1_561_NOTE);
-    expect(section?.text).toContain('Note to paragraph (');
-    expect(section?.text).toContain(')');
-    // The note's substance is still present despite the split.
-    expect(withoutWhitespace(section?.text ?? '')).toContain(
-      withoutWhitespace('VA will charge fees consistent with the salary scale'),
+    expect(section?.text).toContain('Note to paragraph (g)(1):');
+    expect(section?.text).not.toContain('Note to paragraph (\n');
+    expect(section?.text).toContain(
+      'VA will charge fees consistent with the salary scale published by the Office of Personnel Management (OPM).',
     );
+  });
+
+  it('renders an inline element inside an editorial note unbroken (M1(b1))', () => {
+    // The same mechanism, in the <PSPACE> of § 2.6's editorial note: the
+    // inline <E T="04">Federal Register</E> used to split the phrase.
+    const [section] = parseTitleXml(SECTION_2_6_EDNOTE);
+    expect(section?.text).toContain('For Federal Register citations affecting \u00a7 2.6,');
+    expect(section?.text).not.toContain('For\n');
+  });
+
+  it('keeps block structure as blocks (the fix must not flatten it)', () => {
+    // A note's heading and its paragraph are separate BLOCKS upstream and
+    // must stay separate: the inline fix must not merge block structure.
+    const [section] = parseTitleXml(SECTION_1_561_NOTE);
+    expect(section?.text).toContain('Note to paragraph (g)(1):\n\nVA will charge fees');
+    // And a provision with block children keeps its paragraph separation.
+    const [simple] = parseTitleXml(SECTION_1_916_FOOTNOTE);
+    expect(simple?.text).toContain('(a) When an agency discloses information');
   });
 });
