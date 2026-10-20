@@ -262,6 +262,35 @@ Candidate scope: proposed `test/fixtures/retrieval/` data and evaluation runner,
 authorize each new path before coding. Checks: frozen offline evaluation,
 targeted tests, `npm run ci`; record changed results and explain tradeoffs.
 
+### M3 — Measured retrieval quality — BASELINE DONE (2026-10-20), follow-ups OPEN
+
+**Shipped** (PR #80 → `320d05d`): a frozen query set (30 development + 20
+holdout, disjoint), an offline evaluation runner over the product's own
+search path, hermetic tests, and the baseline report
+`docs/research/retrieval-baseline-2026-10-20.md`. Reviewer: APPROVE 0/0/0,
+with every baseline number independently reproduced.
+
+**Baseline (2026-10-16 index):** exact-citation success 13/26, recall@5
+20/26, MRR 0.6006, and **no-answer violations 4/4**. Per category:
+bare-citation 6/6, display-citation 4/4, quoted-phrase 2/2, natural-phrasing
+5/6, ambiguous 1/2, **abbreviation 2/5**, appendix 0/1, no-answer 0/4.
+
+**Four follow-ups the baseline produced. These are tickets, not notes —
+none is ticketed anywhere else.**
+
+| #    | Follow-up                                                      | Evidence                                                                                                                                                                                                                                | State                                                                                                                                                                                                                                               |
+| ---- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M3-a | **Abstention** — the retriever never says "not in this corpus" | 4/4 out-of-scope queries (dental benefits, burial allowance rates, TRICARE forms, home-loan underwriting) return five confident hits; an adjudicator asking about something Title 38 does not cover is handed plausible CFR text        | **OPEN — blocked on an operator product decision**: what should the tool do (return nothing, say "not covered", or flag confidence)? Not dispatched until decided                                                                                   |
+| M3-b | **Abbreviation coverage**                                      | 2/5: `A&A` returns an unrelated top hit in 137 ms; `TBI` never surfaces § 3.350; `SMC` ranks its target 4th; `PTSD` ranks § 3.309 5th. The nine curated synonym groups do not cover these forms                                         | OPEN — a synonym change is MEDIUM risk and needs the adjudicated set (below) to gate it                                                                                                                                                             |
+| M3-c | **The query set needs adjudication**                           | all 50 expectations are `provisional` (the orchestrator's assumptions, not legal ground truth)                                                                                                                                          | **OPEN — operator/expert action.** Nothing downstream can gate on the numbers until the set is adjudicated; the proposed thresholds (exact-citation no regression, recall@5 ≥ 0.75, MRR ≥ 0.65, no-answer violations ≤ 1 of 4) are contingent on it |
+| M3-d | **Ranking order for natural phrasing**                         | `schizophrenia` ranks the definitional § 3.384 above the criteria schedule § 4.130; `traumatic brain injury compensation` puts § 3.350 third. The right provision is usually in the top five, but a first-hit-only client would mislead | OPEN — depends on M3-c; MEDIUM risk (ranking)                                                                                                                                                                                                       |
+
+**Also carried from M1's inventory (a genuine product defect, not a
+measurement one):** four provisions LOSE their footnote text entirely —
+§ 17.610, § 36.4221, § 36.4520, § 36.4527 (signature blocks and one
+complex footnote). The text is not in the index at all, so no label can
+help; the next M1(b) candidate.
+
 ### M4 — A verified first-use path
 
 **Dependency:** P1-04. **Risk:** LOW for docs; HIGH for release CI changes.
@@ -335,6 +364,33 @@ Wrong-citation, unavailable-image, stale-index, and upstream-unavailable cases
 remain visible. Checks: behavioral UI/API/MCP tests and `npm run ci`; disclose
 DOM-stub versus real-browser execution. Do not equate source-string tests with
 browser behavior or add authentication as incidental cleanup.
+
+### M5 — One complete research-and-citation workflow — SLICE 1 DONE (2026-10-20), 3 SLICES OPEN
+
+**Slice 1 — copy-a-citation (SHIPPED, PR #83 → `6a2bb83`).** The section view
+builds a copy block of exactly the fields this roadmap decided: the legal
+display form, the heading, the source line with the index's issue date, the
+DATED verification URL (the revision the text came from), and — when the
+text carries an image marker — an explicit incompleteness warning, so a
+copied citation can never imply complete coverage. The block is always
+shown in a readonly selectable textarea (no clipboard permission required,
+no authentication added) and the button reports a blocked write honestly.
+Reviewer: APPROVE_WITH_NITS 0/0/1 → RE_AFFIRM 0/0/0.
+
+**Slices 2–4 are the E-items this roadmap's M2 line already pointed at
+("reuse E1/E2/E4/E6 work where it exists") — stated here so they are
+ticketed in the repo rather than living in a journal file.**
+
+| Slice | Work                                                                                                           | Evidence it is needed                                                                                                                                                          | State                                                                                                                                      |
+| ----- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **2** | **UI redline view** (`#/redline`) — a from/to/citation form rendering the redline the wire already serves (E4) | the redline is a shipped capability (M2(b)/E1) with no UI surface; M5's flow needs "inspect the dated change view" in the browser                                              | OPEN — one route in `src/titan/ui.ts`, same posture rules (textContent only, no inline script), behavioural tests via the DOM-stub harness |
+| **3** | **ETag/304 revalidation** on the index-backed reads (E5)                                                       | the /current/ link drops the revision; a 304 lets a client confirm the text it quotes is unchanged without re-downloading                                                      | OPEN — additive wire change; openapi + conformance + one focused round                                                                     |
+| **4** | **Browse descent into subject groups** (E6)                                                                    | **1,910 of 2,953 sections are unreachable through the browse tree** (373 `subject_group` nodes hold them; the wire's `StructureEntry` is flat, so the tree stops at the group) | OPEN — needs a `subjgrp` parameter (an API-shape change), or embedded children; MEDIUM risk                                                |
+
+**Not in M5:** E3 (route-level Prometheus metrics) was proposed for E1–E5
+but has **no mandate in this roadmap** and is **not being built** — closed
+here so it stops recurring. If a later stage wants operational metrics,
+it belongs with M6/M7's operator-arranged work, not the product surface.
 
 ### M6 — Practitioner validation before expansion
 
