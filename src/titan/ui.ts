@@ -78,7 +78,8 @@ export const UI_HTML = `<!doctype html>
         <p id="section-meta" class="breadcrumb"></p>
         <p id="section-copy"><button type="button" id="copy-citation">Copy citation</button>
           <span id="copy-status" role="status"></span></p>
-        <textarea id="citation-block" rows="6" readonly aria-label="Citation block to copy"></textarea>
+        <textarea id="citation-block" rows="6" readonly tabindex="-1"
+                  aria-label="Citation block to copy"></textarea>
         <blockquote id="section-text"></blockquote>
         <h3>References</h3>
         <ul id="section-references"></ul>
@@ -465,9 +466,19 @@ export const UI_JS = String.raw`(function () {
 
   copyButton.addEventListener('click', function () {
     var text = citationBlock.value;
-    if (navigator.clipboard !== undefined && navigator.clipboard.writeText !== undefined) {
-      navigator.clipboard.writeText(text);
-      copyStatus.textContent = 'Copied — the block below is also selectable.';
+    var clipboard = navigator.clipboard;
+    if (clipboard !== undefined && clipboard.writeText !== undefined) {
+      // The write can REJECT (blocked permission, non-secure context); an
+      // unhandled rejection would surface as a console error and no
+      // feedback, so both outcomes report honestly.
+      clipboard.writeText(text).then(
+        function () {
+          copyStatus.textContent = 'Copied — the block below is also selectable.';
+        },
+        function () {
+          copyStatus.textContent = 'Copy was blocked — select the block below and copy it.';
+        },
+      );
     } else {
       copyStatus.textContent = 'Select the block below and copy it (clipboard unavailable).';
     }
