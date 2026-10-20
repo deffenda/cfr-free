@@ -183,6 +183,57 @@ name what was requested and verified, never fabricate a served-revision date.
 Checks: relevant service/change/sync/diff/redline/MCP/conformance tests plus
 `npm run ci`; separately record live date probes. No schema change by default.
 
+### M2 — Dated provenance and honest comparison semantics — DONE (2026-10-20)
+
+**Shipped** in three reviewed PRs (the operator's M2 split into three
+packets; the third is the queued E2 item):
+
+- **M2(a) — the dated verification URL** — PR #77 → `bb3243c`. A section
+  response now carries `sourceUrl` (the CURRENT text, for navigation) and
+  `sourceUrlAtIndexDate` (the SAME provision at the revision the index
+  was built from — the eCFR point-in-time form). The `/current/` form
+  drops the revision; the dated form keeps it. Verified against the live
+  site: both forms 302 to a canonical path, the appendix form must be
+  URL-encoded (the unencoded form 404s), and eCFR's point-in-time archive
+  covers 2017 onward — documented rather than left as a surprise 404.
+  Verdict: APPROVE 0/0/0, then RE_AFFIRM 0/0/0.
+- **M2(b) — the comparison payload covers the heading** — PR #78 →
+  `e4fcca4`. § 3.17 was retitled ("Disability and death pension" →
+  "Disability and survivors pension") with no body change, and a
+  text-only hash called it "no change" in the sync report, in
+  `cfr-free diff` and in the MCP diff tool. Measured: 1 heading-only
+  amendment per ~2,921 provisions per year. The fingerprint now covers
+  text AND heading, with **no hash-compatibility transition** (the
+  baseline is the live index table, so the old rows already carry their
+  headings — no one-time "everything changed" report). The line-level
+  redline keeps its text-only contract, by design. Verdict:
+  APPROVE_WITH_NITS 0/0/1 (a stale wire description) → RE_AFFIRM 0/0/0.
+- **M2(c) — the point-in-time read** — PR #79 → `c4b4c8d`.
+  `cfr-free historical <at> <citation>` and the MCP `get_section_at`
+  return one provision as it stood at a date. The response NAMES THE
+  REQUESTED DATE and never a served-revision date (eCFR serves the
+  revision in force on a date without reporting which issue date that
+  was); a date outside the archive (2017-01-01 floor, measured) is a
+  clean not_found; the date and citation are validated before any fetch.
+  Verdict: APPROVE 0/0/0.
+
+**Decisions taken, with the evidence:**
+
+1. Dated verification URL — ADDED (the roadmap's M2(a)).
+2. Shared comparison payload — text AND heading, implemented as a content
+   hash over both fields (no transition; the roadmap's precondition
+   "identify any compatibility/version transition for existing sync hashes
+   before coding" resolved to "none").
+3. Source-asset fingerprints for visual changes — **DEFERRED**. The 15
+   graphics in the corpus are only 3 distinct images (155 KB, legacy
+   artifacts) and nothing shows they change; a fingerprint is cheap
+   (15 requests) but would buy an unproven guarantee, and the marker
+   already names the path for a consumer that wants to re-fetch.
+4. An HTTP `?at=` parameter on `/api/v1/sections/{citation}` — **not in
+   this round**: that route publishes a required-field response schema,
+   so a conditional second shape on one path is a wire decision that
+   deserves its own round. The CLI and MCP surfaces ship first.
+
 ### M3 — Measured retrieval quality for claims research
 
 **Dependency:** P1-03 and M1 fixtures. **Risk:** LOW for evaluation data/report;
