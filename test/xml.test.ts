@@ -194,3 +194,100 @@ describe('parseTitleXml', () => {
     expect(section?.citation).toBe('1.9');
   });
 });
+
+/**
+ * Image content markers (review finding P1-01).
+ *
+ * eCFR carries rating tables as <img> elements. The parser cannot include
+ * their content offline, so it must never drop them silently: an explicit
+ * "not included" marker stands in, carrying the vetted source path.
+ */
+describe('image content markers (P1-01)', () => {
+  const IMAGE_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<ECFR>
+<DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD>
+<DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD>
+<DIV5 N="4" TYPE="PART"><HEAD>Part 4</HEAD>
+<DIV8 N="4.85" TYPE="SECTION">
+<HEAD>&#xA7; 4.85 Evaluation of hearing impairment.</HEAD>
+<P>(a) An examination for hearing impairment must include a controlled speech discrimination test.
+</P>
+<P>(b) Table VI is used to determine a Roman numeral designation.
+</P>
+<img src="/graphics/er11my99.005.gif"/>
+<img src="/graphics/er11my99.006.gif"/>
+</DIV8>
+<DIV8 N="4.99" TYPE="SECTION">
+<HEAD>&#xA7; 4.99 Inline image.</HEAD>
+<P>Before <img src="/graphics/er25se06.021.gif"/> after the image.</P>
+<P>Nested <EXTRACT>inside <img src="/graphics/ec04no91.000.gif"/> a container</EXTRACT>.</P>
+</DIV8>
+</DIV5>
+</DIV3>
+</DIV1>
+</ECFR>`;
+
+  const sections = parseTitleXml(IMAGE_XML);
+  const hearing = sections.find((section) => section.citation === '4.85');
+  const inline = sections.find((section) => section.citation === '4.99');
+
+  it('emits an explicit not-included marker for block-level images', () => {
+    expect(hearing?.text).toContain('[image content not included: /graphics/er11my99.005.gif]');
+    expect(hearing?.text).toContain('[image content not included: /graphics/er11my99.006.gif]');
+    expect(hearing?.markdown).toContain('[image content not included: /graphics/er11my99.005.gif]');
+  });
+
+  it('keeps the marker in place, without disturbing prose order', () => {
+    const text = hearing?.text ?? '';
+    expect(text.indexOf('must include a controlled speech discrimination test')).toBeLessThan(
+      text.indexOf('[image content not included: /graphics/er11my99.005.gif]'),
+    );
+    expect(text.indexOf('[image content not included: /graphics/er11my99.005.gif]')).toBeLessThan(
+      text.indexOf('[image content not included: /graphics/er11my99.006.gif]'),
+    );
+  });
+
+  it('captures images nested inside paragraphs and containers', () => {
+    expect(inline?.text).toContain('[image content not included: /graphics/er25se06.021.gif]');
+    expect(inline?.text).toContain('[image content not included: /graphics/ec04no91.000.gif]');
+    expect(inline?.text).toContain('Before');
+    expect(inline?.text).toContain('after the image.');
+  });
+
+  it('never names an unvetted image source', () => {
+    const hostile = [
+      'http://evil.example/x.gif',
+      'https://evil.example/x.gif',
+      'javascript:alert(1)',
+      'data:image/png;base64,AAAA',
+      '//evil.example/x.gif',
+      '/other/path.gif',
+      '/graphics/../../etc/passwd',
+      '/graphics/',
+    ];
+    for (const src of hostile) {
+      const xml = `<ECFR><DIV8 N="1.1" TYPE="SECTION"><HEAD>x</HEAD><P>t <img src="${src}"/></P></DIV8></ECFR>`;
+      const [section] = parseTitleXml(xml);
+      expect(section?.text).toContain('[image content not included: unrecognized image source]');
+      expect(section?.text).not.toContain(src);
+      expect(section?.text).not.toContain('javascript:');
+      expect(section?.text).not.toContain('data:');
+    }
+  });
+
+  it('marks an image with no source at all', () => {
+    const xml = '<ECFR><DIV8 N="1.1" TYPE="SECTION"><HEAD>x</HEAD><P>t <img/></P></DIV8></ECFR>';
+    const [section] = parseTitleXml(xml);
+    expect(section?.text).toContain('[image content not included: unrecognized image source]');
+  });
+
+  it('leaves provisions without images byte-identical', () => {
+    // The pre-existing fixture (no images) must render exactly as before:
+    // no marker, no whitespace drift, no changed prose.
+    const [plain] = parseTitleXml(FIXTURE_XML);
+    expect(plain?.text).not.toContain('image content not included');
+    expect(plain?.markdown).not.toContain('image content not included');
+    expect(plain?.text).toContain('(a) If the diagnosis of a mental disorder');
+    expect(plain?.markdown).toContain('| Rating | Description |');
+  });
+});

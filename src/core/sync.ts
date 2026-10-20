@@ -3,7 +3,7 @@ import type { Logger } from '../logger.js';
 import type { EcfrApi } from './ecfr.js';
 import { countNodes, parseStructure, type StructureNode } from './structure.js';
 import type { Store } from './store.js';
-import { parseTitleXml, type RawSection } from './xml.js';
+import { IMAGE_MARKER_PREFIX, parseTitleXml, type RawSection } from './xml.js';
 
 /**
  * Full index build: resolve the issue date, pull structure + full-title XML,
@@ -32,6 +32,27 @@ export interface SyncReport {
   readonly durationMs: number;
   /** Provision-level delta versus the previous index (counts only). */
   readonly changes: { readonly changed: number; readonly added: number; readonly removed: number };
+  /**
+   * Provisions whose text carries at least one "image content not included"
+   * marker (review finding P1-01). These provisions are NOT textually
+   * complete: their eCFR graphics (the rating tables) are absent and are
+   * flagged in place, so a matching section count never implies complete
+   * textual coverage.
+   */
+  readonly imageContentSections: number;
+}
+
+/**
+ * Count the provisions that carry at least one image marker. The marker is
+ * emitted by the parser, so the count is derived from the parsed corpus —
+ * never guessed.
+ */
+function countImageContentSections(sections: readonly RawSection[]): number {
+  let count = 0;
+  for (const section of sections) {
+    if (section.text.includes(IMAGE_MARKER_PREFIX)) count += 1;
+  }
+  return count;
 }
 
 function countKinds(sections: readonly RawSection[]): { sections: number; appendices: number } {
@@ -136,6 +157,7 @@ export async function syncIndex(deps: SyncDeps): Promise<SyncReport> {
   }
   const expected = verifyAgainstStructure(sections, structure, logger);
   const counts = countKinds(sections);
+  const imageContentSections = countImageContentSections(sections);
 
   // newHashes for the diff: computed from OUR own parsed XML, so it is safe
   // to do outside the transaction (~2 970 sha256 hashes — real CPU time we
@@ -148,6 +170,9 @@ export async function syncIndex(deps: SyncDeps): Promise<SyncReport> {
     issue_date: issueDate,
     synced_at: new Date().toISOString(),
     appendices_count: String(counts.appendices),
+    // Provisions whose eCFR graphics are NOT included (P1-01): persisted so
+    // a later reader can tell the index is not textually complete.
+    image_content_sections: String(imageContentSections),
     structure_expected_sections: String(expected.expectedSections),
     structure_expected_appendices: String(expected.expectedAppendices),
     structure_json: JSON.stringify(structureRaw),
@@ -186,6 +211,7 @@ export async function syncIndex(deps: SyncDeps): Promise<SyncReport> {
     appendices: counts.appendices,
     durationMs: Date.now() - startedAt,
     changes: { changed: changes.changed, added: changes.added, removed: changes.removed },
+    imageContentSections,
   };
   logger.info('index rebuilt', { ...report });
   return report;

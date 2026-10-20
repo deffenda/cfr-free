@@ -183,9 +183,16 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
         changed + added + removed > 0
           ? `${changed} changed, ${added} added, ${removed} removed`
           : 'no provision changes';
+      // Provisions with eCFR graphics (the rating tables) are NOT textually
+      // complete — the count is stated so a matching section count never
+      // reads as complete coverage (review finding P1-01).
+      const images =
+        report.imageContentSections > 0
+          ? `; ${report.imageContentSections} provisions contain image content not included`
+          : '';
       io.out(
         `synced ${report.sections} sections + ${report.appendices} appendices ` +
-          `(issue date ${report.issueDate}; ${changes}; ${report.durationMs} ms)\n`,
+          `(issue date ${report.issueDate}; ${changes}${images}; ${report.durationMs} ms)\n`,
       );
       return 0;
     }
