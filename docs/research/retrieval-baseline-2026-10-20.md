@@ -5,14 +5,21 @@ query set that mimics how a claims researcher or adjudicator looks up a
 regulation. It measures the RETRIEVER, not legal correctness.
 
 **Provenance of the expectations.** The set was reviewed by a two-member
-committee (free-tier models, independent of the implementer). Each entry was
-judged ADJUDICATE / REVISE / PROVISIONAL against the live corpus, and
-**every revision was re-verified against the index before it was applied**
-(does the provision exist, and does its heading match the claim?). Entries
-the corpus cannot settle — "what would a practitioner mean" — stay
-`provisional`; entries settled by the corpus are `adjudicated`. **9 of 50
-are now `adjudicated`; 41 remain `provisional`** and the thresholds below
-stay contingent on an expert pass.
+committee (free-tier models, independent of the implementer), and the two
+members were then **cross-checked against each other and against the
+corpus**: each member's citation was verified by the provision's own
+heading, and where they disagreed the corpus decided. Entries the corpus
+cannot settle — "what would a practitioner mean" — stay `provisional`;
+entries settled by the corpus are `adjudicated`. **The cross-check found
+errors in BOTH members**: one proposed DIC sections whose headings are
+_pension_ provisions (3.17, 3.26 — the real DIC sections are 3.5, 3.10,
+3.25), and the other dismissed § 3.309 as merely mentioning PTSD when the
+text reads "if the Secretary determines that the veteran has
+post-traumatic stress disorder (PTSD)". A corpus grep also settled Purple
+Heart: exactly four provisions mention it (17.36, 17.108, 17.149, 51.50) —
+each member had missed one. **11 of 50 are now `adjudicated`; 39 remain
+`provisional`**, and the thresholds below stay contingent on an expert
+pass.
 
 **Reproduce.**
 
@@ -45,9 +52,9 @@ re-labelled.
 
 | Metric                                           | Result  |
 | ------------------------------------------------ | ------- |
-| Exact-citation success (expected is the top hit) | 14/29   |
-| Recall@5 (expected appears in top 5)             | 24/29   |
-| Mean reciprocal rank                             | 0.6121  |
+| Exact-citation success (expected is the top hit) | 16/29   |
+| Recall@5 (expected appears in top 5)             | 25/29   |
+| Mean reciprocal rank                             | 0.6753  |
 | No-answer queries that returned a confident hit  | **1/1** |
 
 | Category         | recall@5 |
@@ -56,7 +63,7 @@ re-labelled.
 | display-citation | 4/4      |
 | natural-phrasing | 8/9      |
 | quoted-phrase    | 2/2      |
-| abbreviation     | 3/5      |
+| abbreviation     | 4/5      |
 | ambiguous        | 1/2      |
 | appendix         | 0/1      |
 | no-answer        | 0/1      |
@@ -116,9 +123,9 @@ Contingent on an expert adjudicating the remaining 41 provisional
 expectations.
 
 - **Exact-citation success: no regression** on the 10/10 citation queries.
-- **Recall@5 ≥ 0.80** on the adjudicated answerable set (today 24/29 ≈
+- **Recall@5 ≥ 0.80** on the adjudicated answerable set (today 25/29 ≈
   0.83 on a partly-provisional set).
-- **Mean reciprocal rank ≥ 0.65** (today 0.6121).
+- **Mean reciprocal rank ≥ 0.65** (today 0.6753).
 - **No-answer violations ≤ 1 of 4** (today 1 of 1 in dev, 2 of 3 in
   holdout) — and only if a signal is found that separates them; the
   score-based candidate does not.

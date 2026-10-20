@@ -133,12 +133,13 @@ export const HOLDOUT_QUERIES: readonly RetrievalQuery[] = [
     adjudication: 'provisional',
   },
   {
-    query: 'dependency',
+    query: 'dependency and indemnity compensation',
     category: 'ambiguous',
-    expected: ['3.17'],
-    rationale: 'the dependency and indemnity compensation chapter (provisional)',
+    expected: ['3.5', '3.10', '3.25'],
+    rationale:
+      're-scoped from the bare word (three readings: DIC entitlement, pension dependency, dependents benefits) to the named concept',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'Appendix B to Part 4',
