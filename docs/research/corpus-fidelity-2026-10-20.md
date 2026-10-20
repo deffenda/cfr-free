@@ -79,15 +79,22 @@ g
 
 )(1)".
 
-The eCFR marks inline text with `<E T="01">` elements. The parser renders an
-inline element's text but keeps the XML's pretty-print whitespace around it,
-so the text is split by blank lines. Measured on the snapshot above: **407
-inline `<E>` elements across 136 provisions**, and **at least 71 provisions
-have at least one mid-token split** — a lower bound, not a total: the
-detection used here (a blank line whose two sides are both word/bracket
-characters) is strict, and a looser detection (any mid-token blank-line
-boundary) finds 94 provisions affected. The gap is real either way; the
-exact figure depends on the detection rule, so treat 71 as the floor.
+The eCFR marks inline text with `<E T="01">` elements. A container that
+mixes its own text with such an element was rendered as a sequence of
+BLOCKS, so the text around the inline element was separated from it by a
+blank line. Measured on the snapshot above: **407 inline `<E>` elements
+across 136 provisions**, and **71 provisions flagged** by the detection used
+here (a blank line whose two sides are both word/bracket characters) — a
+lower bound, not a total: a looser detection (any mid-token blank-line
+boundary) finds 94 provisions affected.
+
+**Refined after the M1(b1) fix (which renders inline contexts inline):**
+the defect is **55 provisions**. The corpus diff against the unfixed
+renderer changed 57 provisions, every change whitespace-only, and the
+remaining 16 flagged provisions are LEGITIMATE block boundaries the
+detection also catches — a paragraph ending, a table row, two sibling
+`<FP-1>` list items (§ 4.130's "9201 Schizophrenia" / "9202 [Removed]").
+So the 71 is a proxy count, and 55 is the defect.
 
 Verbatim upstream (§ 1.561, NOTE):
 

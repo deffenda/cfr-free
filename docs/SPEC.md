@@ -63,6 +63,23 @@ Endpoints (base `https://www.ecfr.gov`, fixed origin — no SSRF surface):
 
 Parse rule: walk `<DIVn>` nodes by their `TYPE` attribute (`TITLE|CHAPTER|PART|SUBPART|SUBJGRP|SECTION|APPENDIX`), maintaining an identifier stack → each section gets `path`, `part`, `subpart` columns. Headings from `<HEAD>` (strip `§ 4.125 ` prefix). Sanity check: parsed count vs. structure count; hard-fail on 0, warn on mismatch.
 
+**Inline vs block rendering:** a container that mixes its own text with
+inline elements (`<E T="01">`, `<I>`, `<SU>`, `<strong>`, `<sub>`, `<sup>`,
+`<br>`) is an INLINE context and renders as ONE block, so a phrase is never
+split by a blank line around the inline element it contains — upstream
+`Note to paragraph (<E T="01">g</E>)(1):` renders as `Note to paragraph
+(g)(1):`, not as a paragraph, a blank line, the letter, and another blank
+line. A container that holds BLOCK children (a `<P>`, `<TABLE>`, `<NOTE>`'s
+paragraph, the `DIV` hierarchy) keeps its block structure: a note's heading
+and its paragraph stay separate blocks. The rule is structural (inline
+elements hold text only), not a tag list, with one explicit guard: a child
+that is a `P`, `FP`, `HEAD`, `TABLE`, `CITA`, `SECAUTH`, `NOTE`, `EDNOTE` or
+`EXTRACT` is never part of a phrase, whatever its content. The guard makes
+the rule independent of the current document — a future eCFR document that
+places a paragraph inside a container with its own text keeps that
+paragraph as its own block instead of silently folding it into a
+phrase.
+
 **Image content (P1-01):** some provisions publish their rating tables as `<img>` elements (15 in the 2026-10-16 document, across 9 provisions — 1.9, 4.71, 4.71a, 4.76a, 4.77, 4.85, 17.610, 45.605, 59.50). The parser cannot include image content offline and must never drop it silently: every `<img>` — inline in a paragraph, nested in a container, or a direct content child — is replaced IN PLACE by the explicit marker `[image content not included: <path>]` in BOTH the text and the markdown representation. Only a vetted relative eCFR graphics path (`/graphics/<file>`, safe charset, no traversal) is named; any other source (scheme-qualified, host-qualified, outside `/graphics/`, or missing) yields `[image content not included: unrecognized image source]` and is never echoed. Nothing is fetched, OCR'd, or transcribed: the service stays fully offline, and a matching section count never implies complete textual coverage — the sync report states how many provisions carry the marker (`meta.image_content_sections`).
 
 Sync is a single transaction: `DELETE FROM sections` + bulk insert (FTS5 external-content triggers keep the index consistent). Sync is atomic — readers never see a half-built index (SQLite WAL mode).

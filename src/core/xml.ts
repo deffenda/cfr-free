@@ -326,6 +326,65 @@ function renderBlocks(nodes: readonly unknown[], depth: number): Rendered {
   return { markdown: markdownParts.join('\n\n'), text: textParts.join('\n\n') };
 }
 
+/**
+ * True when a node's element children are all INLINE — that is, every one
+ * of them carries text-only content.
+ *
+ * The eCFR's inline markup (`<E T="01">`, `<I>`, `<SU>`, `<strong>`,
+ * `<sub>`, `<sup>`, `<br>`, and the leaf note/heading elements) holds text
+ * only, while block elements (`<P>`, `<TABLE>`, `<NOTE>`, the `DIV`
+ * hierarchy) hold elements. A container that mixes its own text with
+ * inline elements is an INLINE context: its text and its inline elements
+ * belong to one phrase.
+ *
+ * Measured on the 2026-10-16 document: 16 659 containers mix own text with
+ * inline-only children (the case this fixes), and NO container mixes own
+ * text with an element-bearing child — so this test needs no tag list.
+ */
+const BLOCK_TAGS: ReadonlySet<string> = new Set([
+  'P',
+  'FP',
+  'HEAD',
+  'TABLE',
+  'CITA',
+  'SECAUTH',
+  'NOTE',
+  'EDNOTE',
+  'EXTRACT',
+]);
+
+function hasOnlyInlineChildren(children: readonly unknown[]): boolean {
+  for (const child of children) {
+    if (!isOrderNode(child)) continue;
+    for (const [key, value] of Object.entries(child)) {
+      if (key === ATTR_KEY || key === TEXT_KEY) continue;
+      if (!Array.isArray(value)) continue;
+      // These never render as part of a phrase, whatever their content.
+      if (BLOCK_TAGS.has(key)) return false;
+      // `value` is THIS child element's content. If that content holds
+      // another element, the child is block-ish (a TABLE, a NOTE).
+      for (const grandchild of value) {
+        if (!isOrderNode(grandchild)) continue;
+        for (const [gkey, gvalue] of Object.entries(grandchild)) {
+          if (gkey === ATTR_KEY || gkey === TEXT_KEY) continue;
+          if (Array.isArray(gvalue)) return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
+/** True when the container carries text of its own (not pretty-print whitespace). */
+function hasOwnText(children: readonly unknown[]): boolean {
+  for (const child of children) {
+    if (!isOrderNode(child)) continue;
+    const text = child[TEXT_KEY];
+    if (typeof text === 'string' && text.trim().length > 0) return true;
+  }
+  return false;
+}
+
 function renderBlock(tag: string, children: readonly unknown[], depth: number): Rendered {
   if (depth > MAX_DEPTH) throw new XmlFormatError(`XML nesting exceeds ${MAX_DEPTH} levels`);
   if (tag === 'TABLE') return renderTable(children, depth);
@@ -340,6 +399,15 @@ function renderBlock(tag: string, children: readonly unknown[], depth: number): 
     (child) => isOrderNode(child) && child[TEXT_KEY] === undefined,
   );
   if (!hasElementChildren || tag === 'P' || tag === 'FP' || tag === 'SECAUTH' || tag === 'CITA') {
+    return { markdown: direct, text: direct };
+  }
+  // An inline context: the container's own text and its inline elements are
+  // one phrase, so they render as ONE block. Descending here would emit the
+  // text around an inline element as separate blocks and break the phrase
+  // across a blank line (review finding M1, inventory gap G1): upstream
+  // "Note to paragraph (<E T="01">g</E>)(1):" rendered as
+  // "Note to paragraph (\n\ng\n\n)(1):".
+  if (hasOwnText(children) && hasOnlyInlineChildren(children)) {
     return { markdown: direct, text: direct };
   }
   return renderBlocks(children, depth + 1);

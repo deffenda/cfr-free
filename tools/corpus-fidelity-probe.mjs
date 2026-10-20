@@ -221,9 +221,35 @@ async function main() {
   console.log('');
   console.log("intact = the provision keeps ALL of this construct's text;");
   console.log('partial = some of it survives; lost = none of it does.');
+  // Mid-token splits: a blank line whose two sides are both word/bracket
+  // characters — the inventory's detection method for the inline-element
+  // rendering gap (G1). This is a PROXY: it also flags legitimate block
+  // boundaries (a paragraph ending, a table row, two sibling <FP-1> list
+  // items), so a non-zero count means "inspect these", not "N defects".
+  const splitProvisions = sections.filter((section) => {
+    const parts = section.text.split('\n\n');
+    for (let i = 1; i < parts.length; i += 1) {
+      const before = parts[i - 1];
+      const after = parts[i];
+      if (before.length === 0 || after.length === 0) continue;
+      const left = before[before.length - 1];
+      const right = after[0];
+      // Both sides must look like the middle of a word or a bracket group.
+      const opensWord = (character) =>
+        /[A-Za-z0-9]/.test(character) || character === '(' || character === '[';
+      const closesWord = (character) =>
+        /[A-Za-z0-9]/.test(character) || character === ')' || character === ']';
+      if (opensWord(left) && closesWord(right)) return true;
+    }
+    return false;
+  });
+
   console.log('');
   console.log(`numeric entities  ${countTag(xml, '&#')}`);
   console.log(`named entities    ${[...xml.matchAll(/&[a-z]+;/gi)].length}`);
+  console.log(
+    `mid-token splits  ${splitProvisions.length} provision(s) flagged (proxy — includes legitimate block boundaries)`,
+  );
   console.log('');
   console.log('note: a preserved construct is not necessarily LABELLED or ANCHORED in the');
   console.log('output — see docs/research/corpus-fidelity-2026-10-20.md for that assessment.');
