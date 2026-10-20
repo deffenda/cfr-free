@@ -66,8 +66,9 @@ export async function diffIssues(
   }
   const { ecfr, logger } = deps;
 
-  // Two independent GETs on a stateless HttpClient (all request state is
-  // function-local, nothing mutable is shared), so the fetches run in
+  // Two independent GETs on a stateless HttpClient (http-client.ts keeps all
+  // request state function-local: fresh AbortSignal per call, function-local
+  // retry counters, immutable options), so the fetches run in
   // parallel — half the wall time of sequential on a ~2 s upstream.
   logger.info('fetching full title XML', { issueDate: fromDate });
   logger.info('fetching full title XML', { issueDate: toDate });
