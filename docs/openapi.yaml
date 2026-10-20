@@ -625,7 +625,10 @@ components:
             The same provision at the revision this index was built from (the
             eCFR point-in-time URL for the index's issue date). `sourceUrl`
             points at the CURRENT text; this one points at the text the
-            index actually holds.
+            index actually holds. eCFR serves the point-in-time archive only
+            from 2017 onward (measured 2026-10-20), so for an index older
+            than that the link names the revision correctly but will not
+            resolve.
         references:
           type: array
           items:
