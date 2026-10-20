@@ -1,11 +1,18 @@
-# Retrieval baseline — Title 38 CFR, 2026-10-20
+# Retrieval baseline — Title 38 CFR, 2026-10-20 (adjudicated set)
 
 **What this measures.** How the search retriever behaves over a frozen
 query set that mimics how a claims researcher or adjudicator looks up a
-regulation. It measures the RETRIEVER, not legal correctness: every
-expectation below is `provisional` — the orchestrator's working assumption,
-not expert-adjudicated ground truth. An expert must adjudicate the set
-before its numbers can gate a change.
+regulation. It measures the RETRIEVER, not legal correctness.
+
+**Provenance of the expectations.** The set was reviewed by a two-member
+committee (free-tier models, independent of the implementer). Each entry was
+judged ADJUDICATE / REVISE / PROVISIONAL against the live corpus, and
+**every revision was re-verified against the index before it was applied**
+(does the provision exist, and does its heading match the claim?). Entries
+the corpus cannot settle — "what would a practitioner mean" — stay
+`provisional`; entries settled by the corpus are `adjudicated`. **9 of 50
+are now `adjudicated`; 41 remain `provisional`** and the thresholds below
+stay contingent on an expert pass.
 
 **Reproduce.**
 
@@ -17,80 +24,115 @@ CFR_INDEX_PATH=/tmp/eval-index.sqlite npx tsx test/fixtures/retrieval/run.ts hol
 
 **Provenance** — darwin 25.6.0 arm64, node v26.11.1, 8 cpus, 24 576 MB;
 index issue date 2026-10-16 (2 970 provisions). Warm-search latency is
-reported per query; the dev set's figures below are from that run. The
-runner is offline and deterministic apart from the measured latencies.
+reported per query. The runner is offline and deterministic apart from the
+measured latencies.
 
-## Development set (30 queries; 26 answerable, 4 no-answer)
+## Correction to the first baseline (2026-10-20, same day)
+
+The first version of this report claimed **no-answer violations 4/4** — the
+retriever answering confidently for queries that are not in the corpus. The
+committee showed that **three of those four "no-answer" queries were my
+mistake**: dental treatment eligibility, burial allowance and VA loan
+underwriting **are** in Title 38 (17.161/17.162, 3.1700-3.1705, 36.4340/
+36.4206). The set also contained invented or wrong citations (`3.18` is not
+in the corpus at all; `3.17`/`3.26` are pension sections, not DIC;
+`3.301` is "Line of duty and misconduct", not PTSD criteria; tinnitus is
+rated in the **ear** schedule § 4.87; loss of use of a hand is § 4.63). The
+numbers below are **re-measured against the corrected expectations**, not
+re-labelled.
+
+## Development set (30 queries; 29 answerable, 1 genuine no-answer)
 
 | Metric                                           | Result  |
 | ------------------------------------------------ | ------- |
-| Exact-citation success (expected is the top hit) | 13/26   |
-| Recall@5 (expected appears in top 5)             | 20/26   |
-| Mean reciprocal rank                             | 0.6006  |
-| No-answer queries that returned a confident hit  | **4/4** |
+| Exact-citation success (expected is the top hit) | 14/29   |
+| Recall@5 (expected appears in top 5)             | 24/29   |
+| Mean reciprocal rank                             | 0.6121  |
+| No-answer queries that returned a confident hit  | **1/1** |
 
-| Category         | recall@5               |
-| ---------------- | ---------------------- |
-| bare-citation    | 6/6                    |
-| display-citation | 4/4                    |
-| natural-phrasing | 5/6                    |
-| quoted-phrase    | 2/2                    |
-| abbreviation     | 2/5                    |
-| ambiguous        | 1/2                    |
-| appendix         | 0/1                    |
-| no-answer        | 0/4 (all four violate) |
+| Category         | recall@5 |
+| ---------------- | -------- |
+| bare-citation    | 6/6      |
+| display-citation | 4/4      |
+| natural-phrasing | 8/9      |
+| quoted-phrase    | 2/2      |
+| abbreviation     | 3/5      |
+| ambiguous        | 1/2      |
+| appendix         | 0/1      |
+| no-answer        | 0/1      |
+
+## Holdout set (20 queries; 17 answerable, 3 no-answer)
+
+Exact-citation success 13/17 · recall@5 14/17 · mean reciprocal rank
+0.7794 · no-answer violations 2/3.
 
 ## What the baseline says
 
 1. **Citation retrieval is excellent.** Every bare and display citation
-   pins its exact section first (10/10). The dotted legal form
-   `38 C.F.R. § 4.130` works and resolves, though it costs ~6× the
-   latency of the bare form (65–72 ms vs 6–13 ms) — a pinned-then-fallback
+   pins its exact section first (10/10 in the dev set). The dotted legal
+   form `38 C.F.R. § 4.130` works and resolves, though it costs ~6× the
+   latency of the bare form (59–70 ms vs 4–13 ms) — a pinned-then-fallback
    path difference worth a look, not a defect.
 
-2. **The retriever never abstains.** All four no-answer queries — dental
-   benefits, burial allowance rates, TRICARE forms, home-loan underwriting
-   — return five confident hits. The retriever has no "not in this corpus"
-   answer, so an LLM client reading the response may treat a wrong
-   provision as on-point. **This is the single most consequential gap for
-   the mission**: a claims adjudicator asking about something Title 38 does
-   not cover is handed plausible-looking CFR text.
+2. **The vocabulary gap is the real weakness.** Four of the five
+   abbreviation misses are one thing: the retriever has no synonym for the
+   rating-office forms. `A&A` returns an unrelated top hit in 136 ms
+   (its targets, 3.352/3.350, are absent from the top five); `SMC` puts
+   § 3.350 fourth; `TBI` puts § 4.124a third. The nine curated synonym
+   groups do not cover these forms. This is fixable **deterministically**
+   with the store's existing expansion mechanism and corpus-verified
+   targets (PTSD → 3.304/3.309/4.130; A&A → 3.352/3.350; DIC → 3.5/3.10/
+   3.25; TBI → 4.124a/3.350).
 
-3. **Abbreviations are the weakest link.** `A&A` (aid and attendance)
-   returns an unrelated top hit in 137 ms — its top five (§ 26.31, 45.200,
-   77.8, …) contain nothing about aid and attendance. `TBI` never surfaces
-   § 3.350 at all. `SMC` puts its target at rank 4. `PTSD` puts § 3.309 at
-   rank 5. The curated synonym groups do not cover these forms.
-
-4. **Natural phrasing finds the right provision but not first.**
+3. **Natural phrasing finds the right provision but not first.**
    `schizophrenia` ranks the definitional § 3.384 above the criteria
-   schedule § 4.130 (§ 4.130 at rank 2); `traumatic brain injury
-compensation` puts § 3.350 third, behind § 9.21; `total disability
-rating based on unemployability` puts § 4.16 second behind § 4.17. The
-   provision a practitioner means is usually in the top five — but a
-   first-hit-only client would mislead.
+   schedule § 4.130; `traumatic brain injury compensation` puts § 4.124a
+   fourth; `Persian Gulf veterans compensation` puts § 3.317 second. The
+   right provision is usually in the top five — but a first-hit-only client
+   would be misled.
 
-5. **Quoted phrases and appendices are thin.** `"schedule of ratings"`
-   ranks § 4.130 third (behind two rating tables), and "table of amendments
-   title 38" does not surface Appendix A to Part 4 at all.
+4. **Two subjects are not findable at all.** "table of amendments title
+   38" never surfaces Appendix A to Part 4, and "special monthly
+   compensation" never surfaces § 3.350 — both are vocabulary misses with
+   no synonym.
+
+5. **Abstention is a smaller problem than the first baseline claimed, and
+   the obvious signal does not work.** Exactly **one** confirmed no-answer
+   case in the dev set (TRICARE enrollment forms — the retriever answers
+   with § 17.271) and two in the holdout (BVA, sf-8). A confidence band
+   keyed on the top hit's bm25 score was measured against the corrected
+   set and **misclassifies in both directions**: the genuine no-answer
+   `BVA` scores **−16.24** (a strong match), while the answerable
+   `dependency` (−4.30) and "which appendices list amendments" (−7.19)
+   score weakly and would be abstained on. Worse, a score cannot see the
+   dominant failure at all: `TBI` scores −19.98 and still misses its
+   targets, because the problem is **vocabulary and ranking**, not
+   confidence. Any abstention threshold would be a guess dressed as a
+   guarantee.
 
 ## Proposed thresholds (proposal only — not in force)
 
-These are **proposals contingent on the operator adjudicating the set**.
-They are the bar a future retrieval change (M3 follow-ups: synonyms,
-ranking, abstention) would be measured against; none is enforced today.
+Contingent on an expert adjudicating the remaining 41 provisional
+expectations.
 
 - **Exact-citation success: no regression** on the 10/10 citation queries.
-- **Recall@5 ≥ 0.75** on the adjudicated answerable set (today 20/26 ≈
-  0.77 on a provisional set).
-- **Mean reciprocal rank ≥ 0.65** (today 0.6006).
-- **No-answer violations ≤ 1 of 4** (today 4 of 4) — abstention is the
-  highest-value target.
+- **Recall@5 ≥ 0.80** on the adjudicated answerable set (today 24/29 ≈
+  0.83 on a partly-provisional set).
+- **Mean reciprocal rank ≥ 0.65** (today 0.6121).
+- **No-answer violations ≤ 1 of 4** (today 1 of 1 in dev, 2 of 3 in
+  holdout) — and only if a signal is found that separates them; the
+  score-based candidate does not.
 
 ## What is deliberately NOT in this round
 
 No ranking, synonym, snippet, reference-extraction or abstention change
 ships here. This document is the baseline those changes would be measured
 against; the roadmap sets thresholds only after a baseline exists, and the
-query set itself is subject to expert adjudication before it can gate
-anything. The holdout set is not read or tuned on while iterating.
+query set is subject to expert adjudication before it can gate anything.
+The holdout set is not read or tuned on while iterating.
+
+**Next, in order of measured value:** (1) the synonym/vocabulary gap
+(M3-b) with the corpus-verified targets above; (2) the ranking order for
+natural phrasing (M3-d); (3) abstention (M3-a) — but only with a signal
+that demonstrably separates the cases, and on a set an expert has
+adjudicated.

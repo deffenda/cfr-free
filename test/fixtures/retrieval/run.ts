@@ -25,6 +25,8 @@ import { HOLDOUT_QUERIES } from './queries.holdout.js';
 export interface QueryOutcome {
   readonly query: string;
   readonly category: string;
+  /** The expected provisions for this query (empty = a genuine no-answer case). */
+  readonly expected: readonly string[];
   /** 1-based rank of each expected citation in the returned hits. */
   readonly ranks: Record<string, number>;
   /** True when an EXPECTED citation is the pinned/top hit. */
@@ -103,6 +105,7 @@ export function evaluateQuery(service: CFRService, entry: RetrievalQuery): Query
   return {
     query: entry.query,
     category: entry.category,
+    expected: entry.expected,
     ranks,
     topHitExpected: entry.expected.includes(top5[0] ?? ''),
     recallAt5: !isNoAnswer && Number.isFinite(bestRank),
@@ -117,8 +120,12 @@ export function evaluateQuery(service: CFRService, entry: RetrievalQuery): Query
 export function evaluateSet(service: CFRService, set: EvaluationSet): EvaluationReport {
   const entries = queriesFor(set);
   const outcomes = entries.map((entry) => evaluateQuery(service, entry));
-  const answerable = outcomes.filter((o) => !o.noAnswerViolation && o.category !== 'no-answer');
-  const noAnswerCases = outcomes.filter((o) => o.category === 'no-answer');
+  // A query is a NO-ANSWER case when its EXPECTATION is empty — not when its
+  // category label says so. (A category is a label; the expectation is the
+  // ground truth, and an entry whose expectation was corrected must stop
+  // being counted as a no-answer case.)
+  const answerable = outcomes.filter((o) => o.expected.length > 0);
+  const noAnswerCases = outcomes.filter((o) => o.expected.length === 0);
   const byCategory: EvaluationReport['byCategory'] = {};
   for (const outcome of outcomes) {
     const existing = byCategory[outcome.category];
