@@ -3,9 +3,12 @@ import { ServiceError, type CFRService } from '../core/service.js';
 import { StructureError } from '../core/structure.js';
 import type { Logger } from '../logger.js';
 import { RateLimiter } from './rate-limit.js';
+import { UI_CSP, UI_CSS, UI_HTML, UI_JS } from './ui.js';
 
 /**
- * Titan HTTP API: a tiny GET-only JSON surface over the local index.
+ * Titan HTTP API: a tiny GET-only JSON surface over the local index, plus
+ * the read-only web UI at the serve root (`/`, `/ui.js`, `/ui.css` — see
+ * ui.ts) that consumes the same surface.
  *
  * Deliberately dependency-free (`node:http`) and hardened by construction:
  * no request bodies, no templating, no dynamic SQL, validated query strings,
@@ -14,12 +17,18 @@ import { RateLimiter } from './rate-limit.js';
 
 const JSON_HEADER = 'application/json; charset=utf-8';
 const TEXT_HEADER = 'text/plain; version=0.0.4; charset=utf-8';
+const HTML_HEADER = 'text/html; charset=utf-8';
+const JS_HEADER = 'text/javascript; charset=utf-8';
+const CSS_HEADER = 'text/css; charset=utf-8';
 const NOSNIFF = 'X-Content-Type-Options';
 const SEARCH_PREFIX = '/api/v1/search';
 const SECTIONS_PREFIX = '/api/v1/sections/';
 const BROWSE_PATH = '/api/v1/browse';
 const HEALTH_PATH = '/health';
 const METRICS_PATH = '/metrics';
+const UI_PATH = '/';
+const UI_JS_PATH = '/ui.js';
+const UI_CSS_PATH = '/ui.css';
 
 // Router-level request-size caps, enforced before validation: zod already
 // bounds `q` to 200 chars (≤ 800 UTF-8 bytes) and `part` to 3 digits, so
@@ -65,6 +74,33 @@ function sendText(
   if (cacheControl !== undefined) headers['cache-control'] = cacheControl;
   res.setHeader('cross-origin-resource-policy', 'same-origin');
   res.writeHead(status, headers);
+  if (req.method === 'HEAD') res.end();
+  else res.end(body);
+}
+
+/**
+ * The web-UI asset sender: always 200 + `Cache-Control: no-store` +
+ * NOSNIFF + CORP same-origin, with an optional CSP (sent for the HTML
+ * document only — see UI_CSP in ui.ts for the policy and why the
+ * subresource routes send none). Like every other sender, HEAD gets the
+ * full headers with an empty body.
+ */
+function sendStatic(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  contentType: string,
+  body: string,
+  csp: string | undefined,
+): void {
+  const headers: http.OutgoingHttpHeaders = {
+    'content-type': contentType,
+    'content-length': Buffer.byteLength(body, 'utf8'),
+    [NOSNIFF]: 'nosniff',
+    'cache-control': 'no-store',
+    'cross-origin-resource-policy': 'same-origin',
+  };
+  if (csp !== undefined) headers['content-security-policy'] = csp;
+  res.writeHead(200, headers);
   if (req.method === 'HEAD') res.end();
   else res.end(body);
 }
@@ -257,6 +293,18 @@ function dispatch(
   }
   if (pathname === BROWSE_PATH) {
     handleBrowse(service, req, res, url);
+    return;
+  }
+  if (pathname === UI_PATH) {
+    sendStatic(req, res, HTML_HEADER, UI_HTML, UI_CSP);
+    return;
+  }
+  if (pathname === UI_JS_PATH) {
+    sendStatic(req, res, JS_HEADER, UI_JS, undefined);
+    return;
+  }
+  if (pathname === UI_CSS_PATH) {
+    sendStatic(req, res, CSS_HEADER, UI_CSS, undefined);
     return;
   }
   sendJson(req, res, 404, errorBody('not_found', `no route for ${pathname}`));

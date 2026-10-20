@@ -282,6 +282,9 @@ function assertBodyConforms(
 const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'] as const;
 
 const KNOWN_PATHS = [
+  '/',
+  '/ui.js',
+  '/ui.css',
   '/health',
   '/metrics',
   '/api/v1/search',
@@ -550,6 +553,9 @@ describe('OpenAPI spec well-formedness (docs/openapi.yaml)', () => {
 const ROUTE_PROBES: Readonly<
   Record<string, { readonly requestPath: string; readonly query?: string }>
 > = {
+  '/': { requestPath: '/' },
+  '/ui.js': { requestPath: '/ui.js' },
+  '/ui.css': { requestPath: '/ui.css' },
   '/health': { requestPath: '/health' },
   '/metrics': { requestPath: '/metrics' },
   '/api/v1/search': { requestPath: '/api/v1/search', query: 'q=veteran&per_page=1' },
@@ -638,6 +644,14 @@ const ERROR_PROBES: readonly ErrorProbeRow[] = [
     operation: 'get',
     method: 'POST',
     url: '/health',
+    expectedStatus: 405,
+  },
+  {
+    label: 'POST / (web UI route, non-GET/HEAD method)',
+    specPath: '/',
+    operation: 'get',
+    method: 'POST',
+    url: '/',
     expectedStatus: 405,
   },
   {

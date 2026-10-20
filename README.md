@@ -147,12 +147,16 @@ curl 'http://127.0.0.1:8787/metrics'
 The full request/response contract (schemas, error envelopes) is documented in
 [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1).
 
-The API is intentionally minimal: **GET-only, JSON-only, no request bodies,
-no templating**, bound to `127.0.0.1` by default. The single deliberate
-exception is `/metrics`, which serves Prometheus exposition text for
-scrapers. There is **no authentication** — if you bind it to a non-loopback
-address you must put it behind your own reverse proxy/auth
+The API is intentionally minimal: **GET-only, no request bodies, no
+templating**, bound to `127.0.0.1` by default. The deliberate non-JSON
+responses are `/metrics` (Prometheus exposition text for scrapers) and the
+static web UI assets. There is **no authentication** — if you bind it to a
+non-loopback address you must put it behind your own reverse proxy/auth
 (`CFR_ALLOW_REMOTE=1` is required to allow that, as an explicit opt-in).
+
+The serve root `/` also serves a **read-only web UI** (search + section
+reader over the same JSON API, hash-routed) — no auth, loopback bind by
+default like the rest of the surface.
 
 ## Configuration
 
