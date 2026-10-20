@@ -13,8 +13,11 @@ info:
     [docs/SPEC.md §5](docs/SPEC.md#5-titan-http-api-get-only-json-bind-127001).
     No request bodies, no auth (loopback bind by default; `CFR_ALLOW_REMOTE=1`
     is required to expose it); every `GET` route has a `HEAD` twin with
-    identical status/headers and an empty body (src/titan/http-server.ts:49),
-    and the one non-JSON route is `GET /metrics` (Prometheus exposition).
+    identical status/headers and an empty body (src/titan/http-server.ts:58),
+    and the non-JSON routes are `GET /metrics` (Prometheus exposition) and the
+    read-only web UI (`GET /`, `/ui.js`, `/ui.css` — static asset strings from
+    src/titan/ui.ts; the HTML shell ships a strict Content-Security-Policy and
+    zero inline script).
     Errors are JSON `{ error, message }`; paths not listed under `paths` return
     404, and any method other than `GET`/`HEAD` returns 405 with
     `allow: GET, HEAD`. All schema fields listed under `required` are always
@@ -25,8 +28,83 @@ servers:
   - url: http://127.0.0.1:8787
     description: Default loopback bind (CFR_HOST/CFR_PORT may override deliberately).
 paths:
+  /:
+    # source: src/titan/http-server.ts:298
+    get:
+      summary: Read-only web UI (HTML shell)
+      responses:
+        '200':
+          description: 'Static single-page web UI shell (search + section reader, hash-routed against the JSON API below). Sent with a strict Content-Security-Policy (no inline script/style), X-Content-Type-Options: nosniff, CORP same-origin, Cache-Control: no-store.'
+          content:
+            text/html:
+              schema: { type: string }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    head:
+      summary: Headers-only web UI probe
+      responses:
+        '200':
+          description: 'Status and headers as GET, including the Content-Security-Policy, empty body (src/titan/http-server.ts:104); errors mirror GET, also body-less.'
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /ui.js:
+    # source: src/titan/http-server.ts:302
+    get:
+      summary: Web UI script (embedded string, no external assets)
+      responses:
+        '200':
+          description: 'The UI page script as text/javascript — an embedded string constant from src/titan/ui.ts, nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts:88).'
+          content:
+            text/javascript:
+              schema: { type: string }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    head:
+      summary: Headers-only web UI script probe
+      responses:
+        '200':
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:104); errors mirror GET, also body-less.'
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /ui.css:
+    # source: src/titan/http-server.ts:306
+    get:
+      summary: Web UI stylesheet (embedded string, no external assets)
+      responses:
+        '200':
+          description: 'The UI stylesheet as text/css — an embedded string constant from src/titan/ui.ts, nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts:88).'
+          content:
+            text/css:
+              schema: { type: string }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    head:
+      summary: Headers-only web UI stylesheet probe
+      responses:
+        '200':
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:104); errors mirror GET, also body-less.'
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
   /health:
-    # source: src/titan/http-server.ts:227
+    # source: src/titan/http-server.ts:263
     get:
       summary: Index freshness report
       responses:
@@ -44,14 +122,14 @@ paths:
       summary: Headers-only health check
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:49); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:58); errors mirror GET, also body-less.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /metrics:
-    # source: src/titan/http-server.ts:246
+    # source: src/titan/http-server.ts:282
     get:
       summary: Prometheus exposition
       responses:
@@ -69,14 +147,14 @@ paths:
       summary: Headers-only metrics check
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:49); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:58); errors mirror GET, also body-less.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/search:
-    # source: src/titan/http-server.ts:250
+    # source: src/titan/http-server.ts:286
     get:
       summary: Full-text search over the local index
       responses:
@@ -117,7 +195,7 @@ paths:
       summary: Headers-only search probe
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:49); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:58); errors mirror GET, also body-less.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '414': { $ref: '#/components/responses/UriTooLong' }
@@ -147,7 +225,7 @@ paths:
           description: 'Restrict to one chapter by Roman-numeral identifier — exact and case-sensitive (e.g. "I").'
           schema: { type: string, minLength: 1, maxLength: 8, pattern: '^[IVXLCDM]+$' }
   /api/v1/sections/{citation}:
-    # source: src/titan/http-server.ts:254
+    # source: src/titan/http-server.ts:290
     get:
       summary: Full text of one section or appendix
       responses:
@@ -172,7 +250,7 @@ paths:
       summary: Headers-only section probe
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:49); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:58); errors mirror GET, also body-less.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -186,7 +264,7 @@ paths:
           description: 'Citation or appendix name — 4.125, § 4.125, or 38 CFR 4.125 — URL-encoded (≤ 120 chars).'
           schema: { type: string, maxLength: 120 }
   /api/v1/browse:
-    # source: src/titan/http-server.ts:258
+    # source: src/titan/http-server.ts:294
     get:
       summary: Structure-tree navigation
       responses:
@@ -218,7 +296,7 @@ paths:
       summary: Headers-only browse probe
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:49); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:58); errors mirror GET, also body-less.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -241,19 +319,19 @@ paths:
 components:
   responses:
     BadRequest:
-      # source: src/titan/http-server.ts:123,325,330 (encoding, URL parse, byte caps) + :154 (service input)
+      # source: src/titan/http-server.ts:159,373,378 (encoding, URL parse, byte caps) + :190 (service input)
       description: '{ error: "invalid_input", message } — malformed URL or citation encoding, oversized q (800 bytes) or part (10 bytes), or a service-level input rejection.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     NotFound:
-      # source: src/titan/http-server.ts:262 (no route), :151 (structure/service miss)
+      # source: src/titan/http-server.ts:310 (no route), :187 (structure/service miss)
       description: '{ error: "not_found", message } — any path not listed here, a citation absent from the index, or a nonexistent browse node (browse adds `available`: the identifiers that do exist).'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     MethodNotAllowed:
-      # source: src/titan/http-server.ts:301
+      # source: src/titan/http-server.ts:349
       description: '{ error: "method_not_allowed", message } — any method other than GET/HEAD, on any path.'
       headers:
         allow: { description: 'Always GET, HEAD.', schema: { type: string } }
@@ -261,13 +339,13 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     UriTooLong:
-      # source: src/titan/http-server.ts:317
+      # source: src/titan/http-server.ts:365
       description: '{ error: "uri_too_long", message } — request URL over 2048 bytes.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     RateLimited:
-      # source: src/titan/http-server.ts:308
+      # source: src/titan/http-server.ts:356
       description: '{ error: "rate_limited", message } — per-peer token bucket exhausted (armed only when CFR_ALLOW_REMOTE=1; loopback never throttles).'
       headers:
         retry-after: { description: Seconds to wait., schema: { type: integer } }
@@ -275,7 +353,7 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     InternalError:
-      # source: src/titan/http-server.ts:367
+      # source: src/titan/http-server.ts:415
       description: '{ error: "internal_error", message } — unexpected failure; details are logged server-side only.'
       content:
         application/json:

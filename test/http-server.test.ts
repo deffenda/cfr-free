@@ -566,3 +566,105 @@ describe('Cross-Origin-Resource-Policy', () => {
     expect(corp).toBe('same-origin');
   });
 });
+
+describe('Titan web UI routes', () => {
+  let temp: TempStore;
+  let server: http.Server;
+  let base: string;
+
+  beforeEach(async () => {
+    temp = openTempStore();
+    server = createHttpServer(new CFRService(temp.store, 7), createTestLogger());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      server.closeAllConnections();
+    });
+    temp.cleanup();
+  });
+
+  /** Fetch a UI route with any method; returns status, raw text, headers. */
+  async function fetchUi(
+    pathname: string,
+    init?: RequestInit,
+  ): Promise<{ status: number; text: string; headers: Headers }> {
+    const response = await fetch(`${base}${pathname}`, init);
+    return { status: response.status, text: await response.text(), headers: response.headers };
+  }
+
+  // The exact policy string pinned for the HTML document (UI_CSP in
+  // src/titan/ui.ts): any drift on either side must fail here.
+  const EXPECTED_CSP =
+    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+
+  const UI_ROUTES = [
+    { path: '/', contentType: 'text/html; charset=utf-8' },
+    { path: '/ui.js', contentType: 'text/javascript; charset=utf-8' },
+    { path: '/ui.css', contentType: 'text/css; charset=utf-8' },
+  ] as const;
+
+  for (const route of UI_ROUTES) {
+    it(`GET ${route.path} serves ${route.contentType} with hardening headers`, async () => {
+      const { status, text, headers } = await fetchUi(route.path);
+      expect(status).toBe(200);
+      expect(text.length).toBeGreaterThan(0);
+      expect(headers.get('content-type')).toBe(route.contentType);
+      expect(headers.get('x-content-type-options')).toBe('nosniff');
+      expect(headers.get('cross-origin-resource-policy')).toBe('same-origin');
+      expect(headers.get('cache-control')).toBe('no-store');
+    });
+
+    it(`HEAD ${route.path} answers with the same headers and an empty body`, async () => {
+      const get = await fetchUi(route.path);
+      const head = await fetchUi(route.path, { method: 'HEAD' });
+      expect(head.status).toBe(200);
+      expect(head.text).toBe('');
+      expect(head.headers.get('content-type')).toBe(get.headers.get('content-type'));
+      expect(head.headers.get('content-length')).toBe(get.headers.get('content-length'));
+      expect(head.headers.get('cache-control')).toBe('no-store');
+      expect(head.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(head.headers.get('cross-origin-resource-policy')).toBe('same-origin');
+    });
+  }
+
+  it('sends the pinned CSP verbatim on / (GET and HEAD)', async () => {
+    const get = await fetchUi('/');
+    expect(get.headers.get('content-security-policy')).toBe(EXPECTED_CSP);
+    const head = await fetchUi('/', { method: 'HEAD' });
+    expect(head.headers.get('content-security-policy')).toBe(EXPECTED_CSP);
+  });
+
+  it('pinned posture: served HTML has no inline handlers, no inline styles, and exactly one script tag (the /ui.js reference)', async () => {
+    const { text: html } = await fetchUi('/');
+    // No `on*=` attribute anywhere (no inline event handlers).
+    expect(html).not.toMatch(/<[a-z][^>]*\son[a-z-]+\s*=/i);
+    // No inline <style> and no style="" attribute (style-src 'self' would
+    // block them; the UI must ship zero inline styling).
+    expect(html).not.toContain('<style');
+    expect(html).not.toMatch(/<[a-z][^>]*\sstyle=/i);
+    // Exactly one <script> element, and it is the external reference.
+    expect(html.match(/<script/g) ?? []).toHaveLength(1);
+    expect(html).toContain('<script src="/ui.js"></script>');
+  });
+
+  it('pinned posture: ui.js never touches innerHTML/outerHTML, insertAdjacentHTML, or document.write', async () => {
+    const { text: uiJs } = await fetchUi('/ui.js');
+    // All dynamic content goes through createElement/textContent; any of
+    // these sinks would reopen an HTML-injection path for index content.
+    expect(uiJs).not.toMatch(/(inner|outer)HTML/);
+    expect(uiJs).not.toContain('insertAdjacentHTML');
+    expect(uiJs).not.toContain('document.write');
+  });
+
+  it('keeps 404 for anything that is not an exact UI route', async () => {
+    for (const path of ['/ui', '/ui.js.map', '/UI', '/index.html', '/ui.css/']) {
+      const { status, headers } = await fetchUi(path);
+      expect(status, `${path} must stay a 404`).toBe(404);
+      expect(headers.get('content-type')).toContain('application/json');
+    }
+  });
+});
