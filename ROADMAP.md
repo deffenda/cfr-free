@@ -346,11 +346,20 @@ earlier "about ten" was an estimate, and the example section was mis-cited:
 top-1" figure therefore measures the committee's ranking preferences as
 much as retrieval quality — so adjudicating the ORDER has TWO payoffs: it
 makes the thresholds trustworthy, and it separates the ranking gap from the
-ordering question. The next engineering round is scoped accordingly: split
-the gap FIRST (which cases are real ranking failures, and which are
-ordering preferences), then design an instrument for the real ones — from
-the corpus's own structure, not from another lexical rule (M3-d already
-measured and rejected the weight-tuning variant).
+ordering question.
+
+> **The paragraph above is the PRE-adjudication picture and is kept as
+> written.** The adjudication has since REJECTED those sibling proposals:
+> the retrieved section is a different benefit type, a narrower exception,
+> or a mechanic that presupposes the entitlement, not a defensible answer
+> (`docs/research/expectation-adjudication-2026-10-21.md` §11.2). The
+> current figures are **35 of 46** first and **43 of 46** in the top five
+> (the ranking round, `496d24f`), with **eight** in-window-but-not-first
+> cases — see "And the residual has been worked" below. The next engineering round is scoped accordingly: split
+> the gap FIRST (which cases are real ranking failures, and which are
+> ordering preferences), then design an instrument for the real ones — from
+> the corpus's own structure, not from another lexical rule (M3-d already
+> measured and rejected the weight-tuning variant).
 
 **Reading the gap figures in this table:** the counts quoted in the M3-c, M3-d
 and M3-e rows above (fifteen of fifty still missing; twelve of the thirteen

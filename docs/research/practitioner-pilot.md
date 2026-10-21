@@ -647,10 +647,17 @@ moment of the task:**
 Two consequences, both deliberate:
 
 - **`S` is not "correct".** It is reported as its own rate: _"N attempts
-  ended on a defensible sibling"_. The ROADMAP's "about ten of the
-  thirteen" claim (`ROADMAP.md` §M3) is exactly this rate on the
-  authored query set; this study measures the same rate on human
-  attempts.
+  ended on a defensible sibling"_. Its anchor is the **adjudicated**
+  expected set, not the pre-adjudication one: the committee of 2026-10-21
+  ACCEPTED five sibling proposals (so those sections are the model's
+  examples of a defensible sibling) and REJECTED seven, holding that the
+  retrieved section is a different benefit type, a narrower exception, or
+  a mechanic that presupposes the entitlement — so a participant landing
+  on one of THOSE is `E1`/`E2`, not `S`
+  (`docs/research/expectation-adjudication-2026-10-21.md` §11.1–§11.2).
+  This study measures the same class on human attempts, where a
+  participant's judgement may differ from the committee's — which is the
+  point of recording it separately.
 - **A sibling can be a failure of the _question_, not of the tool.** If a
   participant consistently lands on a sibling because the task's wording
   invites it, that is a finding about the tool's retrieval _and_ about
