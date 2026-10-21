@@ -342,7 +342,7 @@ export const UI_JS = String.raw`(function () {
   function renderPager(state, total) {
     var pages = Math.max(1, Math.ceil(total / state.perPage));
     pager.appendChild(
-      el('p', 'pager-info', 'Page ' + state.page + ' of ' + pages + ' (' + total + ' hits)'),
+      el('p', 'pager-info', 'Page ' + state.page + ' of ' + pages + ' (' + total + ' candidates)'),
     );
     var previous = document.createElement('button');
     previous.type = 'button';
@@ -409,14 +409,15 @@ export const UI_JS = String.raw`(function () {
     }
     var total = typeof body.total === 'number' ? body.total : 0;
     var notice = typeof body.notice === 'string' ? body.notice : '';
+    // The count is the CANDIDATE SET — every provision matching at least one
+    // query term — not the number of hits on this page. The tier is always
+    // the OR tier, so there is no match mode to report.
     statusLine.textContent =
       total +
-      ' hit' +
+      ' candidate' +
       (total === 1 ? '' : 's') +
       ' — page ' +
       String(body.page) +
-      ', match mode ' +
-      String(body.matchMode) +
       (notice === '' ? '' : ' — ' + notice);
     var hits = Array.isArray(body.hits) ? body.hits : [];
     for (var i = 0; i < hits.length; i += 1) appendHit(hits[i]);

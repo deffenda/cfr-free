@@ -229,6 +229,13 @@ export function registerTools(
         'Full-text search across the local Title 38 (VA) CFR index using ranked keyword matching. ' +
         'Returns section citations, headings, relevance snippets, bm25 scores (lower is better) ' +
         'and the query terms visible in each hit. ' +
+        'The CANDIDATE SET is every provision matching AT LEAST ONE query term, so a provision ' +
+        'that answers part of the question stays in the results instead of being excluded by the ' +
+        'words it does not use; `total` counts those candidates (plus the pinned citation when ' +
+        'the candidate set did not already hold it). ' +
+        "The hits are ordered by: (1) a hit whose HEADING carries the query's content terms as a " +
+        'phrase (or the corpus phrase a synonym stands for), (2) a hit matching EVERY query term ' +
+        'ahead of one matching only some, (3) bm25, lower is better. ' +
         'Use `part` to scope results to a single CFR part (e.g. "4" for ratings, "17" for prosthetics), ' +
         '`kind` to restrict results to one provision kind ("section" or "appendix"), and ' +
         '`chapter` to scope to one chapter by its Roman-numeral identifier (e.g. "I"; exact, case-sensitive). ' +
@@ -238,7 +245,7 @@ export function registerTools(
         "and marked `direct: true` — the reliable client signal; the pinned hit's " +
         '`inResults` flag reports whether it also matched the ranked results. ' +
         'Quoted spans (e.g. "exact regulatory language") are emitted as FTS5 phrase queries — the last token gets a prefix wildcard (so "language" also matches "languages"); earlier tokens are matched exactly. ' +
-        'Hits are ranked by LEXICAL OVERLAP with the query, not by legal authority: the first hit is the provision sharing the most words with the query, which is often not the provision that governs the question (a question about hearing loss ranks a sensory-aids provision above § 4.85). ' +
+        'Hits are ranked by LEXICAL OVERLAP with the query, not by legal authority: the first hit is the provision sharing the most words with the query, which is often not the provision that governs the question. ' +
         "Read each hit's heading and fetch its full text with get_section before you cite it. " +
         "Each response also carries matchedTerms and unmatchedTerms: the query's content words (stopwords, single characters and bare numerals removed), split into those the returned hits answered and those they did not. " +
         'A non-empty unmatchedTerms means the returned text does not speak to that part of your question — the governing provision may be a later hit, may be reachable only under different wording, or may not be in this index. ' +

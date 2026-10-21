@@ -167,7 +167,7 @@ CREATE VIRTUAL TABLE sections_fts USING fts5(
 -- standard ai/ad/au sync triggers
 ```
 
-**FTS query safety:** user input never passes through raw. `toFtsQuery()` tokenizes on `[^\p{L}\p{N}]`, emits `"tok"*` terms joined by `AND`; service retries once with `OR` if `AND` yields 0 rows. Bound inputs: query 3–200 chars, `per_page` 1–20, page ≥ 1. Results deduped by citation (eCFR search returns one row per change event).
+**FTS query safety:** user input never passes through raw. `toFtsQuery()` tokenizes on `[^\p{L}\p{N}]`, emits `"tok"*` terms; the same fragments are joined by `OR` for the candidate set and by `AND` for the AND-tier membership (§4.1). Bound inputs: query 3–200 chars, `per_page` 1–20, page ≥ 1. Results deduped by citation (eCFR search returns one row per change event).
 
 **Retrieval evaluation (M3):** `test/fixtures/retrieval/` holds a frozen
 query set (30 development + 20 holdout queries across citations, display
@@ -182,24 +182,51 @@ set's expectations are provisional (the orchestrator's assumptions) until an
 expert adjudicates them; a change to the set is a change to the benchmark and
 must be visible in the diff. The holdout set is not tuned on.
 
-### 4.1 Ranking: the heading-phrase key
+### 4.1 The candidate set and the ranking order
 
-SPEC §13 row 4 promises that "citation/heading matches outrank body-only
-hits". The bm25 column weights (citation 10, heading 5, text 1) do NOT
-deliver that: bm25 weighs term frequency WITHIN a column, so a section whose
-body repeats the phrase ten times outranks a section whose HEADING is the
-phrase (§ 3.350 vs § 17.151 for "special monthly compensation"), and § 3.5
-"Dependency and indemnity compensation." ranks 7th, below five unrelated
-sections.
+**The candidate set is the OR tier:** every provision that matches AT LEAST
+ONE query term. The AND tier (every term present) is no longer a candidate
+tier — it is a RANKING boost. The old contract made the AND tier the
+candidate set and fell back to OR only when AND returned nothing, so a
+provision that answers the question with different words was not a
+candidate at all, and no ranking rule can surface a row that was never a
+candidate. The canonical case: "how is hearing loss rated" wants § 4.85
+"Evaluation of hearing impairment.", and § 4.85 carries neither "rated" nor
+"loss" — under the AND tier it was excluded from the results entirely.
+Measured on the frozen 50 (2026-10-16 corpus), the AND candidate set held
+**50 of the 68** expected provisions and the OR candidate set holds **67 of
+the 68**; § 4.85 now ranks **2nd** for that query (was absent).
 
-So the ranking carries an explicit key: a hit whose heading carries the
-query's CONTENT terms as a phrase — or the corpus phrase a synonym stands
-for — is ordered ahead of body-only hits, with bm25 breaking ties. The key
-requires the PHRASE, not merely one of the query's words: counting the
-words instead promotes any heading that happens to contain a generic term
-("rating", "service", "recipients") above the provision that answers the
-question, which measured as three lost exact-citation hits on the holdout.
-Both forms were measured on the frozen 50 before this was settled.
+`total` is the size of the candidate set — what the pagination walks — plus
+the pinned citation when the candidate set did not already hold it. The
+increment is identical on every page, so the pin is counted exactly once.
+The response's `matchMode` stays (its `and`/`or` enum is part of the wire
+contract) and reports `or`, the only candidate tier.
+
+**The order of the hits** (this exact order):
+
+1. **the heading-phrase key** DESC — a hit whose HEADING carries the
+   query's CONTENT terms as a phrase (or the corpus phrase a synonym stands
+   for) outranks the body-only hits. SPEC §13 row 4 promises that
+   "citation/heading matches outrank body-only hits", and the bm25 column
+   weights (citation 10, heading 5, text 1) do NOT deliver it: bm25 weighs
+   term frequency WITHIN a column, so a section whose body repeats the
+   phrase ten times outranks a section whose HEADING is the phrase. The key
+   requires the PHRASE, not merely one of the query's words: counting the
+   words instead promotes any heading that happens to contain a generic term
+   ("rating", "service", "recipients") above the provision that answers the
+   question, which measured as three lost exact-citation hits on the
+   holdout. Both forms were measured on the frozen 50 before this was
+   settled.
+2. **the AND-tier membership** DESC — a provision that matches EVERY query
+   term outranks one that matches only some. The membership is computed in
+   SQL (a CTE over the AND query, LEFT JOINed onto the ranked rows): a JS
+   prototype that sorted the rows to find the AND members cost ~200 ms and
+   ~700 ms on citation queries.
+3. **bm25** ASC (lower is better) — the tie-breaker.
+
+The AND-tier membership and the candidate query are the SAME fragments
+joined differently, so one parse of the query feeds both.
 
 ## 5. Titan HTTP API (GET-only; JSON + two text exceptions, bind 127.0.0.1)
 
@@ -264,7 +291,7 @@ Unit: citation parser, FTS sanitizer (incl. injection attempts `" OR 1=1--`), XM
 | 7   | `User-Agent` version source (**Nemotron**, major)                       | **Accepted** — read from `package.json` at startup via `createRequire`, fallback `0.0.0`.                                                                                                                                                                                                                                             |
 | 8   | Zero-availability window during DELETE+insert sync (**Gemma**, blocker) | **Rejected w/ rationale** — sync uses one `BEGIN IMMEDIATE … COMMIT`; under WAL, concurrent connections read the pre-commit snapshot (no empty window). In-process auto-sync completes _before_ the MCP/HTTP server starts listening. Shadow-table swap adds risk without benefit at this scale (2 970 rows, <1 s). Documented in §3. |
 | 9   | DOM memory on 2 MB XML (**Gemma**, major)                               | **Accepted (bounded)** — single ordered-tree pass, no backtracking regexes, per-section 400 k-char cap, HTTP 50 MB cap; ~2 MB input ⇒ tens of MB peak, one-shot during sync.                                                                                                                                                          |
-| 10  | AND→OR fallback must not be dynamic SQL (**Gemma**, major)              | **Accepted** — two separate prepared statements executed in sequence; FTS query string is always a **bound parameter** (never concatenated into SQL).                                                                                                                                                                                 |
+| 10  | AND→OR fallback must not be dynamic SQL (**Gemma**, major)              | **Accepted** — two separate prepared statements executed in sequence; FTS query string is always a **bound parameter** (never concatenated into SQL). **M3-e:** the fallback is gone (§4.1) — the SQL text is still fixed fragments with bound values.                                                                                |
 | 11  | Dual TTL cache (**Nemotron**, minor)                                    | **Rejected (cut)** — no cross-process cache: sync is rare and reads never call eCFR after indexing; the only runtime eCFR call is the on-demand temporal diff (R3/D2), which fetches two ~2 MB XML documents per invocation and is CLI/MCP/HTTP-invoked by request, never scheduled. Simpler than any cache policy.                   |
 | 12  | `LIVE_TESTS` in CI (**Nemotron**, minor)                                | **Accepted** — live tests require explicit `LIVE_TESTS=1`; PR CI never sets it — only the weekly Live E2E workflow and manual dispatch do.                                                                                                                                                                                            |
 
@@ -325,7 +352,7 @@ already covered.
 | 1   | `PRAGMA busy_timeout` for concurrent access                                                 | Gemma #2, Gemma b3 #2, Nemotron #7         | **Fixed** — `busy_timeout = 5000` on open; `BEGIN IMMEDIATE` now waits instead of failing instantly.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 2   | Friendly error when another sync holds the write lock                                       | Nemotron #7                                | **Fixed** — SQLITE_BUSY in `transaction()` rethrown as `StoreError` with an actionable "wait for the running sync" message; regression test.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 3   | Schema versioning via `PRAGMA user_version`                                                 | Gemma #5, Gemma b2 #5, Gemma b3 #4         | **Fixed** — `SCHEMA_VERSION = 1`; mismatch fails open with a "rebuild with `cfr-free sync`" message; fresh/legacy (0) files adopt v1.                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| 4   | BM25 field weighting (heading boost)                                                        | Gemma #7                                   | **Fixed** — `bm25(sections_fts, 10, 5, 1)` (citation, heading, text) plus a heading-PHRASE key (§4.1); citation/heading matches outrank body-only hits. Score tests only assert `< 0`.                                                                                                                                                                                                                                                                                                                                                                                        |
+| 4   | BM25 field weighting (heading boost)                                                        | Gemma #7                                   | **Fixed** — `bm25(sections_fts, 10, 5, 1)` (citation, heading, text) plus a heading-PHRASE key (§4.1); citation/heading matches outrank body-only hits. Score tests only assert `< 0`. The candidate set is the OR tier and the AND tier is a ranking boost (§4.1).                                                                                                                                                                                                                                                                                                           |
 | 5   | Granular CLI exit codes                                                                     | Nemotron #2                                | **Fixed** — `EXIT` codes in `src/exit-codes.ts`: 2 usage/config, 3 index unavailable (empty + auto-sync off), 4 port/permission bind failure; documented in `USAGE` + README; tested end-to-end.                                                                                                                                                                                                                                                                                                                                                                              |
 | 6   | `cfr-free export <path>` backup subcommand                                                  | Nemotron #3                                | **Fixed** — `VACUUM INTO ?` snapshot (WAL-consistent, reopenable); refuses to overwrite; exit 3 when no index; tested. Optional positional format (`jsonl` or `md`) re-serializes the same rows for pipeline ingestion; the sqlite snapshot stays the default.                                                                                                                                                                                                                                                                                                                |
 | 7   | MCP `list_parts` tool                                                                       | Nemotron #6                                | **Fixed** — 5th read-only tool: parts with structure-tree titles + per-kind counts; missing/unreadable structure degrades to `title: null`.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -359,7 +386,7 @@ already covered.
 | 35  | snake_case `per_page` vs camelCase `perPage`                                                | Gemma b4 #2, #7                            | **Rejected** — snake_case is the MCP wire-convention for inputs; camelCase is internal; the mapping lives in exactly one place per tool.                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 36  | Compact JSON for tool outputs (token efficiency)                                            | Gemma b4 #4                                | **Rejected** — pretty-printed `structuredContent` is measurably easier for models to read; token cost is bounded by response caps.                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | 37  | Validate `replaceAll` input with zod                                                        | Gemma b3 #6                                | **Rejected** — `RawSection` input is internal, typed, and produced solely by our parser; service-boundary zod is the security boundary.                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| 38  | Cache the AND→OR fallback count                                                             | Gemma b3 #7                                | **Rejected** — the fallback runs only when AND finds nothing (rare); a second COUNT over FTS5 is sub-millisecond at title-38 scale.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 38  | Cache the AND→OR fallback count                                                             | Gemma b3 #7                                | **Rejected** — the fallback runs only when AND finds nothing (rare); a second COUNT over FTS5 is sub-millisecond at title-38 scale. **Amended (M3-e):** there is no fallback any more — the count is over the OR candidate set (§4.1), and it is the count the pagination walks.                                                                                                                                                                                                                                                                                              |
 | 39  | Disposable-pattern resource lifecycle                                                       | Gemma b3 #9                                | **Rejected** — every command closes its store in `finally`/shutdown handlers; a wrapper would not change any leak scenario.                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | 40  | `title_id`/schema `schema_version` table vs `user_version`                                  | Gemma b2 #5 vs b3 #4                       | **Resolved** — `PRAGMA user_version` chosen (item 3): zero schema surface, survives backup/restore, standard SQLite practice.                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 45  | `visibleMatches` substring false positives (token "in" in "brain")                          | Gemini Flash #1                            | **Fixed** — word-start matching (split haystack, `startsWith(token)`) mirrors FTS `"term"*` prefix semantics; no regex construction, still linear.                                                                                                                                                                                                                                                                                                                                                                                                                            |

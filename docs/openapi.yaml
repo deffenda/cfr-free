@@ -568,8 +568,13 @@ components:
         query: { type: string }
         page: { type: integer }
         perPage: { type: integer }
-        total: { type: integer, description: Hits across all pages (pins included). }
-        matchMode: { type: string, enum: [and, or], description: Fallback match tier. }
+        total:
+          type: integer
+          description: 'Size of the candidate set: every provision matching at least one query term, plus the pinned citation when the candidate set did not already hold it. The increment is identical on every page.'
+        matchMode:
+          type: string
+          enum: [and, or]
+          description: "The tier the candidate set came from. The OR tier is the only candidate tier, so this always reports 'or'; a provision matching EVERY query term ranks ahead of one that matches only some. The field stays for wire compatibility."
         hits:
           type: array
           items: { $ref: '#/components/schemas/SearchHit' }

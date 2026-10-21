@@ -87,7 +87,16 @@ export interface SearchResponse {
   readonly query: string;
   readonly page: number;
   readonly perPage: number;
+  /**
+   * Size of the CANDIDATE SET — every provision matching at least one query
+   * term, plus the pinned citation when the candidate set did not already
+   * hold it. The increment is identical on every page.
+   */
   readonly total: number;
+  /**
+   * The tier the candidate set came from. The OR tier is the only candidate
+   * tier, so this reports `or`; the field stays for wire compatibility.
+   */
   readonly matchMode: MatchMode;
   readonly hits: readonly PresentedHit[];
   /** Issue date of the local index backing these results. */
@@ -347,7 +356,7 @@ export class CFRService {
     if (!parsed.success) toServiceError(parsed.error);
     const { query, page, perPage, part, kind, chapter } = parsed.data;
     const outcome = this.store.search({ query, page, perPage, part, kind, chapter });
-    const direct = this.directHit(query, { part, kind, chapter }, outcome.matchMode);
+    const direct = this.directHit(query, { part, kind, chapter });
 
     let hits = outcome.hits.map((hit) => this.presentHit(hit, false));
     let total = outcome.total;
@@ -395,7 +404,6 @@ export class CFRService {
       readonly kind: 'section' | 'appendix' | undefined;
       readonly chapter: string | undefined;
     },
-    matchMode: MatchMode,
   ): (PresentedHit & { readonly inResults: boolean }) | null {
     const normalized = normalizeCitation(stripParagraphSuffix(query));
     if (normalized === null) return null;
@@ -404,7 +412,11 @@ export class CFRService {
     if (filters.part !== undefined && row.part !== filters.part) return null;
     if (filters.kind !== undefined && row.kind !== filters.kind) return null;
     if (filters.chapter !== undefined && row.chapter !== filters.chapter) return null;
-    const inResults = this.store.hasSearchMatch(matchMode, query, row.citation);
+    // The membership check MUST use the tier the candidate set came from —
+    // the OR tier, the only candidate tier. Asking about the AND tier would
+    // report a pinned citation as "not in the results" when the candidate
+    // set holds it, and the pin would then be counted twice in `total`.
+    const inResults = this.store.hasSearchMatch('or', query, row.citation);
     const snippet = excerpt(row.text);
     const hit = this.presentHit(
       {

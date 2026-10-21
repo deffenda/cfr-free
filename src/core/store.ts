@@ -62,9 +62,18 @@ export interface SearchQuery {
 
 export interface SearchOutcome {
   readonly hits: readonly SearchHit[];
+  /** Size of the CANDIDATE SET — the rows the pagination walks. */
   readonly total: number;
   readonly page: number;
   readonly perPage: number;
+  /**
+   * The tier the candidate set came from.
+   *
+   * The OR tier is the only candidate tier: a section matching at least one
+   * query term is a candidate, and the AND tier (every term) survives only
+   * as a ranking boost. The field stays in the response (its `and`/`or`
+   * enum is part of the wire contract) and reports `or`.
+   */
   readonly matchMode: MatchMode;
 }
 
@@ -200,12 +209,47 @@ export interface StoreOpenOptions {
 // heading matches must outrank body-only matches (SPEC §13).
 const SCORE_EXPR = 'bm25(sections_fts, 10.0, 5.0, 1.0) AS score';
 
-const SELECT_MATCHES_SQL = (orderBy: string) => `
+/**
+ * The AND tier's citations, as a CTE.
+ *
+ * The AND tier is not a candidate tier any more (the candidate set is the
+ * OR tier); it is a RANKING boost, and the boost is computed IN SQL: a JS
+ * prototype that sorted the rows to find the AND members cost ~200 ms and
+ * ~700 ms on citation queries. The CTE's MATCH parameter binds FIRST — the
+ * CTE precedes the main SELECT in the statement text.
+ */
+const AND_TIER_CTE = `
+WITH and_hits(citation) AS (
+  SELECT s.citation
+  FROM sections_fts
+  JOIN sections s ON s.id = sections_fts.rowid
+  WHERE sections_fts MATCH ?
+)`;
+
+/**
+ * The AND-tier membership key: 1 when the row matches EVERY query term, 0
+ * when it matches only some. Sorted DESC, it puts the rows that answered
+ * the whole question ahead of the rows that answered part of it.
+ */
+const AND_TIER_KEY = '(CASE WHEN a.citation IS NOT NULL THEN 1 ELSE 0 END) DESC';
+
+/**
+ * The ranked-search statement.
+ *
+ * The candidate set is the OR tier (`sections_fts MATCH ?` with the OR
+ * query); the AND tier joins onto it as the ranking boost. `where` is the
+ * filter tail (` AND s.part = ? …`, always fixed column names with bound
+ * values) and `orderBy` is the sort-key prefix, so every value binds as a
+ * parameter and no user input reaches the SQL text.
+ */
+const SELECT_MATCHES_SQL = (where: string, orderBy: string): string => `
+${AND_TIER_CTE}
 SELECT s.citation, s.heading, s.part, s.path, ${SNIPPET_EXPR} AS snippet,
        ${SCORE_EXPR}
 FROM sections_fts
 JOIN sections s ON s.id = sections_fts.rowid
-WHERE sections_fts MATCH ?
+LEFT JOIN and_hits a ON a.citation = s.citation
+WHERE sections_fts MATCH ?${where}
 ORDER BY ${orderBy}score
 LIMIT ? OFFSET ?`;
 
@@ -240,15 +284,6 @@ function presentFilters(query: SearchQuery): SearchFilter[] {
 function filterClause(filters: readonly SearchFilter[]): string {
   return filters.map(([name]) => ` AND ${SEARCH_FILTER_COLUMNS[name]} = ?`).join('');
 }
-
-const SELECT_MATCHES_FILTERED_SQL = (where: string, orderBy: string): string => `
-SELECT s.citation, s.heading, s.part, s.path, ${SNIPPET_EXPR} AS snippet,
-       ${SCORE_EXPR}
-FROM sections_fts
-JOIN sections s ON s.id = sections_fts.rowid
-WHERE sections_fts MATCH ?${where}
-ORDER BY ${orderBy}score
-LIMIT ? OFFSET ?`;
 
 const COUNT_MATCHES_SQL = `
 SELECT count(*) AS n
@@ -432,21 +467,17 @@ export function queryTerms(raw: string): readonly QueryTerm[] {
 }
 
 /**
- * Translate free text into a safe FTS5 match string.
+ * The FTS5 fragments of a PARSED query: one quoted prefix phrase per term.
  *
- * Quoted spans become phrase queries (exact token sequence, prefix on the
- * last token) so verbatim regulatory language can be searched as written.
- * Every other token is emitted as a quoted prefix (`"tok"*`), optionally
- * grouped with a curated claims-language synonym phrase. User input can
- * never introduce FTS5 operators: every emitted piece is alphanumeric
- * tokens wrapped in quotes, and the result is always passed to SQLite as a
- * bound parameter, never concatenated into SQL.
+ * The candidate query (the OR tier) and the AND-tier membership query are
+ * the SAME fragments joined differently, so both are built from ONE parse of
+ * the query — a query with no usable terms yields neither.
  */
-export function toFtsQuery(raw: string, mode: MatchMode): string | null {
+function ftsParts(terms: readonly QueryTerm[]): string[] {
   const parts: string[] = [];
   let budget = MAX_TERMS;
 
-  for (const term of queryTerms(raw)) {
+  for (const term of terms) {
     if (term.kind === 'token') {
       if (budget <= 0) continue;
       budget -= 1;
@@ -464,6 +495,22 @@ export function toFtsQuery(raw: string, mode: MatchMode): string | null {
     budget = Math.max(0, budget - term.words.length);
     parts.push(`"${term.words.join(' ')}"*`);
   }
+  return parts;
+}
+
+/**
+ * Translate free text into a safe FTS5 match string.
+ *
+ * Quoted spans become phrase queries (exact token sequence, prefix on the
+ * last token) so verbatim regulatory language can be searched as written.
+ * Every other token is emitted as a quoted prefix (`"tok"*`), optionally
+ * grouped with a curated claims-language synonym phrase. User input can
+ * never introduce FTS5 operators: every emitted piece is alphanumeric
+ * tokens wrapped in quotes, and the result is always passed to SQLite as a
+ * bound parameter, never concatenated into SQL.
+ */
+export function toFtsQuery(raw: string, mode: MatchMode): string | null {
+  const parts = ftsParts(queryTerms(raw));
   if (parts.length === 0) return null;
   return parts.join(mode === 'and' ? ' AND ' : ' OR ');
 }
@@ -923,9 +970,7 @@ export class Store {
     return hashes;
   }
 
-  private countMatches(match: MatchMode, query: string, filters: readonly SearchFilter[]): number {
-    const ftsQuery = toFtsQuery(query, match);
-    if (ftsQuery === null) return 0;
+  private countMatches(ftsQuery: string, filters: readonly SearchFilter[]): number {
     const sql =
       filters.length === 0 ? COUNT_MATCHES_SQL : COUNT_MATCHES_FILTERED_SQL(filterClause(filters));
     const row = this.stmt(sql).get(ftsQuery, ...filters.map(([, value]) => value)) as
@@ -936,8 +981,21 @@ export class Store {
   /**
    * Ranked full-text search.
    *
-   * Tries an AND query first for precision; falls back to OR once when AND
-   * finds nothing. Each attempt is a separate prepared statement execution.
+   * The CANDIDATE SET is the OR tier: every section that matches at least
+   * one query term. The AND tier is no longer a candidate tier — requiring
+   * EVERY term excluded the provision that answers the question from the
+   * results altogether (§ 4.85 "Evaluation of hearing impairment." carries
+   * neither "rated" nor "loss", so "how is hearing loss rated" never saw it),
+   * and no ranking rule can surface a row that was never a candidate.
+   *
+   * The AND tier survives as a RANKING boost: a row that matches every
+   * query term outranks a row that matches only some. The order is
+   *
+   *   1. the heading-phrase key (SPEC §4.1) DESC,
+   *   2. the AND-tier membership DESC,
+   *   3. bm25 ASC (lower is better).
+   *
+   * `total` is the size of the candidate set — what the pagination walks.
    * Optional `part`/`kind`/`chapter` filters are exact column matches
    * applied to both the count and the ranked rows.
    */
@@ -946,29 +1004,27 @@ export class Store {
     const offset = (Math.max(1, query.page) - 1) * perPage;
     const filters = presentFilters(query);
 
-    let mode: MatchMode = 'and';
-    let total = this.countMatches('and', query.query, filters);
-    if (total === 0) {
-      const orTotal = this.countMatches('or', query.query, filters);
-      if (orTotal > 0) {
-        mode = 'or';
-        total = orTotal;
-      }
-    }
-    if (total === 0) return { hits: [], total: 0, page: query.page, perPage, matchMode: mode };
-
-    const ftsQuery = toFtsQuery(query.query, mode);
-    if (ftsQuery === null)
-      return { hits: [], total: 0, page: query.page, perPage, matchMode: mode };
-
+    // ONE parse of the query feeds both tiers: the candidate query (OR) and
+    // the AND-tier membership query (AND) are the same fragments joined
+    // differently, so a query with no usable terms has no candidate set.
     const terms = queryTerms(query.query);
+    const parts = ftsParts(terms);
+    if (parts.length === 0) {
+      return { hits: [], total: 0, page: query.page, perPage, matchMode: 'or' };
+    }
+    const orQuery = parts.join(' OR ');
+    const andQuery = parts.join(' AND ');
+
+    const total = this.countMatches(orQuery, filters);
+    if (total === 0) {
+      return { hits: [], total: 0, page: query.page, perPage, matchMode: 'or' };
+    }
+
     const key = headingMatchKey(terms);
-    const sql =
-      filters.length === 0
-        ? SELECT_MATCHES_SQL(key.clause)
-        : SELECT_MATCHES_FILTERED_SQL(filterClause(filters), key.clause);
+    const sql = SELECT_MATCHES_SQL(filterClause(filters), `${key.clause}${AND_TIER_KEY}, `);
     const rows = this.stmt(sql).all(
-      ftsQuery,
+      andQuery,
+      orQuery,
       ...filters.map(([, value]) => value),
       ...key.params,
       perPage,
@@ -987,13 +1043,18 @@ export class Store {
       };
       return { ...hit, matches: visibleMatches(terms, hit) };
     });
-    return { hits, total, page: query.page, perPage, matchMode: mode };
+    return { hits, total, page: query.page, perPage, matchMode: 'or' };
   }
 
   /**
    * Whether an exact citation participates in the FTS result set for this
    * query/mode — used by the service to adjust `total` when it prepends a
    * direct citation hit that FTS itself did not return.
+   *
+   * The mode MUST mirror the tier the candidate set came from: the search
+   * runs the OR tier, so a caller asking "is this citation among the
+   * results?" has to ask about the OR tier, or the pin's `total` adjustment
+   * counts a citation the results already contain.
    */
   hasSearchMatch(mode: MatchMode, rawQuery: string, citation: string): boolean {
     const ftsQuery = toFtsQuery(rawQuery, mode);

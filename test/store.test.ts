@@ -304,7 +304,8 @@ describe('Store', () => {
     try {
       const result = temp.store.search({ query: 'mental disorder', page: 1, perPage: 10 });
       expect(result.total).toBeGreaterThanOrEqual(2);
-      expect(result.matchMode).toBe('and');
+      // The OR tier is the only candidate tier, so the mode reports it.
+      expect(result.matchMode).toBe('or');
       const first = result.hits[0];
       expect(first).toBeDefined();
       expect(first?.snippet.length).toBeGreaterThan(0);
@@ -315,12 +316,16 @@ describe('Store', () => {
     }
   });
 
-  it('falls back to OR when AND finds nothing', () => {
+  it('searches the OR candidate set when no term matches every row', () => {
     const temp = openTempStore();
     try {
+      // "zzzunfindable" matches nothing, but "mental" does: the candidate set
+      // is the OR tier, so the section is a candidate and ranks by the
+      // heading-phrase key, then the AND-tier membership, then bm25.
       const result = temp.store.search({ query: 'mental zzzunfindable', page: 1, perPage: 10 });
       expect(result.matchMode).toBe('or');
       expect(result.total).toBeGreaterThan(0);
+      expect(result.hits.map((hit) => hit.citation)).toContain('4.125');
     } finally {
       temp.cleanup();
     }
@@ -343,7 +348,7 @@ describe('Store', () => {
       expect(temp.store.search({ query: '!!! ???', page: 1, perPage: 10 })).toMatchObject({
         total: 0,
         hits: [],
-        matchMode: 'and',
+        matchMode: 'or',
       });
     } finally {
       temp.cleanup();
@@ -367,15 +372,18 @@ describe('Store', () => {
   it('filters by kind', () => {
     const temp = openTempStore();
     try {
-      // "rating schedule" matches 4.130 (section) and Appendix A to Part 4.
+      // The candidate set is the OR tier: "rating schedule" matches 4.130
+      // (both terms) and 4.125 ("rating agency" — one term). § 4.125 is a
+      // candidate now, and it ranks BELOW § 4.130 because § 4.130 carries
+      // every query term (the AND-tier membership boost).
       const sections = temp.store.search({
         query: 'rating schedule',
         page: 1,
         perPage: 10,
         kind: 'section',
       });
-      expect(sections.total).toBe(1);
-      expect(sections.hits.map((hit) => hit.citation)).toEqual(['4.130']);
+      expect(sections.total).toBe(2);
+      expect(sections.hits.map((hit) => hit.citation)).toEqual(['4.130', '4.125']);
       const appendices = temp.store.search({
         query: 'rating schedule',
         page: 1,
@@ -386,7 +394,7 @@ describe('Store', () => {
       expect(appendices.hits.map((hit) => hit.citation)).toEqual(['Appendix A to Part 4']);
       // Unfiltered: both kinds still match.
       const all = temp.store.search({ query: 'rating schedule', page: 1, perPage: 10 });
-      expect(all.total).toBe(2);
+      expect(all.total).toBe(3);
     } finally {
       temp.cleanup();
     }
