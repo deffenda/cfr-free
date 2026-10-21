@@ -542,6 +542,17 @@ at least three participants complete four of five tasks without a citation/
 version error and request repeat use; explicitly label this an initial
 decision threshold, not statistical proof or a revenue forecast.
 
+**Criteria review (2026-10-21):** the operator's decision committee
+reviewed the seven success criteria in `docs/research/practitioner-pilot.md`
+§8 and the continue/change/stop mapping in §11.2 of that document.
+**SC-1 and SC-5 are kept**; **SC-2, SC-3, SC-4, SC-6 and SC-7 are
+revised**, as recorded in the protocol, and the previously unhandled §11.2
+branch is closed — a cohort that misses SC-1 while at least 2 of N asked
+for another session is a CHANGE, not an unhandled case. **Operator
+acceptance of the criteria remains the precondition before recruitment:**
+the committee's review is not acceptance, and the pilot is not recruited
+until the operator ticks accept / revise / reject per criterion.
+
 ### M7 — Integrations and support, conditional on pilot demand
 
 **Dependency:** M6 evidence. **Risk:** LOW for a decision brief; runtime
