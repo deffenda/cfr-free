@@ -8,8 +8,10 @@ import {
   StoreError,
   MAX_TERMS,
   SCHEMA_VERSION,
+  queryTerms,
   toFtsQuery,
   tidySnippet,
+  visibleMatches,
 } from '../src/core/store.js';
 import { syncIndex } from '../src/core/sync.js';
 import type { EcfrApi } from '../src/core/ecfr.js';
@@ -113,6 +115,58 @@ describe('toFtsQuery', () => {
     // A phrase alone may exceed the budget; loose terms then stay empty.
     const longPhrase = `"${Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ')}" tail`;
     expect(toFtsQuery(longPhrase, 'and')).not.toContain('tail');
+  });
+});
+
+describe('queryTerms', () => {
+  it('reads tokens, quoted spans and punctuated abbreviations as terms', () => {
+    const terms = queryTerms('smc "aid and attendance" A&A');
+    // Spans first (the FTS builder's order), then the bare tokens.
+    expect(terms.map((term) => term.kind)).toEqual(['phrase', 'substitution', 'token']);
+    expect(terms[0]?.term).toBe('aid and attendance');
+    expect(terms[0]?.words).toEqual(['aid', 'and', 'attendance']);
+    // A punctuated abbreviation is ONE term standing for its corpus phrase.
+    expect(terms[1]?.term).toBe('a&a');
+    expect(terms[1]?.expansions).toEqual(['aid and attendance']);
+    expect(terms[2]?.term).toBe('smc');
+  });
+
+  it('does not read a punctuated abbreviation inside a word as an abbreviation', () => {
+    // "VA&A" is a different word: the abbreviation must stand alone, so no
+    // substitution term is created ("&" only splits it into two tokens).
+    const terms = queryTerms('VA&A');
+    expect(terms.map((term) => term.kind)).toEqual(['token', 'token']);
+    expect(terms.map((term) => term.term)).toEqual(['va', 'a']);
+  });
+
+  it('expands a curated acronym to every corpus spelling it stands for', () => {
+    const [term] = queryTerms('ptsd');
+    expect(term?.expansions).toEqual(['posttraumatic stress', 'post-traumatic stress']);
+  });
+
+  it('keeps a quoted span verbatim', () => {
+    const [term] = queryTerms('"mental disorder"');
+    expect(term?.kind).toBe('phrase');
+    expect(term?.expansions).toEqual([]);
+  });
+});
+
+describe('visibleMatches', () => {
+  const hit = {
+    citation: '3.350',
+    heading: 'Special monthly compensation ratings.',
+    snippet: 'Ratings for special monthly compensation.',
+  };
+
+  it('reports the term a hit answered through its corpus phrase', () => {
+    // The hit never spells "smc" — it spells the phrase the synonym stands
+    // for, so the term still answered.
+    expect(visibleMatches(queryTerms('smc'), hit)).toEqual(['smc']);
+    expect(visibleMatches(queryTerms('smc rating'), hit)).toEqual(['smc', 'rating']);
+  });
+
+  it('reports nothing for a term the hit does not answer', () => {
+    expect(visibleMatches(queryTerms('tinnitus'), hit)).toEqual([]);
   });
 });
 
