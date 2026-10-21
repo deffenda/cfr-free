@@ -277,3 +277,19 @@ provisional.
 natural phrasing (M3-d); (3) abstention (M3-a) — but only with a signal
 that demonstrably separates the cases, and on a set an expert has
 adjudicated.
+
+### 2026-10-21 — exception demotion (ranking round)
+
+Measured on the frozen set (corpus issue date 2026-10-16, 46 answerable
+queries):
+
+| variant                          | dev first | dev recall@5 | holdout first | holdout recall@5 |
+| -------------------------------- | --------- | ------------ | ------------- | ---------------- |
+| baseline (shipped at `27b5b51`)  | 21/29     | 28/29        | 13/17         | 15/17            |
+| + `s.citation` tie-break         | 21/29     | 28/29        | 13/17         | 15/17            |
+| + tie-break + exception demotion | **22/29** | 28/29        | 13/17         | 15/17            |
+
+The demotion flips "how is hearing loss rated" from `4.86, 4.85` to
+`4.85, 4.86`. The dev per-query diff against baseline is that single line
+and nothing else; the holdout per-query list is identical to baseline
+(only timings differ).

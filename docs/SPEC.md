@@ -227,7 +227,18 @@ contract) and reports `or`, the only candidate tier.
    SQL (a CTE over the AND query, LEFT JOINed onto the ranked rows): a JS
    prototype that sorted the rows to find the AND members cost ~200 ms and
    ~700 ms on citation queries.
-3. **bm25** ASC (lower is better) — the tie-breaker.
+3. **the exception demotion** ASC — a heading that ANNOUNCES an exception
+   ("Exceptional patterns of …", "Exceptions to …") names a case the rule
+   does not cover, not the rule the question asks about; when both headings
+   carry the query phrase, body repetition would otherwise hand the answer
+   to the exception. The key is a fixed GLOB prefix over the corpus's
+   own headings, placed after the AND-tier key so it only separates rows
+   already equal on phrase and AND membership, and it is switched off when
+   the query itself asks about exceptions (then the exception IS the answer).
+   It binds no parameters.
+4. **bm25** ASC (lower is better) — the tie-breaker. After bm25 the order
+   ends with `s.citation` ASC, so equal-score rows have a stable order and
+   pagination cannot drift across builds.
 
 The AND-tier membership and the candidate query are the SAME fragments
 joined differently, so one parse of the query feeds both.
