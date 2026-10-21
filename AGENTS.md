@@ -27,11 +27,14 @@ the learning journal. None of this redefines what the project does.
   implements a bounded packet in a worktree. Reports files touched, gate
   tails, and disclosures. Never installs dependencies to do its job; it
   reports the need instead.
-- **Independent reviewer** (Nemotron family — distinct model from both
-  orchestrator and coder; primary: `opencode/nemotron-3-ultra-free` —
-  fresh-context subagent that reads the diff at a pinned SHA and returns
-  a verdict under the critical-review contract (firm but fair) in
+- **Independent reviewer** (a free-tier model — distinct model from both
+  orchestrator and coder; the Nemotron family is preferred, primary:
+  `opencode/nemotron-3-ultra-free` — fresh-context subagent that reads the
+  diff at a pinned SHA and returns a verdict under the critical-review
+  contract (firm but fair) in
   [`claude/rules/cross-model-review.md`](claude/rules/cross-model-review.md).
+  The ladder and the model's place in it are set there; the operator's
+  rule of 2026-10-21 is that free is the roster).
 
 Paid models are an operator-approved escalation only, made in chat.
 
@@ -170,9 +173,10 @@ Two consecutive rounds by the SAME reviewer model whose verdicts
 classify as mechanically weak-effort is a process fault:
 
 1. The next round executes the **cross-check round protocol** in
-   `claude/rules/cross-model-review.md` ("Elevated rubric"): the
-   mirror-variant reviewer re-runs the SAME packet, never having seen
-   the first verdict; the adjudicator compares the verdict class, the
+   `claude/rules/cross-model-review.md` ("Elevated rubric"): a
+   different eligible free-tier reviewer — never the orchestrator's
+   model, never the coder's, and never the first reviewer's — re-runs
+   the SAME packet, never having seen the first verdict; the adjudicator compares the verdict class, the
    P0 counts, and the P1 counts — a different class, differing P0
    counts, or P1 counts differing by 2 or more escalate to the
    operator with both verdicts attached, as does a pair where neither

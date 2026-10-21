@@ -1193,3 +1193,31 @@ describe('CFRService last sync changes', () => {
     }
   });
 });
+
+describe('CFRService.search part titles', () => {
+  it('carries the part title on a search hit when the index has a structure tree', () => {
+    withService((service) => {
+      const result = service.search({ query: 'mental disorder' });
+      expect(result.hits.length).toBeGreaterThan(0);
+      expect(result.hits[0]?.partTitle).toBe('Schedule for Rating Disabilities');
+    });
+  });
+
+  it('sets partTitle to null when the index has no structure_json, and search still succeeds', () => {
+    const temp = openTempStore({ seed: false });
+    try {
+      temp.store.replaceAll(FIXTURE_SECTIONS, '2026-10-09', {
+        issue_date: '2026-10-09',
+        synced_at: new Date().toISOString(),
+        appendices_count: '1',
+        parser_version: '1',
+      });
+      const service = new CFRService(temp.store, 7);
+      const result = service.search({ query: 'mental disorder' });
+      expect(result.hits.length).toBeGreaterThan(0);
+      expect(result.hits[0]?.partTitle).toBeNull();
+    } finally {
+      temp.cleanup();
+    }
+  });
+});

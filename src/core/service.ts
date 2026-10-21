@@ -81,6 +81,9 @@ export interface PresentedHit extends SearchHit {
    * (`direct: true`) it reports whether the pin also appeared in the
    * ranked results. */
   readonly inResults: boolean;
+  /** Part title from the index's structure tree, without the "Part N—" prefix;
+   * null when the hit has no part, the part has no title, or the map is empty. */
+  readonly partTitle: string | null;
 }
 
 export interface SearchResponse {
@@ -343,6 +346,8 @@ export class CFRService {
    */
   private readonly ecfr: EcfrApi | undefined;
   private readonly logger: Logger | undefined;
+  /** Memoised part-number → display-title map built from the index's structure tree. */
+  private partTitles: Map<string, string> | undefined;
 
   constructor(store: Store, maxAgeDays: number, ecfr?: EcfrApi, logger?: Logger) {
     this.store = store;
@@ -443,12 +448,17 @@ export class CFRService {
   /** Attach display citation, source URL, direct flag, and inResults to a raw hit. */
   private presentHit(hit: SearchHit, direct: boolean, inResults = true): PresentedHit {
     const kind = kindForCitation(hit.citation);
+    const partTitleValue =
+      hit.part === null || hit.part === undefined
+        ? null
+        : (this.partTitleMap().get(hit.part) ?? null);
     return {
       ...hit,
       citationDisplay: displayCitation(kind, hit.citation),
       sourceUrl: sourceUrlFor(kind, hit.citation),
       direct,
       inResults,
+      partTitle: partTitleValue,
     };
   }
 
@@ -616,17 +626,27 @@ export class CFRService {
     return sections !== expectedSections + expectedAppendices;
   }
 
+  /** Build (once) and return the memoised part-number → display-title map. */
+  private partTitleMap(): Map<string, string> {
+    // An EMPTY map is memoised too: a missing or unreadable structure must
+    // not be re-parsed on every search.
+    if (this.partTitles !== undefined) return this.partTitles;
+    const titles = new Map<string, string>();
+    try {
+      const structureJson = this.store.getMeta('structure_json');
+      if (structureJson !== null) {
+        collectPartTitles(parseStructure(JSON.parse(structureJson)), titles);
+      }
+    } catch {
+      // Unreadable or missing structure: degrade silently to an empty map.
+    }
+    this.partTitles = titles;
+    return titles;
+  }
+
   /** Parts present in the index, joined with titles from the structure tree. */
   listParts(): PartSummary[] {
-    const titles = new Map<string, string>();
-    const structureJson = this.store.getMeta('structure_json');
-    if (structureJson !== null) {
-      try {
-        collectPartTitles(parseStructure(JSON.parse(structureJson)), titles);
-      } catch {
-        // Unreadable structure: still list parts, just without titles.
-      }
-    }
+    const titles = this.partTitleMap();
     return this.store.listParts().map((row) => ({
       part: row.part,
       title: titles.get(row.part) ?? null,
