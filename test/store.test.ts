@@ -839,6 +839,99 @@ describe('Store search matches', () => {
   });
 });
 
+describe('Store ranking: exception demotion and citation tie-break', () => {
+  // The corpus's real § 4.85/§ 4.86 shape: BOTH headings carry the query's
+  // bridge phrase ("hearing impairment"), so the heading key ties and both
+  // sections are AND members — § 4.86's heavier body repetition would win
+  // on bm25 alone (the measured baseline state; research doc 2026-10-21).
+  const HEARING_SECTIONS = [
+    makeSection({
+      citation: '4.85',
+      heading: 'Evaluation of hearing impairment.',
+      text: 'How hearing loss is rated under this evaluation of hearing impairment. Exceptions to the rule are noted here.',
+      markdown: '## Evaluation of hearing impairment.',
+    }),
+    makeSection({
+      citation: '4.86',
+      heading: 'Exceptional patterns of hearing impairment.',
+      text:
+        'How is hearing loss rated in exceptional patterns: hearing loss rated, hearing loss rated, ' +
+        'hearing impairment rated. Exceptions to the rule: exceptions to the hearing impairment rule, ' +
+        'the rule and its exceptions. Rated hearing loss again.',
+      markdown: '## Exceptional patterns of hearing impairment.',
+    }),
+  ];
+
+  it('demotes an announcing exception heading when the query does not ask about exceptions', () => {
+    const temp = openTempStore({ sections: HEARING_SECTIONS });
+    try {
+      // "how is hearing loss rated": no query term starts with "exception",
+      // so the demotion key applies and § 4.85 leads despite § 4.86's body
+      // repetition (which hands § 4.86 the answer without the demotion).
+      const result = temp.store.search({
+        query: 'how is hearing loss rated',
+        page: 1,
+        perPage: 10,
+      });
+      expect(result.total).toBe(2);
+      expect(result.hits.map((hit) => hit.citation)).toEqual(['4.85', '4.86']);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('keeps the demotion off when the query itself asks about exceptions', () => {
+    const temp = openTempStore({ sections: HEARING_SECTIONS });
+    try {
+      // "exceptions" in the query switches the demotion key off: § 4.86 and
+      // § 4.85 tie on the heading key and the AND tier, and § 4.86's body
+      // repetition decides on bm25. Applied unconditionally, the demotion
+      // key would break that tie toward § 4.85 instead.
+      const result = temp.store.search({
+        query: 'exceptions to the hearing impairment rule',
+        page: 1,
+        perPage: 10,
+      });
+      expect(result.hits.map((hit) => hit.citation)).toEqual(['4.86', '4.85']);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('orders a genuine score tie by citation so one query returns one stable order', () => {
+    // Identical heading and body: every ranking key ties through bm25.
+    // Inserted LATER citation first, so only the s.citation tie-break can
+    // order the rows by citation — rowid order would give 4.86 first.
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '4.86',
+          heading: 'Evaluation of hearing impairment.',
+          text: 'How hearing loss is rated under this evaluation of hearing impairment.',
+          markdown: '## Evaluation of hearing impairment.',
+        }),
+        makeSection({
+          citation: '4.85',
+          heading: 'Evaluation of hearing impairment.',
+          text: 'How hearing loss is rated under this evaluation of hearing impairment.',
+          markdown: '## Evaluation of hearing impairment.',
+        }),
+      ],
+    });
+    try {
+      const query = 'how is hearing loss rated';
+      const first = temp.store.search({ query, page: 1, perPage: 10 });
+      const second = temp.store.search({ query, page: 1, perPage: 10 });
+      const order = (result: { readonly hits: readonly { citation: string }[] }): string[] =>
+        result.hits.map((hit) => hit.citation);
+      expect(order(first)).toEqual(['4.85', '4.86']);
+      expect(order(second)).toEqual(order(first));
+    } finally {
+      temp.cleanup();
+    }
+  });
+});
+
 describe('Store transaction and integrity edge cases', () => {
   it('propagates non-busy BEGIN failures raw', () => {
     const temp = openTempStore();
