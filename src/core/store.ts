@@ -711,16 +711,52 @@ export function hitWords(hit: { citation: string; heading: string; snippet: stri
 }
 
 /**
- * True when the hit's text answers the term: the term's own words are
- * visible, or every word of one of its corpus phrases is.
+ * True when the hit's text answers the term.
+ *
+ * - A single-token term is answered when the token is present anywhere, with
+ *   the search's prefix rule (`"term"*` → `startsWith`).
+ * - A multi-word term (a quoted phrase, or a punctuated abbreviation standing
+ *   for one) is answered only when its words occur in the hit's text in that
+ *   order and contiguously — the same normalising the search applies (case and
+ *   token boundaries). Every word but the last must match a whole token; the
+ *   last uses the search's prefix rule, mirroring an FTS phrase query.
+ * - A synonym/substitution term is answered through its own words OR through
+ *   any of its corpus expansions, each expansion matched with the same rules
+ *   (a single-word expansion uses the prefix rule; a multi-word expansion must
+ *   be contiguous and in order).
  *
  * The word-start match mirrors the FTS prefix semantics ("term"*) and avoids
  * false positives like the token "in" matching inside "brain".
  */
 export function termResponded(term: QueryTerm, words: readonly string[]): boolean {
-  const visible = (word: string): boolean => words.some((candidate) => candidate.startsWith(word));
-  if (term.words.every(visible)) return true;
-  return term.expansions.some((phrase) => phraseWords(phrase).every(visible));
+  const tokens = words.filter((word) => word.length > 0);
+  const phraseMatches = (phrase: readonly string[]): boolean => {
+    if (phrase.length === 0) return false;
+    if (phrase.length === 1)
+      return tokens.some((candidate) => candidate.startsWith(phrase[0] ?? ''));
+    const last = phrase.length - 1;
+    for (let i = 0; i + phrase.length <= tokens.length; i++) {
+      let ok = true;
+      for (let j = 0; j < phrase.length; j++) {
+        const token = tokens[i + j] ?? '';
+        const word = phrase[j] ?? '';
+        if (j === last) {
+          if (!token.startsWith(word)) {
+            ok = false;
+            break;
+          }
+        } else if (token !== word) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) return true;
+    }
+    return false;
+  };
+
+  if (phraseMatches(term.words)) return true;
+  return term.expansions.some((phrase) => phraseMatches(phraseWords(phrase)));
 }
 
 function nullableString(value: unknown): string | null {
