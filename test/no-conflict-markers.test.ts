@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -14,22 +15,28 @@ import { describe, expect, it } from 'vitest';
  * The same resolution also left a markdown route table ragged, with one row
  * lost, which a later review caught as a P2.
  *
- * The marker rule is Git's own: a line whose first non-whitespace
- * characters are `<<<<<<< `, exactly seven `=`, or `>>>>>>> ` (Git writes
- * the label after a space). A markdown setext heading underline is a run of
- * `=` of ANY length, so requiring EXACTLY seven keeps `====` and `=======`
- * apart from an underline; the repo's own tracked files are checked
- * against this rule by the test below, so the rule is known not to fire on
- * them.
+ * THE RULE, and why it is this narrow:
  *
- * Fenced code blocks are skipped: documentation may legitimately SHOW a
- * marker (this file's own history does), and a marker inside a fence is
- * not damage in the merge sense. The cost of that choice is recorded here
- * rather than left implicit: a conflict that landed inside a code fence
- * would not be caught by this test.
+ * - `<<<<<<< ` and `>>>>>>> ` are UNAMBIGUOUS. No valid markdown line
+ *   begins with seven `<` or seven `>` followed by a space, so these two
+ *   branches can never fire on legitimate content.
+ * - The separator line `=======` is AMBIGUOUS and is therefore NOT matched
+ *   on its own: a CommonMark setext heading underline of exactly seven `=`
+ *   is valid markdown, so matching it would fail the gate on an innocent
+ *   heading. A merge conflict always carries the two unambiguous halves as
+ *   well, so nothing real is lost by leaving the separator alone.
+ * - Fenced code blocks are skipped, because documentation may legitimately
+ *   SHOW a marker (this file's own history does). BOTH fence forms are
+ *   recognised: the backtick fence and the tilde fence. Indented code
+ *   blocks (four spaces) are NOT skipped — a marker there is still a marker
+ *   in the file — and that is deliberate.
+ *
+ * The cost of the fence exemption is recorded here rather than left
+ * implicit: a conflict that landed inside a fenced code block would not be
+ * caught by this test.
  */
 
-const MARKER = /^\s*(?:<{7} |={7}\s*$|>{7} )/;
+const MARKER = /^\s*(?:<{7} |>{7} )/;
 
 /** True when the file is text we can scan (no NUL byte in the first 8 KiB). */
 function isTextFile(filePath: string): boolean {
@@ -38,10 +45,14 @@ function isTextFile(filePath: string): boolean {
   return !probe.includes(0);
 }
 
-/** The tracked files of the repository, as paths relative to the repo root. */
-function trackedFiles(): string[] {
-  const output = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8' });
-  return output.split('\0').filter((entry) => entry.length > 0);
+/** The tracked files of the repository, or null when there is no repository. */
+function trackedFiles(): string[] | null {
+  try {
+    const output = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8' });
+    return output.split('\0').filter((entry) => entry.length > 0);
+  } catch {
+    return null;
+  }
 }
 
 /** Every conflict-marker line in one file, as 1-based line numbers. */
@@ -51,7 +62,7 @@ function markerLines(filePath: string): number[] {
   const hits: number[] = [];
   let inFence = false;
   content.split('\n').forEach((line, index) => {
-    if (/^\s*```/.test(line)) {
+    if (/^\s*(?:```|~~~)/.test(line)) {
       inFence = !inFence;
       return;
     }
@@ -62,9 +73,18 @@ function markerLines(filePath: string): number[] {
 }
 
 describe('no tracked file carries a conflict marker', () => {
-  it('finds no conflict marker in the repository', () => {
+  it('finds no conflict marker in the repository', (context) => {
+    const files = trackedFiles();
+    if (files === null) {
+      context.skip('not a git checkout — the tracked-file scan cannot run');
+      return;
+    }
+    if (files.length === 0) {
+      context.skip('no tracked files — the scan would pass vacuously');
+      return;
+    }
     const offenders: string[] = [];
-    for (const file of trackedFiles()) {
+    for (const file of files) {
       for (const line of markerLines(path.resolve(file))) {
         offenders.push(`${file}:${line}`);
       }
@@ -75,15 +95,40 @@ describe('no tracked file carries a conflict marker', () => {
     ).toEqual([]);
   });
 
-  it('detects a marker when one is present', () => {
-    // The rule itself, pinned: a setext underline of any other length and a
-    // marker-looking word inside a line are both NOT markers.
+  it('matches only the unambiguous marker forms', () => {
+    // The two halves Git writes. Nothing else may match: a setext heading
+    // underline of any length is valid markdown, including exactly seven
+    // `=`, and a marker-looking word inside a line is just a word.
     expect(MARKER.test('<<<<<<< HEAD')).toBe(true);
-    expect(MARKER.test('=======')).toBe(true);
     expect(MARKER.test('>>>>>>> origin/main')).toBe(true);
     expect(MARKER.test('  <<<<<<< HEAD')).toBe(true);
+    expect(MARKER.test('=======')).toBe(false);
     expect(MARKER.test('====')).toBe(false);
-    expect(MARKER.test('======= not quite a separator')).toBe(false);
     expect(MARKER.test('text <<<<<<< HEAD')).toBe(false);
+    expect(MARKER.test('> quote')).toBe(false);
+  });
+
+  it('skips both fence forms and keeps scanning indented blocks', () => {
+    const write = (name: string, content: string): string => {
+      const file = path.join(mkdtempSync(path.join(tmpdir(), 'cfr-markers-')), name);
+      writeFileSync(file, content);
+      return file;
+    };
+    // A marker inside a backtick fence: skipped (documentation may show one).
+    const backtick = write('backtick.md', 'text\n```\n<<<<<<< HEAD\n```\n');
+    // The same inside a tilde fence: also skipped — the earlier draft
+    // recognised only the backtick form, which is a false positive waiting
+    // for the next document that uses `~~~`.
+    const tilde = write('tilde.md', 'text\n~~~\n<<<<<<< HEAD\n~~~\n');
+    // An indented code block is NOT a fence: a marker there is still a
+    // marker in the file, so it is reported.
+    const indented = write('indented.md', 'text\n\n    <<<<<<< HEAD\n');
+    // A marker outside any block: reported.
+    const plain = write('plain.md', 'text\n<<<<<<< HEAD\nmore\n');
+
+    expect(markerLines(backtick)).toEqual([]);
+    expect(markerLines(tilde)).toEqual([]);
+    expect(markerLines(indented)).toEqual([3]);
+    expect(markerLines(plain)).toEqual([2]);
   });
 });

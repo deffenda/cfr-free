@@ -270,7 +270,9 @@ if ! tool_ok npx; then
   finish tests UNAVAILABLE "$((SECONDS - start))" 'npx not found'
 elif [ "$all" -eq 1 ]; then
   printf 'note: test/live.test.ts excluded (network-dependent live test)\n'
-  if npx vitest run --exclude 'test/live.test.ts' >"$tmp/tests.log" 2>&1; then
+  # test/no-conflict-markers.test.ts is excluded here and run by the
+  # markers section below, so it runs exactly once in every mode.
+  if npx vitest run --exclude 'test/live.test.ts' --exclude 'test/no-conflict-markers.test.ts' >"$tmp/tests.log" 2>&1; then
     finish tests pass "$((SECONDS - start))"
   else
     finish tests FAIL "$((SECONDS - start))" "$(fail_reason "$tmp/tests.log")"
@@ -312,7 +314,14 @@ if ! tool_ok npx; then
 elif [ ! -f test/no-conflict-markers.test.ts ]; then
   finish markers UNAVAILABLE "$((SECONDS - start))" 'test/no-conflict-markers.test.ts not found'
 elif npx vitest run test/no-conflict-markers.test.ts >"$tmp/markers.log" 2>&1; then
-  finish markers pass "$((SECONDS - start))"
+  # A skip means the scan could not run (not a git checkout, or no tracked
+  # files). That is a warning, not a pass: the gate must not report a green
+  # row for a check that did not run.
+  if grep -q 'skipped' "$tmp/markers.log"; then
+    finish markers skip "$((SECONDS - start))" 'scan skipped (no git checkout or no tracked files)'
+  else
+    finish markers pass "$((SECONDS - start))"
+  fi
 else
   finish markers FAIL "$((SECONDS - start))" "$(fail_reason "$tmp/markers.log")"
 fi
