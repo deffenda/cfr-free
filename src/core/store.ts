@@ -633,13 +633,45 @@ function headingMatchKey(terms: readonly QueryTerm[]): { clause: string; params:
  * hearing impairment.") carry the corpus's bridge phrase, so the
  * heading-phrase key ties and body repetition hands the answer to the
  * exception. Demote the announcing heading — unless the query itself asks
- * about exceptions, in which case it IS the answer. ONE fixed GLOB prefix
- * deliberately covers both spellings ('exception*' matches "Excepted",
- * "Exceptions" and "Exceptional"); it reads the corpus's own headings and
- * no per-query or per-part list.
+ * about exceptions, in which case it IS the answer (see
+ * `asksAboutExceptions`). ONE fixed GLOB prefix deliberately covers both
+ * spellings ('exception*' matches "Excepted", "Exceptions" and
+ * "Exceptional"); it reads the corpus's own headings and no per-query or
+ * per-part list.
  */
 const EXCEPTION_DEMOTION_KEY =
   "(CASE WHEN lower(s.heading) GLOB 'exception*' THEN 1 ELSE 0 END) ASC";
+
+/** The words that mean "the query asks about exceptions". */
+const EXCEPTION_WORDS = new Set([
+  'exception',
+  'exceptions',
+  'exceptional',
+  'exceptionals',
+  'excepted',
+]);
+
+/**
+ * Whether the query itself asks about exceptions — the gate that switches
+ * the exception demotion off.
+ *
+ * The exception word may sit ANYWHERE in a term, not only at its start: a
+ * quoted span is ONE term ("hearing impairment exceptions"), so the word
+ * never begins it, and a startsWith test missed it — the audit of
+ * 2026-10-21 (P1-20261021-06) found the quoted form ranked the GENERAL
+ * provision first, the opposite of what the user asked for.
+ *
+ * The word must be a WHOLE word. "exceptionally" and "unexceptional" are
+ * not the same request, and "antiexceptions" is one token, not the word.
+ * The term is split with this module's own word rule (`phraseWords`), so
+ * the test is case-insensitive and reads words exactly as the rest of the
+ * module reads them.
+ */
+function asksAboutExceptions(terms: readonly QueryTerm[]): boolean {
+  return terms.some((term) =>
+    phraseWords(term.term).some((word) => EXCEPTION_WORDS.has(word.toLowerCase())),
+  );
+}
 
 /** True for SQLITE_BUSY/SQLITE_LOCKED failures (concurrent writer). */
 function isBusyError(error: unknown): boolean {
@@ -1076,9 +1108,7 @@ export class Store {
     }
 
     const key = headingMatchKey(terms);
-    const demotion = terms.some((term) => term.term.toLowerCase().startsWith('exception'))
-      ? ''
-      : `${EXCEPTION_DEMOTION_KEY}, `;
+    const demotion = asksAboutExceptions(terms) ? '' : `${EXCEPTION_DEMOTION_KEY}, `;
     const sql = SELECT_MATCHES_SQL(
       filterClause(filters),
       `${key.clause}${AND_TIER_KEY}, ${demotion}`,

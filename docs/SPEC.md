@@ -234,7 +234,14 @@ contract) and reports `or`, the only candidate tier.
    to the exception. The key is a fixed GLOB prefix over the corpus's
    own headings, placed after the AND-tier key so it only separates rows
    already equal on phrase and AND membership, and it is switched off when
-   the query itself asks about exceptions (then the exception IS the answer).
+   the query itself asks about exceptions (then the exception IS the
+   answer). "Asks about exceptions" means: one of the query's TERMS
+   contains an exception word — `exception`, `exceptions`, `exceptional`,
+   `exceptionals` or `excepted` — as a WHOLE word, case-insensitively.
+   The word may sit anywhere in the term, because a quoted span is ONE
+   term: `"hearing impairment exceptions"` asks about exceptions exactly
+   as the unquoted form does. A word that merely contains the letters
+   ("exceptionally", "unexceptional", "antiexceptions") does not count.
    It binds no parameters.
 4. **bm25** ASC (lower is better) — the tie-breaker. After bm25 the order
    ends with `s.citation` ASC, so equal-score rows have a stable order and
