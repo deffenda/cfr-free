@@ -58,11 +58,50 @@ describe('toFtsQuery', () => {
   });
 
   it('expands curated claims acronyms into phrase alternatives', () => {
-    expect(toFtsQuery('ptsd', 'and')).toBe('("ptsd"* OR "posttraumatic stress"*)');
+    // Every expansion lists the spellings the CORPUS actually uses, so it
+    // reaches the sections that contain the concept: the corpus spells
+    // "posttraumatic stress" (6 sections) AND "post-traumatic stress" (2).
+    expect(toFtsQuery('ptsd', 'and')).toBe(
+      '("ptsd"* OR "posttraumatic stress"* OR "post-traumatic stress"*)',
+    );
     expect(toFtsQuery('ptsd rating', 'and')).toBe(
-      '("ptsd"* OR "posttraumatic stress"*) AND "rating"*',
+      '("ptsd"* OR "posttraumatic stress"* OR "post-traumatic stress"*) AND "rating"*',
     );
     expect(toFtsQuery('evaluation', 'and')).toBe('"evaluation"*'); // no false expansion
+  });
+
+  it('expands the acronyms whose corpus spelling differs from the old form', () => {
+    // "dependency and indemnity compensation" (98 sections) — the old
+    // expansion omitted the "and" and matched ONE section.
+    expect(toFtsQuery('dic', 'and')).toBe('("dic"* OR "dependency and indemnity compensation"*)');
+    // "board of veterans' appeals" (75 sections) — the old expansion
+    // omitted the apostrophe and matched SEVEN.
+    expect(toFtsQuery('bva', 'and')).toBe('("bva"* OR "board of veterans\' appeals"*)');
+  });
+
+  it('expands punctuated abbreviations before tokenizing', () => {
+    // "A&A" tokenizes to two single letters, which are dropped — the
+    // query degenerated and the search returned noise. The raw-phrase
+    // table expands it first: "aid and attendance" is in 31 sections.
+    expect(toFtsQuery('A&A', 'and')).toBe('"aid and attendance"*');
+    expect(toFtsQuery('a&a', 'and')).toBe('"aid and attendance"*');
+    // The literal words are NOT an abbreviation match — they tokenize
+    // individually, exactly as before this change.
+    expect(toFtsQuery('aid and attendance for a parent', 'and')).toBe(
+      '"aid"* AND "and"* AND "attendance"* AND "for"* AND "a"* AND "parent"*',
+    );
+  });
+
+  it('never lets an expansion introduce an FTS operator', () => {
+    // The raw-phrase table is applied to the raw query, so whatever the
+    // user types around the abbreviation is still emitted as quoted
+    // tokens: no operator can escape into the FTS expression.
+    expect(toFtsQuery('A&A" OR 1=1--', 'and')).toBe(
+      '"aid and attendance"* AND "or"* AND "1"* AND "1"*',
+    );
+    expect(toFtsQuery('A&A OR NEAR(x)', 'and')).toBe(
+      '"aid and attendance"* AND "or"* AND "near"* AND "x"*',
+    );
   });
 
   it('charges phrase words against the term budget', () => {

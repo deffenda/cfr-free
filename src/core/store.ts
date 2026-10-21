@@ -275,16 +275,36 @@ LIMIT 1`;
  * primary prefix term still catches text that uses the acronym itself.
  * Kept deliberately small: every entry is unambiguous in Title 38 context.
  */
-const SYNONYM_PHRASES: Readonly<Record<string, string>> = {
-  ptsd: 'posttraumatic stress',
+const SYNONYM_PHRASES: Readonly<Record<string, string | readonly string[]>> = {
+  // The corpus spells some concepts two ways; each expansion lists every
+  // spelling that actually occurs, so the expansion reaches the sections
+  // that use it. Counts are measured against the 2026-10-16 corpus.
+  ptsd: ['posttraumatic stress', 'post-traumatic stress'],
   tbi: 'traumatic brain injury',
   tdiu: 'individual unemployability',
   smc: 'special monthly compensation',
-  dic: 'dependency indemnity compensation',
+  // "dependency and indemnity compensation" (98 sections) — the previous
+  // form omitted the "and" and matched ONE section.
+  dic: 'dependency and indemnity compensation',
   mst: 'military sexual trauma',
   hlr: 'high level review',
-  bva: 'board of veterans appeals',
+  // "board of veterans' appeals" (75 sections) — the previous form omitted
+  // the apostrophe and matched SEVEN.
+  bva: "board of veterans' appeals",
   nsc: 'non service connected',
+};
+
+/**
+ * Abbreviations whose letters are separated by punctuation, so the TOKENIZER
+ * never produces a usable token for them: "A&A" becomes two single
+ * letters, which are dropped — the query degenerates and the search
+ * returns noise. These are matched against the RAW query before
+ * tokenizing, and expand to a phrase the corpus actually uses
+ * ("aid and attendance" appears in 31 sections).
+ */
+const RAW_PHRASE_EXPANSIONS: Readonly<Record<string, string>> = {
+  'a&a': 'aid and attendance',
+  'c&c': 'care and attendance',
 };
 
 /**
@@ -302,7 +322,16 @@ export function toFtsQuery(raw: string, mode: MatchMode): string | null {
   const parts: string[] = [];
   let budget = MAX_TERMS;
 
-  const remaining = raw.toLowerCase().replace(/"([^"]{3,200})"/g, (_match, span: string) => {
+  // Punctuated abbreviations first: they are replaced with their phrase so
+  // the tokenizer sees real words (without this, "A&A" yields nothing). The
+  // replacement is a QUOTED span, so it becomes a phrase query ("aid and
+  // attendance"*) rather than three words that must merely co-occur.
+  let expanded = raw.toLowerCase();
+  for (const [abbreviation, phrase] of Object.entries(RAW_PHRASE_EXPANSIONS)) {
+    expanded = expanded.split(abbreviation).join(`"${phrase}"`);
+  }
+
+  const remaining = expanded.replace(/"([^"]{3,200})"/g, (_match, span: string) => {
     const words = span.split(/[^\p{L}\p{N}]+/u).filter((word) => word.length > 0);
     if (words.length > 0 && budget > 0) {
       parts.push(`"${words.join(' ')}"*`);
@@ -316,8 +345,14 @@ export function toFtsQuery(raw: string, mode: MatchMode): string | null {
     .filter((token) => token.length > 0)
     .slice(0, budget);
   for (const token of tokens) {
-    const phrase = SYNONYM_PHRASES[token];
-    parts.push(phrase === undefined ? `"${token}"*` : `("${token}"* OR "${phrase}"*)`);
+    const entry = SYNONYM_PHRASES[token];
+    if (entry === undefined) {
+      parts.push(`"${token}"*`);
+      continue;
+    }
+    const phrases = typeof entry === 'string' ? [entry] : entry;
+    const alternatives = phrases.map((phrase) => `"${phrase}"*`).join(' OR ');
+    parts.push(`("${token}"* OR ${alternatives})`);
   }
   if (parts.length === 0) return null;
   return parts.join(mode === 'and' ? ' AND ' : ' OR ');
