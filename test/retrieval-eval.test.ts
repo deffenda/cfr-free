@@ -185,4 +185,23 @@ describe('retrieval evaluation runner (M3)', () => {
     expect(queriesFor('dev' as EvaluationSet)).toHaveLength(30);
     expect(queriesFor('holdout' as EvaluationSet)).toHaveLength(20);
   });
+
+  it('classifies by the expectation, not by the category label', () => {
+    // A no-answer case is one whose EXPECTATION is empty. An entry whose
+    // category says 'no-answer' but whose expectation was corrected (three
+    // subjects the committee found ARE in Title 38) must count as
+    // answerable — otherwise the report miscounts the corpus coverage.
+    withService((service) => {
+      const report = evaluateSet(service, 'dev');
+      const noAnswer = report.outcomes.filter((outcome) => outcome.expected.length === 0);
+      expect(noAnswer).toHaveLength(1);
+      expect(report.totals.noAnswerCases).toBe(1);
+      expect(report.totals.answerable).toBe(report.outcomes.length - 1);
+      // The classification follows the expectation, whatever the label says.
+      const mislabelled = report.outcomes.find(
+        (outcome) => outcome.category === 'natural-phrasing' && outcome.expected.length === 0,
+      );
+      expect(mislabelled).toBeUndefined();
+    });
+  });
 });

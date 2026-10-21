@@ -132,18 +132,18 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
   {
     query: 'PTSD',
     category: 'abbreviation',
-    expected: ['3.301', '3.309', '3.317'],
+    expected: ['4.130', '3.304', '3.309', '4.125'],
     rationale:
-      'post-traumatic stress disorder criteria/rating sections (orchestrator expectation; expert to confirm)',
+      'the rating schedule (4.130), direct service connection (3.304), presumptive service connection (3.309) and the diagnosis section (4.125) - committee members disagreed; the corpus shows 3.309 names PTSD substantively, so all four are kept',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'TBI',
     category: 'abbreviation',
-    expected: ['3.350'],
+    expected: ['4.124a', '3.350', '3.310'],
     rationale:
-      'traumatic brain injury special monthly compensation (orchestrator expectation; expert to confirm)',
+      'TBI residuals are rated in the neurological schedule (4.124a); 3.350 is the special monthly compensation; 3.310 governs aggravation and the proximate result',
     sourceDate: SOURCE_DATE,
     adjudication: 'provisional',
   },
@@ -158,16 +158,18 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
   {
     query: 'A&A',
     category: 'abbreviation',
-    expected: ['3.504'],
-    rationale: 'aid and attendance (orchestrator expectation; expert to confirm)',
+    expected: ['3.352', '3.350', '3.504'],
+    rationale:
+      'aid and attendance: the criteria (3.352), the entitlement and rate (3.350) and the parents provision (3.504) - the abbreviation denotes the subject generally',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'VA disability rating',
     category: 'abbreviation',
-    expected: ['4.130', '4.16'],
-    rationale: 'the general rating-schedule sections (provisional)',
+    expected: ['4.1', '4.15'],
+    rationale:
+      'the general rating provisions - essentials of evaluative rating (4.1) and total disability ratings (4.15); the mental-disorders schedule and the TDIU formula answer narrower questions',
     sourceDate: SOURCE_DATE,
     adjudication: 'provisional',
   },
@@ -209,8 +211,9 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
   {
     query: 'traumatic brain injury compensation',
     category: 'natural-phrasing',
-    expected: ['3.350'],
-    rationale: '§ 3.350 rates TBI (provisional)',
+    expected: ['3.350', '4.124a'],
+    rationale:
+      'the compensation (3.350) and the residuals rating (4.124a) - a practitioner needs both to compute an award',
     sourceDate: SOURCE_DATE,
     adjudication: 'provisional',
   },
@@ -272,20 +275,21 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
   // No-answer — a real query that should return nothing relevant.
   {
     query: 'veterans dental benefits eligibility',
-    category: 'no-answer',
-    expected: [],
+    category: 'natural-phrasing',
+    expected: ['17.161', '17.162', '3.381'],
     rationale:
-      'Title 38 Part 14 dental care — not in the indexed CFR text corpus; should not return a confidently-wrong provision (provisional)',
+      'dental treatment IS in Title 38: authorization (17.161), Class II eligibility (17.162) and service connection of dental conditions (3.381). Was mis-specified as a no-answer case.',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'military burial allowance rate table',
-    category: 'no-answer',
-    expected: [],
-    rationale: 'burial allowance schedules are not in the CFR text corpus (provisional)',
+    category: 'natural-phrasing',
+    expected: ['3.1704', '3.1705', '3.1700'],
+    rationale:
+      'burial benefits ARE in Title 38 Part 3: service-connected (3.1704), non-service-connected (3.1705) and the types of benefit (3.1700). Only the RATE itself is outside the CFR. Was mis-specified as a no-answer case.',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'tricare enrollment forms',
@@ -297,10 +301,11 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
   },
   {
     query: 'va loan underwriting guidelines',
-    category: 'no-answer',
-    expected: [],
-    rationale: 'VA loan policies are not in the CFR text corpus (provisional)',
+    category: 'natural-phrasing',
+    expected: ['36.4340', '36.4206'],
+    rationale:
+      'VA loan underwriting standards ARE in Title 38 Part 36 (36.4340, 36.4206). Was mis-specified as a no-answer case.',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
 ];

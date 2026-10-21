@@ -58,10 +58,11 @@ export const HOLDOUT_QUERIES: readonly RetrievalQuery[] = [
   {
     query: 'DIC',
     category: 'abbreviation',
-    expected: ['3.17', '3.18', '3.26'],
-    rationale: 'dependency and indemnity compensation sections (provisional)',
+    expected: ['3.5', '3.10', '3.25'],
+    rationale:
+      'dependency and indemnity compensation: the DIC section (3.5), the surviving-spouse rate (3.10) and parents DIC (3.25) — NOT the pension sections 3.17/3.18/3.26 (3.18 is not in the corpus at all)',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'BVA',
@@ -84,26 +85,28 @@ export const HOLDOUT_QUERIES: readonly RetrievalQuery[] = [
   {
     query: 'veteran with a mental disorder rating',
     category: 'natural-phrasing',
-    expected: ['4.130', '4.16'],
-    rationale: 'the mental-disorder schedule or the general rating formula (provisional)',
+    expected: ['4.130'],
+    rationale:
+      'the mental-disorders rating schedule (4.130); the TDIU formula (4.16) is not implied by the query',
     sourceDate: SOURCE_DATE,
     adjudication: 'provisional',
   },
   {
     query: 'how much compensation for loss of use of a hand',
     category: 'natural-phrasing',
-    expected: ['4.18', '4.21'],
-    rationale: 'the extremities/amputations or the general ratings sections (provisional)',
+    expected: ['4.63'],
+    rationale: 'loss of use of hand or foot (4.63)',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'rating for service-connected tinnitus',
     category: 'natural-phrasing',
-    expected: ['4.130'],
-    rationale: 'mental-disorders schedule covers tinnitus (provisional)',
+    expected: ['4.87'],
+    rationale:
+      'tinnitus is rated in the ear schedule (4.87, DC 6260) — NOT the mental-disorders schedule',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: '"aid and attendance"',
@@ -124,18 +127,19 @@ export const HOLDOUT_QUERIES: readonly RetrievalQuery[] = [
   {
     query: 'respiratory',
     category: 'ambiguous',
-    expected: ['4.16', '3.350'],
-    rationale: 'many provisions touch respiratory; ambiguous (provisional)',
+    expected: ['4.96', '4.97'],
+    rationale: 'respiratory evaluation (4.96) and the respiratory rating schedule (4.97)',
     sourceDate: SOURCE_DATE,
     adjudication: 'provisional',
   },
   {
-    query: 'dependency',
+    query: 'dependency and indemnity compensation',
     category: 'ambiguous',
-    expected: ['3.17'],
-    rationale: 'the dependency and indemnity compensation chapter (provisional)',
+    expected: ['3.5', '3.10', '3.25'],
+    rationale:
+      're-scoped from the bare word (three readings: DIC entitlement, pension dependency, dependents benefits) to the named concept',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'Appendix B to Part 4',
@@ -155,11 +159,12 @@ export const HOLDOUT_QUERIES: readonly RetrievalQuery[] = [
   },
   {
     query: 'va mortgage rates',
-    category: 'no-answer',
-    expected: [],
-    rationale: 'VA home-loan rates are not in the CFR text corpus (provisional)',
+    category: 'natural-phrasing',
+    expected: ['36.4212', '36.4312'],
+    rationale:
+      'CORRECTED: VA mortgage interest rates ARE in Title 38 Part 36 (36.4212, 36.4312). Mis-specified as a no-answer case.',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'sf-8 form',
@@ -171,10 +176,11 @@ export const HOLDOUT_QUERIES: readonly RetrievalQuery[] = [
   },
   {
     query: 'purple heart recipients',
-    category: 'no-answer',
-    expected: [],
-    rationale: 'entitlement policy is not in the CFR text corpus (provisional)',
+    category: 'natural-phrasing',
+    expected: ['17.36', '51.50', '17.149'],
+    rationale:
+      'CORRECTED: Purple Heart provisions ARE in Title 38 (enrollment 17.36, nursing-home care 51.50, sensori-neural aids 17.149). Mis-specified as a no-answer case.',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
 ];
