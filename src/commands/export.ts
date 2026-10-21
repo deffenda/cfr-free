@@ -110,7 +110,7 @@ export function runExportCommand(
   if (existsSync(target)) {
     throw new CommandError(
       `refusing to overwrite existing file: ${target} — remove it first`,
-      EXIT.USAGE,
+      EXIT.REFUSED,
     );
   }
 

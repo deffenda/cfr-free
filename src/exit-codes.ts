@@ -10,6 +10,9 @@ export const EXIT = {
   USAGE: 2,
   INDEX_UNAVAILABLE: 3,
   ADDRESS_IN_USE: 4,
+  // Deliberate refusal to overwrite an existing output file: the tool's own
+  // protection, not a usage mistake, so it does not share code 2.
+  REFUSED: 5,
 } as const;
 
 /** Error carrying an explicit process exit code for the CLI entry point. */

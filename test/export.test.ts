@@ -115,7 +115,7 @@ describe('export command', () => {
         caught = error;
       }
       expect(caught).toBeInstanceOf(CommandError);
-      expect((caught as CommandError).exitCode).toBe(2);
+      expect((caught as CommandError).exitCode).toBe(5);
       expect((caught as Error).message).toMatch(/refusing to overwrite/);
     } finally {
       temp.cleanup();
