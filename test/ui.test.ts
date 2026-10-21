@@ -693,6 +693,157 @@ describe('UI redline view (M5 slice 2)', () => {
     expect(harness.element('redline-heading').textContent).toBe('');
     expect(harness.element('redline-output').textContent).toBe('');
   });
+
+  it('does not let a stale redline submission overwrite a newer one (audit repro)', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/redline');
+    // First submission: citation 4.125.
+    harness.element('redline-from').value = '2026-01-01';
+    harness.element('redline-to').value = '2026-06-01';
+    harness.element('redline-citation').value = '4.125';
+    harness.element('redline-form').dispatch('submit', { preventDefault: () => undefined });
+    await harness.flush();
+    // Second submission: same dates, citation 4.130.
+    harness.element('redline-citation').value = '4.130';
+    harness.element('redline-form').dispatch('submit', { preventDefault: () => undefined });
+    await harness.flush();
+    expect(harness.calls).toHaveLength(2);
+
+    // The SECOND request resolves first.
+    harness.calls[1]?.respond(
+      true,
+      redlineBody({
+        citation: '4.130',
+        hunks: [{ fromLine: 1, toLine: null, type: 'del', text: 'line 4.130' }],
+      }),
+    );
+    await harness.flush();
+    // Then the FIRST request resolves later.
+    harness.calls[0]?.respond(
+      true,
+      redlineBody({
+        citation: '4.125',
+        hunks: [{ fromLine: 1, toLine: null, type: 'del', text: 'line 4.125' }],
+      }),
+    );
+    await harness.flush();
+
+    expect(harness.element('redline-heading').textContent).toBe('Section 4.130: changed');
+    const output = harness.element('redline-output').textContent ?? '';
+    expect(output).toContain('line 4.130');
+    expect(output).not.toContain('line 4.125');
+  });
+
+  it('ignores a stale redline HTTP error after a newer submission succeeded', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/redline');
+    harness.element('redline-from').value = '2026-01-01';
+    harness.element('redline-to').value = '2026-06-01';
+    harness.element('redline-citation').value = '4.125';
+    harness.element('redline-form').dispatch('submit', { preventDefault: () => undefined });
+    await harness.flush();
+    harness.element('redline-citation').value = '4.130';
+    harness.element('redline-form').dispatch('submit', { preventDefault: () => undefined });
+    await harness.flush();
+
+    harness.calls[1]?.respond(true, redlineBody({ citation: '4.130' }));
+    await harness.flush();
+    expect(harness.element('redline-heading').textContent).toBe('Section 4.130: changed');
+
+    harness.calls[0]?.respond(false, { error: 'not_found', message: '4.125 is not in Title 38' });
+    await harness.flush();
+    expect(harness.element('redline-heading').textContent).toBe('Section 4.130: changed');
+    expect(harness.element('redline-error').textContent).toBe('');
+  });
+
+  it('ignores a stale redline network error after a newer submission succeeded', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/redline');
+    harness.element('redline-from').value = '2026-01-01';
+    harness.element('redline-to').value = '2026-06-01';
+    harness.element('redline-citation').value = '4.125';
+    harness.element('redline-form').dispatch('submit', { preventDefault: () => undefined });
+    await harness.flush();
+    harness.element('redline-citation').value = '4.130';
+    harness.element('redline-form').dispatch('submit', { preventDefault: () => undefined });
+    await harness.flush();
+
+    harness.calls[1]?.respond(true, redlineBody({ citation: '4.130' }));
+    await harness.flush();
+
+    harness.calls[0]?.reject(new Error('network down'));
+    await harness.flush();
+    expect(harness.element('redline-heading').textContent).toBe('Section 4.130: changed');
+    expect(harness.element('redline-error').textContent).toBe('');
+  });
+
+  it('does not let a delayed redline body repaint after a newer submission', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/redline');
+    harness.element('redline-from').value = '2026-01-01';
+    harness.element('redline-to').value = '2026-06-01';
+    harness.element('redline-citation').value = '4.125';
+    harness.element('redline-form').dispatch('submit', { preventDefault: () => undefined });
+    await harness.flush();
+    // Obsolete response arrives; its body is still pending.
+    harness.calls[0]?.respondLater(true);
+    await harness.flush();
+
+    harness.element('redline-citation').value = '4.130';
+    harness.element('redline-form').dispatch('submit', { preventDefault: () => undefined });
+    await harness.flush();
+    harness.calls[1]?.respond(true, redlineBody({ citation: '4.130' }));
+    await harness.flush();
+    expect(harness.element('redline-heading').textContent).toBe('Section 4.130: changed');
+
+    // The obsolete body finally parses.
+    harness.calls[0]?.resolveBody(redlineBody({ citation: '4.125' }));
+    await harness.flush();
+    expect(harness.element('redline-heading').textContent).toBe('Section 4.130: changed');
+  });
+
+  it('clears a stale result on an invalid submission', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/redline');
+    await submitRedline(harness);
+    harness.calls[0]?.respond(true, redlineBody());
+    await harness.flush();
+    expect(harness.element('redline-heading').textContent).toBe('Section 4.130: changed');
+
+    // Invalid submission: empty citation.
+    harness.element('redline-citation').value = '';
+    harness.element('redline-form').dispatch('submit', { preventDefault: () => undefined });
+    await harness.flush();
+
+    expect(harness.calls).toHaveLength(1);
+    expect(harness.element('redline-error').textContent).toContain('required');
+    expect(harness.element('redline-heading').textContent).toBe('');
+    expect(harness.element('redline-output').textContent).toBe('');
+  });
+
+  it('invalidates an in-flight request when a later submission is invalid', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/redline');
+    harness.element('redline-from').value = '2026-01-01';
+    harness.element('redline-to').value = '2026-06-01';
+    harness.element('redline-citation').value = '4.130';
+    harness.element('redline-form').dispatch('submit', { preventDefault: () => undefined });
+    await harness.flush();
+    expect(harness.calls).toHaveLength(1);
+
+    // Invalid submission takes a fresh identity.
+    harness.element('redline-citation').value = '';
+    harness.element('redline-form').dispatch('submit', { preventDefault: () => undefined });
+    await harness.flush();
+    expect(harness.calls).toHaveLength(1);
+
+    // The earlier in-flight request resolves later; it must be ignored.
+    harness.calls[0]?.respond(true, redlineBody());
+    await harness.flush();
+    expect(harness.element('redline-heading').textContent).toBe('');
+    expect(harness.element('redline-output').textContent).toBe('');
+    expect(harness.element('redline-error').textContent).toContain('required');
+  });
 });
 
 describe('UI search part title', () => {
