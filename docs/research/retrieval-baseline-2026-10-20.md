@@ -293,3 +293,18 @@ The demotion flips "how is hearing loss rated" from `4.86, 4.85` to
 `4.85, 4.86`. The dev per-query diff against baseline is that single line
 and nothing else; the holdout per-query list is identical to baseline
 (only timings differ).
+
+### 2026-10-21 — grounding phrase adjacency (audit P1-20261021-02)
+
+Audit finding: `termResponded` in `src/core/store.ts` treated a quoted
+phrase as answered when its words appeared anywhere in the hit (scattered or
+reversed), and applied prefix matching to every phrase word, so a hit
+containing "emergency aid" and "attendance records" falsely reported the
+phrase "aid and attendance". Fixed so a quoted phrase (and any multi-word
+synonym/substitution expansion) is answered only when its words occur in the
+hit's text in that order and contiguously, under the search's own token
+boundaries and prefix rules (prefix on the final token only); single-token
+terms keep the existing prefix behaviour. Grounding is a reporting layer, so
+no ranking number moved: dev 22/29 first, 28/29 recall@5, MRR 0.8448;
+holdout 13/17, 15/17, MRR 0.8137; combined 35/46 first, 43/46 in the top
+five. Per-query lists identical to baseline (only timings differ).
