@@ -19,7 +19,9 @@ sign-off first).
 3. **Money or publishing**: any paid-model run, any publish/release
    action (`npm publish`, tag pushes beyond what CI does).
 4. **Reviewer exhaustion**: the availability ladder is spent
-   (503-storm or invalid packets on every variant).
+   (503-storm, quota exhaustion, or invalid packets on every ELIGIBLE
+   free-tier model in the ladder — never the orchestrator's or the
+   coder's).
 5. **Merge-gate exception requests**: oversized diffs (>~300 net lines)
    that cannot be split; any bypass of a protection, ever.
 6. **Destructive maintenance**: worktree removals with `force`, branch
