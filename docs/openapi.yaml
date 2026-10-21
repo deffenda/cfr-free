@@ -550,7 +550,20 @@ components:
       additionalProperties: false
     SearchResponse:
       type: object
-      required: [query, page, perPage, total, matchMode, hits, indexIssueDate, indexStale, notice]
+      required:
+        [
+          query,
+          page,
+          perPage,
+          total,
+          matchMode,
+          hits,
+          indexIssueDate,
+          indexStale,
+          notice,
+          matchedTerms,
+          unmatchedTerms,
+        ]
       properties:
         query: { type: string }
         page: { type: integer }
@@ -563,6 +576,14 @@ components:
         indexIssueDate: { type: [string, 'null'] }
         indexStale: { type: boolean }
         notice: { type: [string, 'null'], description: Stale-index warning. }
+        matchedTerms:
+          type: array
+          items: { type: string }
+          description: "The query's content terms the returned hits answered (stopwords, single characters and bare numerals removed). A term counts as answered when a hit carries its words or every word of one of the corpus phrases it stands for."
+        unmatchedTerms:
+          type: array
+          items: { type: string }
+          description: "The query's content terms NO returned hit answered. This describes the RESULTS, never what Title 38 covers: a term can be unmatched because the governing provision is outside the returned window, because it uses other words, or because the corpus does not discuss it."
       additionalProperties: false
     SearchHit:
       type: object

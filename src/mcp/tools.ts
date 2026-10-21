@@ -40,6 +40,8 @@ const searchOutputSchema = z.object({
   indexIssueDate: z.string().nullable(),
   indexStale: z.boolean(),
   notice: z.string().nullable(),
+  matchedTerms: z.array(z.string()),
+  unmatchedTerms: z.array(z.string()),
   hits: z.array(
     z.object({
       citation: z.string(),
@@ -235,7 +237,12 @@ export function registerTools(
         'section is pinned to the top of page 1 (totals include the pin on every page) ' +
         "and marked `direct: true` — the reliable client signal; the pinned hit's " +
         '`inResults` flag reports whether it also matched the ranked results. ' +
-        'Quoted spans (e.g. "exact regulatory language") are emitted as FTS5 phrase queries — the last token gets a prefix wildcard (so "language" also matches "languages"); earlier tokens are matched exactly.',
+        'Quoted spans (e.g. "exact regulatory language") are emitted as FTS5 phrase queries — the last token gets a prefix wildcard (so "language" also matches "languages"); earlier tokens are matched exactly. ' +
+        'Hits are ranked by LEXICAL OVERLAP with the query, not by legal authority: the first hit is the provision sharing the most words with the query, which is often not the provision that governs the question (a question about hearing loss ranks a sensory-aids provision above § 4.85). ' +
+        "Read each hit's heading and fetch its full text with get_section before you cite it. " +
+        "Each response also carries matchedTerms and unmatchedTerms: the query's content words (stopwords, single characters and bare numerals removed), split into those the returned hits answered and those they did not. " +
+        'A non-empty unmatchedTerms means the returned text does not speak to that part of your question — the governing provision may be a later hit, may be reachable only under different wording, or may not be in this index. ' +
+        'Never cite a provision you have not read in full, and never state that Title 38 does not address a question on the basis of this response alone.',
       inputSchema: {
         query: z
           .string()
@@ -288,6 +295,8 @@ export function registerTools(
         });
         const structuredContent: SearchOutput = {
           ...response,
+          matchedTerms: [...response.matchedTerms],
+          unmatchedTerms: [...response.unmatchedTerms],
           hits: response.hits.map((hit) => ({ ...hit, matches: [...hit.matches] })),
         };
         return {

@@ -12,7 +12,16 @@ import {
   type BrowseResult,
   type StructureNode,
 } from './structure.js';
-import { Store, queryTerms, visibleMatches, type MatchMode, type SearchHit } from './store.js';
+import {
+  Store,
+  hitWords,
+  queryTerms,
+  termResponded,
+  visibleMatches,
+  type MatchMode,
+  type QueryTerm,
+  type SearchHit,
+} from './store.js';
 
 /**
  * Application facade shared by the MCP server and the HTTP API. All input
@@ -86,6 +95,65 @@ export interface SearchResponse {
   readonly indexStale: boolean;
   /** Warning to surface to a client when the index is stale; null otherwise. */
   readonly notice: string | null;
+  /**
+   * The query's content terms that the returned hits answered.
+   *
+   * A term counts as answered when a hit's text carries the term's words,
+   * or every word of one of the corpus phrases the term stands for — the
+   * same reading the search itself used.
+   */
+  readonly matchedTerms: readonly string[];
+  /**
+   * The query's content terms that NO returned hit answered.
+   *
+   * This says what the RESULTS did not speak to — never what Title 38
+   * covers. A term can be unmatched because the governing provision sits
+   * outside the returned window, because it uses other words, or because
+   * the corpus does not discuss it at all.
+   */
+  readonly unmatchedTerms: readonly string[];
+}
+
+/**
+ * Words that carry no question: function words, and the "38 CFR" of a
+ * citation. Published and fixed — a presentation constant, never tuned.
+ */
+const STOPWORDS: ReadonlySet<string> = new Set(
+  (
+    'a an and are as at be by cfr cfrs for from had has have how in is it its many much no not of on ' +
+    'or that the their there these this to too was were what when where which who whom why will with ' +
+    'you your'
+  ).split(' '),
+);
+
+/** The query's terms that carry a question: not a stopword, not a bare numeral, not a single letter. */
+function contentTerms(terms: readonly QueryTerm[]): readonly QueryTerm[] {
+  return terms.filter((term) => {
+    // A quoted span or a punctuated abbreviation is deliberate — never noise.
+    if (term.kind !== 'token') return true;
+    return term.term.length > 1 && !/^\p{N}+$/u.test(term.term) && !STOPWORDS.has(term.term);
+  });
+}
+
+/**
+ * Split the query's content terms into those the returned hits answered and
+ * those they did not.
+ *
+ * The test is the same one the per-hit `matches` uses, so the response can
+ * never claim a term was missing that the search actually looked for.
+ */
+function grounding(
+  terms: readonly QueryTerm[],
+  hits: readonly PresentedHit[],
+): { matchedTerms: string[]; unmatchedTerms: string[] } {
+  const words = hits.map((hit) => hitWords(hit));
+  const matchedTerms: string[] = [];
+  const unmatchedTerms: string[] = [];
+  for (const term of contentTerms(terms)) {
+    const answered = words.some((hit) => termResponded(term, hit));
+    (answered ? matchedTerms : unmatchedTerms).push(term.term);
+  }
+  return { matchedTerms, unmatchedTerms };
 }
 
 const citationInputSchema = z.string().trim().min(1).max(120);
@@ -316,6 +384,7 @@ export class CFRService {
     }
 
     const status = this.status();
+    const groundingTerms = grounding(queryTerms(query), hits);
     return {
       query,
       page,
@@ -326,6 +395,8 @@ export class CFRService {
       indexIssueDate: status.issueDate,
       indexStale: status.stale,
       notice: noticeFor(status),
+      matchedTerms: groundingTerms.matchedTerms,
+      unmatchedTerms: groundingTerms.unmatchedTerms,
     };
   }
 

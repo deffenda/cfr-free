@@ -32,6 +32,52 @@ describe('CFRService.search', () => {
     });
   });
 
+  it('splits the query content terms into answered and unanswered', () => {
+    withService((service) => {
+      const result = service.search({ query: 'smc rating' });
+      // "rating" is in the fixture text; no fixture section spells out the
+      // phrase "smc" stands for, so it is the unanswered term.
+      expect(result.matchedTerms).toEqual(['rating']);
+      expect(result.unmatchedTerms).toEqual(['smc']);
+      // The two partition the content terms: no overlap, nothing dropped.
+      const union = [...result.matchedTerms, ...result.unmatchedTerms];
+      expect(new Set(union).size).toBe(union.length);
+    });
+  });
+
+  it('reports no content terms for a citation query', () => {
+    withService((service) => {
+      // A citation is made of numerals and the word "CFR": there is no
+      // question to ground, so neither list has an entry.
+      const result = service.search({ query: '38 CFR 4.130' });
+      expect(result.matchedTerms).toEqual([]);
+      expect(result.unmatchedTerms).toEqual([]);
+    });
+  });
+
+  it('reports the term a hit answered through its corpus phrase', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '3.350',
+          heading: 'Special monthly compensation ratings.',
+          text: 'Special monthly compensation is payable for the degrees of disability described here.',
+        }),
+      ],
+    });
+    try {
+      const service = new CFRService(temp.store, 7);
+      const result = service.search({ query: 'smc' });
+      // The section never spells "smc" — it spells the phrase the synonym
+      // stands for, so the term still answered.
+      expect(result.hits[0]?.matches).toContain('smc');
+      expect(result.matchedTerms).toEqual(['smc']);
+      expect(result.unmatchedTerms).toEqual([]);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
   it('rejects short queries', () => {
     withService((service) => {
       expect(() => service.search({ query: 'ab' })).toThrow(ServiceError);

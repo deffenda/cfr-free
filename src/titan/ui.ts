@@ -68,6 +68,7 @@ export const UI_HTML = `<!doctype html>
           <button type="submit">Search</button>
         </form>
         <p id="search-status" role="status"></p>
+        <p id="search-caution" role="note" hidden></p>
         <ul id="search-hits" class="hits"></ul>
         <nav id="search-pager" aria-label="Pagination"></nav>
       </section>
@@ -148,6 +149,7 @@ export const UI_JS = String.raw`(function () {
   var chapterInput = byId('chapter');
   var perPageSelect = byId('per-page');
   var statusLine = byId('search-status');
+  var cautionLine = byId('search-caution');
   var hitsList = byId('search-hits');
   var pager = byId('search-pager');
   var sectionError = byId('section-error');
@@ -360,10 +362,47 @@ export const UI_JS = String.raw`(function () {
     pager.appendChild(next);
   }
 
+  /** A readable list of quoted terms: "a", "b" or "c". */
+  function quoteList(words) {
+    var quoted = [];
+    for (var i = 0; i < words.length; i += 1) quoted.push('"' + String(words[i]) + '"');
+    if (quoted.length === 1) return quoted[0];
+    return quoted.slice(0, -1).join(', ') + ' or ' + quoted[quoted.length - 1];
+  }
+
+  /**
+   * The caution line: what the RESULTS did not speak to, never what Title 38
+   * covers. A term can be unmatched because the governing provision sits
+   * outside the returned window, because it uses other words, or because the
+   * corpus does not discuss it at all — so the wording names only the terms
+   * and leaves the reason open.
+   */
+  function renderSearchCaution(body, total) {
+    clear(cautionLine);
+    var unmatched = Array.isArray(body.unmatchedTerms) ? body.unmatchedTerms : [];
+    if (unmatched.length > 0) {
+      cautionLine.textContent =
+        'None of these results mention ' +
+        quoteList(unmatched) +
+        '. The provision that answers your question may not be among them.';
+      cautionLine.hidden = false;
+      return;
+    }
+    if (total === 0) {
+      cautionLine.textContent =
+        'No indexed provision matched these terms. Try different wording, or use Browse to find the relevant part.';
+      cautionLine.hidden = false;
+      return;
+    }
+    cautionLine.hidden = true;
+  }
+
   function renderSearchResult(state, ok, body) {
     clear(hitsList);
     clear(pager);
     if (!ok || typeof body.error === 'string') {
+      clear(cautionLine);
+      cautionLine.hidden = true;
       statusLine.textContent =
         'Search failed (' + String(body.error) + '): ' + String(body.message);
       return;
@@ -381,6 +420,7 @@ export const UI_JS = String.raw`(function () {
       (notice === '' ? '' : ' — ' + notice);
     var hits = Array.isArray(body.hits) ? body.hits : [];
     for (var i = 0; i < hits.length; i += 1) appendHit(hits[i]);
+    renderSearchCaution(body, total);
     renderPager(state, total);
   }
 
@@ -528,6 +568,8 @@ export const UI_JS = String.raw`(function () {
         if (generation !== routeGeneration) return;
         clear(hitsList);
         clear(pager);
+        clear(cautionLine);
+        cautionLine.hidden = true;
         statusLine.textContent =
           'Request failed: ' + String(error && error.message ? error.message : error);
       });
