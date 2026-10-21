@@ -179,6 +179,15 @@ export const UI_JS = String.raw`(function () {
   var redlineHeading = byId('redline-heading');
   var redlineMeta = byId('redline-meta');
   var redlineOutput = byId('redline-output');
+  // Per-submission request identity for the redline view. routeGeneration
+  // only advances on NAVIGATION, so two submissions on the same #/redline
+  // route would otherwise share one guard and a stale response could
+  // overwrite a newer one. Every submission attempt - valid or not -
+  // takes a fresh identity, and a response is applied only when its
+  // identity is still the latest. Invalid submissions also take an
+  // identity so an in-flight request from a previous attempt is
+  // invalidated rather than left to resurrect stale text.
+  var redlineRequestId = 0;
   // Tree navigation state: one entry per level, deepest last. It lives HERE,
   // never in the hash — #/browse is a single route and the stack is
   // depth-limited (root → chapter → part → subpart).
@@ -491,7 +500,7 @@ export const UI_JS = String.raw`(function () {
     redlineOutput.textContent = lines.join('\n');
   }
 
-  function loadRedline(from, to, citation, generation) {
+  function loadRedline(from, to, citation, generation, requestId) {
     clear(redlineError);
     redlineOutput.textContent = 'Loading…';
     var params = new URLSearchParams();
@@ -506,6 +515,7 @@ export const UI_JS = String.raw`(function () {
       })
       .then(function (result) {
         if (generation !== routeGeneration) return;
+        if (requestId !== redlineRequestId) return;
         if (!result.ok || typeof result.body.error === 'string') {
           showRedlineError(
             'Redline failed (' +
@@ -519,6 +529,7 @@ export const UI_JS = String.raw`(function () {
       })
       .catch(function (error) {
         if (generation !== routeGeneration) return;
+        if (requestId !== redlineRequestId) return;
         showRedlineError(
           'Request failed: ' + String(error && error.message ? error.message : error),
         );
@@ -530,11 +541,20 @@ export const UI_JS = String.raw`(function () {
     var from = redlineFrom.value.trim();
     var to = redlineTo.value.trim();
     var citation = redlineCitation.value.trim();
+    // Every submission attempt takes a fresh request identity, including an
+    // invalid one, so a response from a previous attempt can never overwrite
+    // this attempt's result and an in-flight request is invalidated.
+    redlineRequestId += 1;
+    var requestId = redlineRequestId;
+    // Invalid submission policy: a client-rejected submission does not fetch.
+    // It clears any previously displayed comparison and shows the reason, so
+    // a stale result is never presented as the answer to the current form;
+    // taking the fresh identity above also invalidates any in-flight request.
     if (from === '' || to === '' || citation === '') {
       showRedlineError('A from date, a to date and a citation are all required.');
       return;
     }
-    loadRedline(from, to, citation, routeGeneration);
+    loadRedline(from, to, citation, routeGeneration, requestId);
   });
 
   function renderSearch(state, generation) {
