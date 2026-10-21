@@ -905,7 +905,7 @@ describe('UI search part title', () => {
 });
 
 describe('browse race reachability (P1-20261021-07 — the race is NOT reachable)', () => {
-  it('empties the tree while a browse fetch is pending, so two cannot overlap', async () => {
+  it('empties the tree while a browse fetch is pending', async () => {
     const harness = makeHarness();
     await harness.navigate('#/browse');
     harness.calls[0]?.respond(true, {
@@ -950,7 +950,10 @@ describe('browse race reachability (P1-20261021-07 — the race is NOT reachable
     // Re-render the SAME route while that fetch is pending.
     await harness.navigate('#/browse');
     // Re-rendering the same route issues NO new request: the tree is
-    // served from the cached stack.
+    // served from the cached stack. NOTE: the harness fires `hashchange`
+    // even for an unchanged hash, which a real browser does not -- this
+    // test exercises the ROUTE GUARD on purpose, not a user-reachable
+    // path.
     expect(harness.calls.length).toBe(2);
     // The pending response arrives late: does it push a level?
     harness.calls[1]?.respond(true, {
