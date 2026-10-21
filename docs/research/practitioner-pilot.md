@@ -3,8 +3,8 @@
 **Date:** 2026-10-21 · **Status:** **PROPOSED — nothing in this document is
 decided.** The success criteria in §8 are proposals for the operator to
 accept, revise or reject _before_ any recruitment, per the M6 acceptance
-condition (`ROADMAP.md:512`).
-**Authority:** the M6 section of `ROADMAP.md` (`ROADMAP.md:496-516`).
+condition (`ROADMAP.md` §M6).
+**Authority:** the M6 section of `ROADMAP.md` (§M6).
 **Evidence base:** this repository at `928e63e`; the local index built from
 the eCFR issue date **2026-10-16** (**2 970 provisions** — 2 953 sections +
 17 appendices, measured against a copy of the live index on 2026-10-21).
@@ -20,7 +20,7 @@ next two roadmap stages, and four specific decisions are waiting on its
 output.
 
 1. **M7 (integrations) and M8 (corpus/platform expansion) are gated on
-   demand evidence** (`ROADMAP.md:518-546`). The questions are narrow:
+   demand evidence** (`ROADMAP.md` §M7–§M8). The questions are narrow:
    _does anyone actually need this, and would they change their workflow?_
    This study is designed to answer exactly those two questions and nothing
    larger.
@@ -29,7 +29,7 @@ output.
    ("Diagnosis of mental disorders") reachable for the question "PTSD" —
    was explicitly **deferred, not cancelled**, with the recorded reason:
    _"The demand evidence is M6's practitioner study (does the workflow
-   actually ask subject-level questions?)"_ (`ROADMAP.md:289-302`). This
+   actually ask subject-level questions?)"_ (`ROADMAP.md` §M3). This
    protocol must therefore measure whether subject-level questions arise
    in real use, not whether a specific retrieval misses.
 3. **The ranking investment is currently unmeasurable as a _preference_.**
@@ -40,7 +40,7 @@ output.
    the thirteen** in-window-but-not-first cases are _sibling provisions
    where the retrieved section is a defensible answer_ (§ 3.351 for
    § 3.350, § 4.86 for § 4.85, § 4.17 for § 4.16), which is the
-   ROADMAP's recorded characterisation (`ROADMAP.md:314-330`). Because so
+   ROADMAP's recorded characterisation (`ROADMAP.md` §M3). Because so
    many of those are defensible answers, "top-1 is 63%" **cannot be read as
    "37% of the time the tool misleads the practitioner."** This study is
    the instrument that separates the two readings: it observes whether a
@@ -48,24 +48,24 @@ output.
    provision anyway.
 4. **The M5 workflow must be shown usable end to end**: find provision →
    read full content → follow references → inspect the dated change view →
-   copy a citation (`ROADMAP.md:453-460`).
+   copy a citation (`ROADMAP.md` §M5).
 
 ## 2. What this study is, and what it is not
 
 ### 2.1 The dependency M6 records, and where it stands
 
 M6 opens with its own dependency line: _"study design can start now;
-usable pilot requires A and C"_ (`ROADMAP.md:498`). Read against the
-delivery-order table (`ROADMAP.md:77-80`), that means:
+usable pilot requires A and C"_ (`ROADMAP.md` §M6). Read against the
+delivery-order table (`ROADMAP.md`, "Delivery order and exit gates"), that means:
 
 | Stage | Work                               | Exit evidence                                                                                    | Where it stands for this study                                                                                                                                                                                                                                                                                                                                      |
 | ----- | ---------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **A** | trustworthy baseline (P1-01…P1-04) | four fixing PRs, reviewed SHAs, gate tails; no silent loss of graphics or stale-route repaint    | **Shipped** — the corpus fidelity work and the route-ownership fix are in `origin/main`; the corpus this study uses is the post-A corpus (2 970 provisions, 9 image-marked provisions, measured 2026-10-21)                                                                                                                                                         |
-| **C** | usable distribution (M4, M5)       | verified onboarding and one end-to-end research/export workflow                                  | **Shipped** — the M5 section header records 4 of 4 slices done (`ROADMAP.md:469`); the copy block (`src/titan/ui.ts:629-649`), the redline view (`src/titan/ui.ts:44`, `:97-110`, `:429-484`, shipped as `ae61dbf`), the subject-group descent (`src/core/service.ts:519-540`) and the ETag reads (`docs/SPEC.md:244`) are what families F1, F3, F4 and F5 exercise |
+| **C** | usable distribution (M4, M5)       | verified onboarding and one end-to-end research/export workflow                                  | **Shipped** — the M5 section header records 4 of 4 slices done (`ROADMAP.md` §M5); the copy block (`src/titan/ui.ts:629-649`), the redline view (`src/titan/ui.ts:44`, `:97-110`, `:429-484`, shipped as `ae61dbf`), the subject-group descent (`src/core/service.ts:519-540`) and the ETag reads (`docs/SPEC.md:244`) are what families F1, F3, F4 and F5 exercise |
 | **D** | validate demand (M6)               | operator-arranged practitioner study, task-level results, explicit continue/change/stop decision | **This document** — the protocol; the study itself is operator-arranged and has not been run                                                                                                                                                                                                                                                                        |
 
 > **One stale row in the ROADMAP, flagged rather than absorbed.** The M5
-> header says 4 of 4 slices are done (`ROADMAP.md:469`), but the **slice-2
+> header says 4 of 4 slices are done (`ROADMAP.md` §M5), but the **slice-2
 > row of the table below it still reads "OPEN"** — while the UI redline
 > view it describes is implemented (`src/titan/ui.ts:44` links the route,
 > `:97-110` is the form, `:429-484` renders it, `:501` calls
@@ -93,14 +93,14 @@ Two consequences worth stating plainly, because they are the kind of thing
 that gets quietly forgotten later:
 
 - **The M6 cohort size is a planning target, not evidence of demand.**
-  `ROADMAP.md:500-501` says so in terms: _"Proposed starting cohort: five
+  `ROADMAP.md` §M6 says so in terms: _"Proposed starting cohort: five
   practitioners or tool builders; this is a planning target, not existing
   demand evidence."_ A successful pilot of five people is evidence that
   five people found it useful. It is **not** evidence that the market
   wants it. The decision log in §11 carries that distinction into every
   row it will ever hold.
 - **The suggested continue signal is a decision threshold, not proof.** The
-  ROADMAP's own words (`ROADMAP.md:513-516`) are: _"at least three
+  ROADMAP's own words (`ROADMAP.md` §M6) are: _"at least three
   participants complete four of five tasks without a citation/version error
   and request repeat use; explicitly label this an initial decision
   threshold, not statistical proof or a revenue forecast."_ §8 adopts that
@@ -170,7 +170,7 @@ CFR_INDEX_PATH=/tmp/eval-index.sqlite npx tsx test/fixtures/retrieval/run.ts hol
 The runner's own definitions are at `test/fixtures/retrieval/run.ts:110-113`
 and its aggregation at `test/fixtures/retrieval/run.ts:151-162`. The
 "29 / 42 / 13" figures match the ROADMAP's recorded numbers
-(`ROADMAP.md:314-330`) and the M3-e row (`ROADMAP.md:287`).
+(`ROADMAP.md` §M3) and the M3-e row in the same section.
 
 Two things the tasks are built on, and one thing they are not:
 
@@ -194,7 +194,7 @@ Two things the tasks are built on, and one thing they are not:
   | 13  | `"special monthly compensation"`                   | 17.151   | 3.350 (2)                |
 
   Rows 3 and 4 are the canonical sibling cases the ROADMAP names
-  (`ROADMAP.md:322-330`): § 4.86 "Exceptional patterns of hearing
+  (`ROADMAP.md` §M3): § 4.86 "Exceptional patterns of hearing
   impairment" for § 4.85 "Evaluation of hearing impairment", and § 4.17
   "Total disability ratings for **pension**…" for § 4.16 "…for
   **compensation**…". Row 2 is the definition-instead-of-the-schedule case
@@ -202,7 +202,7 @@ Two things the tasks are built on, and one thing they are not:
   **This protocol does not re-adjudicate the ROADMAP's "about ten of the
   thirteen" characterisation.** That adjudication — including the _order_
   of the expectations — is the operator's recorded open action
-  (`ROADMAP.md:314-330`). What the protocol does is observe whether a
+  (`ROADMAP.md` §M3). What the protocol does is observe whether a
   practitioner experiences these same cases as failures.
 
 - **The vocabulary gap is real and measurable.** The corpus says "hearing
@@ -228,7 +228,7 @@ Two things the tasks are built on, and one thing they are not:
 ### 5.1 Cohort
 
 **Proposed: 5 participants** — practitioners (claims adjudicators, rating
-officers, veteran-support officers) or tool builders, per `ROADMAP.md:500-501`.
+officers, veteran-support officers) or tool builders, per `ROADMAP.md` §M6.
 The protocol works at any N; §5.2 states every denominator in terms of the
 **actual N**, so a cohort of 3 or 7 is reportable without changing a
 single table.
@@ -453,7 +453,7 @@ reaches § 4.130 and § 4.125 by any route (search, browse, or their own
 knowledge) scores `E0` for the task; a participant who reaches § 4.130
 alone scores `E3` (incomplete chain, §6.8). The count of `E3` attempts is
 the demand evidence for the subject-index decision
-(`ROADMAP.md:289-302`) — **it is a count, not a score**.
+(`ROADMAP.md` §M3) — **it is a count, not a score**.
 
 ### 6.5 F3 — Cross-reference follow-up
 
@@ -480,7 +480,7 @@ the demand evidence for the subject-index decision
 | --- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | a   | Reports § 4.83 as a **broken link or a bug**                          | The availability flag is easy to miss; "broken" and "not in this copy" mean different things               |
 | b   | Answers only the **forward** references                               | The back-reference half (`citedBy`) is the part the "follow references" step of the M5 workflow depends on |
-| c   | Substitutes **§ 3.351** for § 3.350                                   | The sibling named in `ROADMAP.md:322-330`                                                                  |
+| c   | Substitutes **§ 3.351** for § 3.350                                   | The sibling named in `ROADMAP.md` §M3                                                                      |
 | d   | Reports a **count** ("four references") without checking availability | The count is right and the availability is the finding                                                     |
 
 ### 6.6 F4 — Historical comparison (requires network)
@@ -525,7 +525,7 @@ real content of the task:
 | --- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | a   | Reports "**no change**" and stops                     | `E1` — the redline's answer, and it is incomplete                                                                                 |
 | b   | Reports "**changed**" without saying **what** changed | `E1` — the diff's answer, and it is equally incomplete                                                                            |
-| c   | Uses **today's text** as the 2026-01-01 text          | `E4` — the exact failure M2's dated-provenance work exists to prevent (`ROADMAP.md:157-185`)                                      |
+| c   | Uses **today's text** as the 2026-01-01 text          | `E4` — the exact failure M2's dated-provenance work exists to prevent (`ROADMAP.md` §M2)                                          |
 | d   | Reads a **coarse** diff as a line-by-line one         | `E1` — the coarse flag exists precisely so this cannot happen silently (`src/core/redline.ts:270-279`, `src/titan/ui.ts:479-481`) |
 | e   | Claims the tool reports the **served revision date**  | `E4` — it does not, and the tool says so                                                                                          |
 
@@ -635,7 +635,7 @@ Two consequences, both deliberate:
 
 - **`S` is not "correct".** It is reported as its own rate: _"N attempts
   ended on a defensible sibling"_. The ROADMAP's "about ten of the
-  thirteen" claim (`ROADMAP.md:322-330`) is exactly this rate on the
+  thirteen" claim (`ROADMAP.md` §M3) is exactly this rate on the
   authored query set; this study measures the same rate on human
   attempts.
 - **A sibling can be a failure of the _question_, not of the tool.** If a
@@ -747,22 +747,22 @@ exists for M7 and M8.
 ## 8. Proposed success criteria — the operator agrees these BEFORE recruitment
 
 **None of this is decided.** The ROADMAP's acceptance condition is explicit:
-_"before recruitment, operator agrees success criteria"_ (`ROADMAP.md:512`).
+_"before recruitment, operator agrees success criteria"_ (`ROADMAP.md` §M6).
 The table below is the proposal; the operator ticks **accept / revise /
 reject** per row **before** any participant is contacted, and the signed
 version is what the results are judged against. Changing a criterion after
 seeing results invalidates the pilot, and the change must then be recorded
 as a decision-log row.
 
-| #        | Proposed criterion                                                                                                                                                                                                                                                                                                                                                     | Evidence that settles it                                                        | Operator decision          |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------- |
-| **SC-1** | **≥ 3 of N participants complete ≥ 4 of the 5 core tasks with no `E1`/`E2`/`E4` outcome, and request another session.** This is the ROADMAP's suggested continue signal (`ROADMAP.md:513-516`). "Citation error" is read as `E1` + `E2` and "version error" as `E4` (§7.2). **It is an initial decision threshold, not statistical proof and not a revenue forecast.** | The per-participant core-task table (§10.2) and the return measure (§7.6).      | ☐ accept ☐ revise ☐ reject |
-| **SC-2** | **≥ 3 of N participants are faster with cfr-free than with their existing tool on the paired task, AND rate the cfr-free answer as usable without a second lookup.**                                                                                                                                                                                                   | The paired run (§6.1), the time measures (§7.4), the debrief question 2 (§6.9). | ☐ accept ☐ revise ☐ reject |
-| **SC-3** | **≥ 4 of N participants reach their first successful query within 30 minutes of starting**, and **every** installation obstacle is listed, with minutes lost, not averaged away.                                                                                                                                                                                       | The obstacle list and `install_minutes_total` (§7.5).                           | ☐ accept ☐ revise ☐ reject |
-| **SC-4** | **≥ 3 of N participants return for a second session within 14 days**, of their own initiative.                                                                                                                                                                                                                                                                         | `returned_within_14_days` (§7.6).                                               | ☐ accept ☐ revise ☐ reject |
-| **SC-5** | **Zero `E4` (wrong-version) outcomes in families F1, F4 and F5.** Dated, verifiable text is the product's core promise; one wrong-version citation is a trust failure, not a learning curve.                                                                                                                                                                           | The per-task outcome table (§10.2), the `E4` column.                            | ☐ accept ☐ revise ☐ reject |
-| **SC-6** | **≥ 3 of N participants name a concrete workflow change they would make.** This is the M7/M8 demand gate.                                                                                                                                                                                                                                                              | Debrief question 3, verbatim (§6.9).                                            | ☐ accept ☐ revise ☐ reject |
-| **SC-7** | **Not a pass/fail criterion — a recorded count.** The number of attempts that needed a provision **not reachable by the participant's own vocabulary** (the F2-B `E3` count) is reported as the demand evidence for the deferred subject index (`ROADMAP.md:289-302`).                                                                                                 | The `E3` count and the F2-B failure entries (§10.3).                            | ☐ accept ☐ revise ☐ reject |
+| #        | Proposed criterion                                                                                                                                                                                                                                                                                                                                                 | Evidence that settles it                                                        | Operator decision          |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- | -------------------------- |
+| **SC-1** | **≥ 3 of N participants complete ≥ 4 of the 5 core tasks with no `E1`/`E2`/`E4` outcome, and request another session.** This is the ROADMAP's suggested continue signal (`ROADMAP.md` §M6). "Citation error" is read as `E1` + `E2` and "version error" as `E4` (§7.2). **It is an initial decision threshold, not statistical proof and not a revenue forecast.** | The per-participant core-task table (§10.2) and the return measure (§7.6).      | ☐ accept ☐ revise ☐ reject |
+| **SC-2** | **≥ 3 of N participants are faster with cfr-free than with their existing tool on the paired task, AND rate the cfr-free answer as usable without a second lookup.**                                                                                                                                                                                               | The paired run (§6.1), the time measures (§7.4), the debrief question 2 (§6.9). | ☐ accept ☐ revise ☐ reject |
+| **SC-3** | **≥ 4 of N participants reach their first successful query within 30 minutes of starting**, and **every** installation obstacle is listed, with minutes lost, not averaged away.                                                                                                                                                                                   | The obstacle list and `install_minutes_total` (§7.5).                           | ☐ accept ☐ revise ☐ reject |
+| **SC-4** | **≥ 3 of N participants return for a second session within 14 days**, of their own initiative.                                                                                                                                                                                                                                                                     | `returned_within_14_days` (§7.6).                                               | ☐ accept ☐ revise ☐ reject |
+| **SC-5** | **Zero `E4` (wrong-version) outcomes in families F1, F4 and F5.** Dated, verifiable text is the product's core promise; one wrong-version citation is a trust failure, not a learning curve.                                                                                                                                                                       | The per-task outcome table (§10.2), the `E4` column.                            | ☐ accept ☐ revise ☐ reject |
+| **SC-6** | **≥ 3 of N participants name a concrete workflow change they would make.** This is the M7/M8 demand gate.                                                                                                                                                                                                                                                          | Debrief question 3, verbatim (§6.9).                                            | ☐ accept ☐ revise ☐ reject |
+| **SC-7** | **Not a pass/fail criterion — a recorded count.** The number of attempts that needed a provision **not reachable by the participant's own vocabulary** (the F2-B `E3` count) is reported as the demand evidence for the deferred subject index (`ROADMAP.md` §M3).                                                                                                 | The `E3` count and the F2-B failure entries (§10.3).                            | ☐ accept ☐ revise ☐ reject |
 
 **What happens if the operator rejects SC-1?** The protocol still runs and
 the rest of the table still applies; SC-1 is replaced by whatever
@@ -786,7 +786,7 @@ class, a citation, a duration, or a sentence about the tool's behaviour**.
 - **No personal or medical information** about any real person — not a
   name, not a date of birth, not a service history, not a diagnosis, not
   a case number, not a screenshot of a file that contains any of these.
-  (`ROADMAP.md:508`: _"Avoid claimant documents or personal/medical
+  (`ROADMAP.md` §M6: _"Avoid claimant documents or personal/medical
   information."_)
 - **No participant contact details** beyond what the operator already
   holds for scheduling, and no copy of those details in the study notes.
@@ -813,7 +813,7 @@ a participant volunteers a real case anyway, the observer:
   recorded.
 - **The operator holds the keys.** The notes are not shared, not
   uploaded, not committed, and not attached to issues or PRs.
-- `ROADMAP.md:509` requires _"notes local/operator-controlled"_; this is
+- `ROADMAP.md` §M6 requires _"notes local/operator-controlled"_; this is
   how that is honoured.
 
 ### 9.5 Consent, and who arranges it
@@ -822,9 +822,9 @@ a participant volunteers a real case anyway, the observer:
 This document does not contain an outreach plan, a message template, a
 target list, or a contact script — deliberately, and because M6 is
 explicit that _"external participation needs operator
-arrangement/authorization"_ (`ROADMAP.md:499-500`) and that _"recruiting,
+arrangement/authorization"_ (`ROADMAP.md` §M6) and that _"recruiting,
 messages, and live sessions remain operator-arranged or explicitly
-authorized"_ (`ROADMAP.md:83-85`).**
+authorized"_ (`ROADMAP.md`, delivery-order note).**
 
 What the protocol supplies instead is the **content** a consent conversation
 needs, so that the operator can write the invitation in their own voice:
@@ -859,7 +859,7 @@ needs, so that the operator can write the invitation in their own voice:
 
 ### 9.7 No telemetry and no automatic outreach
 
-Both are required by `ROADMAP.md:509` and both are properties of the
+Both are required by `ROADMAP.md` §M6 and both are properties of the
 product as it stands, verified rather than asserted:
 
 - **No telemetry ships for this study, and none exists.** The tool is a
@@ -986,14 +986,14 @@ date | item | options considered | decision | evidence (table + row) | decided b
 **Pre-seeded rows** — the decisions this study exists to inform, each with
 its current state, so the log starts populated rather than empty:
 
-| Item                                                            | Current state                                                                                         | This study settles                                                                   |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| **M7 — integrations**                                           | Gated on M6 evidence (`ROADMAP.md:518-530`)                                                           | Whether a destination is demonstrated; feeds `docs/research/integration-decision.md` |
-| **M8 — corpus/platform expansion**                              | Gated on M6 evidence + operator scope approval (`ROADMAP.md:533-546`)                                 | Whether expansion has a demonstrated need, not a speculative one                     |
-| **The subject index** (curated benefit/topic → sections map)    | **DEFERRED** pending this study (`ROADMAP.md:289-302`)                                                | The `E3` count (SC-7): do practitioners actually need subject-level reach?           |
-| **The ranking investment** (top-1 accuracy)                     | Scoped, not built; ~10 of 13 in-window-not-first cases are defensible siblings (`ROADMAP.md:314-330`) | The sibling rate from §10.2: does the top-1 gap reach the practitioner as a failure? |
-| **The M5 workflow** (find → read → follow → change view → copy) | 4 of 4 slices shipped (`ROADMAP.md:469-489`)                                                          | Whether the five steps are usable end to end by someone who did not build them       |
-| **The M6 study itself**                                         | Design proposed in this document                                                                      | Continue / change / stop, below                                                      |
+| Item                                                            | Current state                                                                                     | This study settles                                                                   |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| **M7 — integrations**                                           | Gated on M6 evidence (`ROADMAP.md` §M7)                                                           | Whether a destination is demonstrated; feeds `docs/research/integration-decision.md` |
+| **M8 — corpus/platform expansion**                              | Gated on M6 evidence + operator scope approval (`ROADMAP.md` §M8)                                 | Whether expansion has a demonstrated need, not a speculative one                     |
+| **The subject index** (curated benefit/topic → sections map)    | **DEFERRED** pending this study (`ROADMAP.md` §M3)                                                | The `E3` count (SC-7): do practitioners actually need subject-level reach?           |
+| **The ranking investment** (top-1 accuracy)                     | Scoped, not built; ~10 of 13 in-window-not-first cases are defensible siblings (`ROADMAP.md` §M3) | The sibling rate from §10.2: does the top-1 gap reach the practitioner as a failure? |
+| **The M5 workflow** (find → read → follow → change view → copy) | 4 of 4 slices shipped (`ROADMAP.md` §M5)                                                          | Whether the five steps are usable end to end by someone who did not build them       |
+| **The M6 study itself**                                         | Design proposed in this document                                                                  | Continue / change / stop, below                                                      |
 
 ### 11.2 The continue / change / stop decision
 
@@ -1003,7 +1003,7 @@ alongside §8.
 
 | Outcome      | Proposed trigger (all three)                                                                                                                                                                  | Then                                                                                                                                                                                                                                                                               |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **CONTINUE** | 1. SC-1 met (≥ 3 of N clean on ≥ 4 of 5 core tasks **and** requesting another session).<br>2. SC-2 met (≥ 3 of N faster on the paired task).<br>3. SC-5 met (zero `E4` outcomes in F1/F4/F5). | Open the M7 integration decision brief (`ROADMAP.md:518-530`) **and** write the subject-index brief if the SC-7 count justifies it. The subject index stays deferred until that brief exists.                                                                                      |
+| **CONTINUE** | 1. SC-1 met (≥ 3 of N clean on ≥ 4 of 5 core tasks **and** requesting another session).<br>2. SC-2 met (≥ 3 of N faster on the paired task).<br>3. SC-5 met (zero `E4` outcomes in F1/F4/F5). | Open the M7 integration decision brief (`ROADMAP.md` §M7) **and** write the subject-index brief if the SC-7 count justifies it. The subject index stays deferred until that brief exists.                                                                                          |
 | **CHANGE**   | SC-1 met but SC-2, SC-3 or SC-5 missed, **or** the sibling rate is high while the wrong-provision rate is low.                                                                                | Change the tool or the workflow, not the threshold. Which change is implied is named by the failing criterion: an SC-5 failure is a dated-provenance defect; a high sibling rate is a ranking or a subject-index question; an SC-3 failure is an installation/onboarding question. |
 | **STOP**     | SC-1 not met, **and** fewer than 2 of N requested another session.                                                                                                                            | Record the stop with the evidence, close M6, and record M7/M8 as not-evidenced rather than as deferred-pending-evidence. The subject index is closed as well: its only justification was this study.                                                                               |
 
@@ -1060,15 +1060,15 @@ not over-read the results:**
 
 **Deliberately excluded from this deliverable** (each with the reason):
 
-| Excluded                                                           | Why                                                                                                                                                                                  |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| An outreach plan, message template, target list, or contact script | Recruitment and consent are operator-arranged and operator-authorized (`ROADMAP.md:83-85`, `:454-455`). §9.5 supplies the content, not the campaign.                                 |
-| Any change to the product, code, fixtures, or tests                | The study observes; it does not instrument. No telemetry ships (§9.7).                                                                                                               |
-| Any change to `ROADMAP.md`                                         | The roadmap is updated by the operator after the review, not by this packet.                                                                                                         |
-| A sample size calculation, power analysis, or significance test    | n = 5 is a decision threshold, not a statistical claim (`ROADMAP.md:513-516`). §8 labels it so.                                                                                      |
-| A new evaluation set or a threshold proposal                       | The holdout is **burned** and is a regression set only; a **fresh** holdout is built before the first threshold-bearing round (`ROADMAP.md:303-312`). This protocol touches neither. |
-| A claim that the results generalise                                | Out of scope, and the ROADMAP forbids the claim outright (`ROADMAP.md:554-555`).                                                                                                     |
-| Prices, revenue, customer commitments, or a market-size estimate   | Forbidden by M7's own terms (`ROADMAP.md:530-531`) and out of scope for M6.                                                                                                          |
+| Excluded                                                           | Why                                                                                                                                                                              |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An outreach plan, message template, target list, or contact script | Recruitment and consent are operator-arranged and operator-authorized (`ROADMAP.md`, delivery-order note; §M5). §9.5 supplies the content, not the campaign.                     |
+| Any change to the product, code, fixtures, or tests                | The study observes; it does not instrument. No telemetry ships (§9.7).                                                                                                           |
+| Any change to `ROADMAP.md`                                         | The roadmap is updated by the operator after the review, not by this packet.                                                                                                     |
+| A sample size calculation, power analysis, or significance test    | n = 5 is a decision threshold, not a statistical claim (`ROADMAP.md` §M6). §8 labels it so.                                                                                      |
+| A new evaluation set or a threshold proposal                       | The holdout is **burned** and is a regression set only; a **fresh** holdout is built before the first threshold-bearing round (`ROADMAP.md` §M3). This protocol touches neither. |
+| A claim that the results generalise                                | Out of scope, and the ROADMAP forbids the claim outright (`ROADMAP.md`, "Evidence required to mark a roadmap item delivered").                                                   |
+| Prices, revenue, customer commitments, or a market-size estimate   | Forbidden by M7's own terms (`ROADMAP.md` §M7) and out of scope for M6.                                                                                                          |
 
 ## 13. Known limitations of this design, and the concrete alternatives
 
@@ -1097,7 +1097,7 @@ with the alternative, so the operator can choose rather than inherit.
    participant to phrase one real question of their own (with the
    claimant facts stripped, and with their consent) and record it as a
    **candidate for the fresh holdout** — the discipline for a fresh
-   holdout is set out in `ROADMAP.md:303-312`, and this would be a
+   holdout is set out in `ROADMAP.md` §M3, and this would be a
    candidate pool for it, not a set to tune against.
 
 ---
@@ -1179,11 +1179,15 @@ F5-B EXPORT / COPY VERIFICATION (variant; incompleteness warning)
 
 ## Appendix B — the source files this protocol cites
 
+ROADMAP references here are **section anchors** (§M2 … §M8) rather than line numbers:
+the roadmap is edited every round, so a line number is stale the moment
+anything above it changes. The other files are cited by line as of this writing.
+
 | File                                                                                   | What was taken from it                                                                             |
 | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `ROADMAP.md:496-516`                                                                   | the M6 section — the authority for every requirement in this document                              |
-| `ROADMAP.md:289-330`                                                                   | the subject-index deferral, the holdout's status, the top-1 re-scoping                             |
-| `ROADMAP.md:453-460`, `:425-445`                                                       | the M5 workflow definition and its slice record                                                    |
+| `ROADMAP.md` §M6                                                                       | the M6 section — the authority for every requirement in this document                              |
+| `ROADMAP.md` §M3                                                                       | the subject-index deferral, the holdout's status, the top-1 re-scoping                             |
+| `ROADMAP.md` §M5                                                                       | the M5 workflow definition and its slice record                                                    |
 | `docs/research/retrieval-baseline-2026-10-20.md`                                       | the baseline this protocol re-measured on 2026-10-21                                               |
 | `test/fixtures/retrieval/run.ts`                                                       | the runner's metric definitions and aggregation (`:110-113`, `:151-162`)                           |
 | `test/fixtures/retrieval/queries.{dev,holdout}.ts`                                     | the frozen 50-query set                                                                            |
