@@ -311,12 +311,33 @@ mental-disorders DIAGNOSIS section and its text contains no "PTSD", no
 not by vocabulary, so no lexical mechanism can reach it. Closing that class
 needs a curated, corpus-verified subject index (a benefit/topic → sections
 map): a roadmap-sized build with a curation and maintenance cost, not a
-search tweak. **DEFERRED (operator, 2026-10-21): do not build it yet.** It
-is ticketed as a decision — the demand evidence is M6's practitioner study
-(does the workflow actually ask subject-level questions?), and the brief
-(topic map, curation effort over 2,970 provisions, corpus-change
-maintenance, the acceptance measure) is to be written when that evidence
-exists. The one known miss is recorded rather than papered over.
+search tweak. **DECIDED (2026-10-21): the subject index is NOT BUILT**, and the
+decision is not a deferral. The measured demand is **one expected provision
+in 92** unreachable by vocabulary, against a curation and maintenance
+burden over 2,970 provisions — and the repository's standing rule is that
+scope does not grow ahead of evidence. The reopen condition is **fixed now,
+before any data exists**, so the decision cannot be reopened by
+re-interpreting it later:
+
+> **Reopen only if the pilot's `E3` count reaches a MAJORITY of the
+> cohort's F2-B attempts** — the attempts that needed a provision the
+> participant's own words could not reach (`docs/research/practitioner-pilot.md`
+> §8, SC-7). At the planned N = 5 that is **3 or more**. Below that, the
+> subject index is **CLOSED as not justified**, and the one known miss
+> stays recorded rather than papered over.
+
+The brief's shape is pre-written here, so a reopen is a formality rather
+than another decision cycle: **topic map** — benefit/topic → sections,
+keyed on the corpus's own part and subject-group structure, curated
+against the corpus rather than invented; **curation effort** — one pass
+over the 2,970 provisions, with the subject vocabulary taken from the
+corpus's own headings and the eCFR's subject groups; **corpus-change
+maintenance** — the map is invalidated by any amendment that adds, removes
+or retitles a mapped section, so it needs a staleness check against the
+index issue date; **acceptance measure** — the fraction of subject-index
+expectations reachable by the participant's own words, measured on the
+same benchmark, with the map's own curation defects counted separately
+from retrieval defects.
 
 **The holdout's status (recorded 2026-10-21, operator-approved):** all 50
 entries were read and adjudicated, so the holdout is BURNED for threshold
@@ -437,6 +458,7 @@ round wrote the row.
 | M6 (the practitioner-pilot protocol)                                                    | #100                                         | `65adb7d` → APPROVE 0/0/1                                                                               | `17da023`                                        | `npm run ci` exit 0, `scripts/validate.sh --base origin/main` GATE: PASS, 636 tests                                                                     |
 | M6 (the criteria revision — the committee's seven criteria and the closed §11.2 branch) | #103                                         | `0e684f4` → APPROVE_WITH_NITS 0/0/1; `932cff7` → APPROVE 0/0/0 (re-affirm)                              | `a489c00`                                        | `npm run ci` exit 0, `scripts/validate.sh` GATE: PASS, 636 tests                                                                                        |
 | M6 (the sibling class re-anchored on the adjudicated set)                               | #119                                         | `c37a16e` → APPROVE 0/0/0                                                                               | `5ebe98d`                                        | `npm run ci` exit 0, 668 passed \| 1 skipped, prettier clean                                                                                            |
+| M6 (the completion record and the gate-evidence convention)                             | #120                                         | `185d440` → APPROVE 0/0/0                                                                               | `f34f76f`                                        | `npm run ci` exit 0, 670 passed \| 1 skipped, prettier clean                                                                                            |
 | M3 (the measured state restated after the ranking round)                                | #108                                         | `3c5c5be` → APPROVE 0/0/0; `a7e2cfb` → APPROVE 0/0/0 (re-affirm)                                        | `f455e01`                                        | `npm run ci` exit 0, 639 tests                                                                                                                          |
 | M3 (the part title on every hit — the § 9.21 context remedy)                            | #109                                         | `fa70b33` → APPROVE 0/0/0                                                                               | `5306fb8`                                        | `npm run ci` exit 0, 660 passed \| 1 skipped, 97.3 % stmts / 90.96 % branches                                                                           |
 | **CLOSED — not a defect** — P1-20261021-07 (the browse view's request identity)         | #118 (closed by measurement; no code change) | `69d5df3` → APPROVE 0/0/0 (the review's one P1 was this row's gate tail — corrected in the same commit) | — (this PR's own merge; recorded in the journal) | `npm run ci` exit 0, 670 passed \| 1 skipped, prettier clean, eslint 0 errors (8 pre-existing warnings); the two pinning tests are in `test/ui.test.ts` |
@@ -603,7 +625,11 @@ Keep notes local/operator-controlled; no telemetry or automatic outreach.
 Candidate deliverable: proposed `docs/research/practitioner-pilot.md` with
 protocol, consent/data boundaries, results template, and decision log.
 Acceptance: before recruitment, operator agrees success criteria; after the
-pilot, record continue/change/stop with evidence. Suggested continue signal:
+pilot, record continue/change/stop with evidence. **Acceptance met
+2026-10-21**: the seven criteria in `docs/research/practitioner-pilot.md` §8
+are agreed (the committee's revisions, independently reviewed, then signed
+off), and the session pack that makes a session runnable is
+`docs/research/pilot-session-pack.md`. Suggested continue signal:
 at least three participants complete four of five tasks without a citation/
 version error and request repeat use; explicitly label this an initial
 decision threshold, not statistical proof or a revenue forecast.
