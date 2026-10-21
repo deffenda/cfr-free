@@ -188,17 +188,21 @@ verdict is the paper trail the operator audits. Gate rounding:
   context, model passed explicitly per round.
 - **Model roster** (operator-maintained; current values are visible in
   this file's git history — the roster is updated by a one-line PR
-  whenever a model ID changes): primary
-  `opencode/nemotron-3-ultra-free`; mirror variants
-  `opencode/nemotron-3.5-super-vl-free`,
-  `opencode/nemotron-3.5-lightning-free`,
-  `opencode/glm-5.3-flash-free`,
-  `opencode/longcat-2.5-preview-free` (operator-approved 2026-10-21:
-  both Nemotron mirrors were provider-rate-limited for a whole session, so
-  free non-Nemotron models were added to the ladder — still never the
-  orchestrator's model and never the coder's model). The rules bind ROLES,
-  not IDs: if an ID is unavailable or renamed, the operator updates the
-  roster and the ladder logic still holds.
+  whenever a model ID changes): **free is the roster.** Any free-tier
+  model may take the reviewer role, with two constraints that never
+  move: **never the orchestrator's model, never the coder's model**. The
+  Nemotron family remains the PREFERRED reviewer role — primary
+  `opencode/nemotron-3-ultra-free`, mirrors
+  `opencode/nemotron-3.5-super-vl-free` and
+  `opencode/nemotron-3.5-lightning-free` — and is used whenever its
+  quota allows. When it does not (as on 2026-10-21, when both mirrors
+  were provider-rate-limited for a whole session and the primary carried
+  every review alone), the ladder falls to any other free-tier model the
+  operator has enabled — `opencode/glm-5.3-flash-free`,
+  `opencode/longcat-2.5-preview-free`, and any further free model. Paid
+  models remain an operator-approved escalation only, made in chat. The
+  rules bind ROLES, not IDs: if an ID is unavailable or renamed, the
+  operator updates the roster and the ladder logic still holds.
 - Transient upstream 5xx (e.g. 503): retry the same model once, then
   fall to any mirror variant with the IDENTICAL packet.
 - Rubber-stamp tripwire (see AGENTS.md, "Rubber-stamp tripwire"):
