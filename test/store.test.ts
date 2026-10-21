@@ -81,6 +81,20 @@ describe('toFtsQuery', () => {
     expect(toFtsQuery('bva', 'and')).toBe('("bva"* OR "board of veterans\' appeals"*)');
   });
 
+  it('expands a punctuated abbreviation only when it stands alone', () => {
+    // The base commit expanded "A&A" wherever it appeared, so "VA&A"
+    // became the aid-and-attendance phrase (and "A&As" became the phrase
+    // plus a stray "s"). An abbreviation is a standalone word: "VA&A" is
+    // a different word. These two queries are the ONLY ones whose FTS
+    // string changed.
+    expect(toFtsQuery('VA&A', 'and')).toBe('"va"* AND "a"*');
+    expect(toFtsQuery('A&As', 'and')).toBe('"a"* AND "as"*');
+    // Everything else is unchanged by the standalone rule.
+    expect(toFtsQuery('A&A', 'and')).toBe('"aid and attendance"*');
+    expect(toFtsQuery('(A&A)', 'and')).toBe('"aid and attendance"*');
+    expect(toFtsQuery('a & a', 'and')).toBe('"a"* AND "a"*');
+  });
+
   it('expands punctuated abbreviations before tokenizing', () => {
     // "A&A" tokenizes to two single letters, which are dropped — the
     // query degenerated and the search returned noise. The raw-phrase
