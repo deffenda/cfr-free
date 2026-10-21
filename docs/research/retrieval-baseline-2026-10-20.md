@@ -141,6 +141,19 @@ against; the roadmap sets thresholds only after a baseline exists, and the
 query set is subject to expert adjudication before it can gate anything.
 The holdout set is not read or tuned on while iterating.
 
+**Update (M3-b, after this baseline):** the curated synonym expansions
+shipped with corpus-verified spellings, and the effect on this baseline is
+measured, not asserted — dev exact-citation 16/29 → **17/29**, recall@5
+25/29 → **26/29**, MRR 0.6753 → **0.7098**, abbreviation recall@5 **4/5 →
+5/5**; holdout exact-citation 13/17 → 12/17 and MRR 0.7794 → 0.7402,
+recall@5 unchanged at 14/17. The one holdout move is "DIC": the broader
+expansion ("dependency and indemnity compensation" is in 98 sections) now
+returns five GENUINE DIC provisions where it previously returned mostly
+DIC-adjacent ones, so the expected provision is still in the window but no
+longer first. That is a ranking consequence (M3-d), not a correctness
+regression — and the expectation's ORDER is a committee judgement, still
+provisional.
+
 **Next, in order of measured value:** (1) the synonym/vocabulary gap
 (M3-b) with the corpus-verified targets above; (2) the ranking order for
 natural phrasing (M3-d); (3) abstention (M3-a) — but only with a signal
