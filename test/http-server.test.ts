@@ -291,6 +291,25 @@ describe('Titan HTTP API', () => {
     expect((part.body['node'] as Json)['identifier']).toBe('4');
   });
 
+  it('descends into a subject group over the wire', async () => {
+    const group = await get('/api/v1/browse?chapter=I&part=17&subjgrp=ECFRfixturegroup0001');
+    expect(group.status).toBe(200);
+    expect((group.body['node'] as Json)['type']).toBe('subject_group');
+    expect((group.body['children'] as Json[])[0]?.['identifier']).toBe('17.15');
+  });
+
+  it('400s a subject-group request that names no part', async () => {
+    const { status, body } = await get('/api/v1/browse?chapter=I&subjgrp=ECFRfixturegroup0001');
+    expect(status).toBe(400);
+    expect(body['error']).toBe('invalid_input');
+  });
+
+  it('404s an unknown subject group', async () => {
+    const { status, body } = await get('/api/v1/browse?chapter=I&part=17&subjgrp=ECFRnope');
+    expect(status).toBe(404);
+    expect(body['error']).toBe('not_found');
+  });
+
   it('returns structure misses as 404 with available identifiers', async () => {
     const { status, body } = await get('/api/v1/browse?chapter=I&part=999');
     expect(status).toBe(404);
@@ -703,7 +722,7 @@ describe('Titan web UI routes', () => {
     expect(uiJs).toContain('if (generation !== routeGeneration) return;');
   });
 
-  it('pinned posture: ui.js pins both hash routes and builds the /api/v1/browse URL from all three query names', async () => {
+  it('pinned posture: ui.js pins both hash routes and builds the /api/v1/browse URL from all four query names', async () => {
     const { text: uiJs } = await fetchUi('/ui.js');
     // The two hash routes that must resolve in parseHash (unknown hashes fall
     // through to search), and the browse URL builder with chapter/part/subpart.
@@ -713,6 +732,7 @@ describe('Titan web UI routes', () => {
     expect(uiJs).toContain("if (level.chapter !== '') params.set('chapter', level.chapter);");
     expect(uiJs).toContain("if (level.part !== '') params.set('part', level.part);");
     expect(uiJs).toContain("if (level.subpart !== '') params.set('subpart', level.subpart);");
+    expect(uiJs).toContain("if (level.subjgrp !== '') params.set('subjgrp', level.subjgrp);");
     expect(uiJs).toContain("return '/api/v1/browse' + (query === '' ? '' : '?' + query);");
     // Leaf links go through the section reader route — never raw hrefs.
     expect(uiJs).toContain('leaf.href = sectionHref(String(entry.identifier));');

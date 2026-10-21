@@ -81,9 +81,16 @@ function findChild(node: StructureNode, type: string, identifier: string): Struc
 /**
  * Navigate the structure and return the children at the requested level.
  *
- * Levels must be given in hierarchy order (chapter → part → subpart); omitted
- * levels mean "stop here". With no query, returns the root's children
- * (Title 38's chapters).
+ * Levels must be given in hierarchy order (chapter → part → subpart →
+ * subject group); omitted levels mean "stop here". With no query, returns the
+ * root's children (Title 38's chapters).
+ *
+ * A subject group is the level that holds the sections of one regulatory
+ * subject; descending into it is what makes those sections reachable (1,910
+ * of the corpus's 2,953 sections sit under a subject group). A group hangs
+ * off a PART or off a SUBPART, so `subjgrp` needs `part` but NOT `subpart`:
+ * `subpart` stays optional, and a group under a part is reached with
+ * chapter + part + subjgrp.
  */
 export function browse(
   root: StructureNode,
@@ -91,16 +98,25 @@ export function browse(
     chapter?: string | undefined;
     part?: string | undefined;
     subpart?: string | undefined;
+    subjgrp?: string | undefined;
   },
 ): BrowseResult {
   let node = root;
   const path: StructureEntry[] = [];
-  const steps: Array<['chapter' | 'part' | 'subpart', string]> = [];
+  const steps: Array<['chapter' | 'part' | 'subpart' | 'subject_group', string]> = [];
   if (query.chapter !== undefined) steps.push(['chapter', query.chapter]);
   if (query.part !== undefined) steps.push(['part', query.part]);
   if (query.subpart !== undefined) {
     if (query.part === undefined) throw new StructureError("subpart navigation requires 'part'");
     steps.push(['subpart', query.subpart]);
+  }
+  // Subject groups sit under a PART (158 of the 373 in the 2026-10-16 corpus)
+  // or under a SUBPART (215) — so the level requires 'part' but not 'subpart'.
+  if (query.subjgrp !== undefined) {
+    if (query.part === undefined) {
+      throw new StructureError("subject-group navigation requires 'part'");
+    }
+    steps.push(['subject_group', query.subjgrp]);
   }
 
   for (const [type, identifier] of steps) {
