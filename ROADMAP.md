@@ -286,6 +286,48 @@ none is ticketed anywhere else.**
 | M3-d | **Ranking order for natural phrasing**                                       | `schizophrenia` ranks the definitional § 3.384 above the criteria schedule § 4.130; `traumatic brain injury compensation` puts § 3.350 third. The right provision is usually in the top five, but a first-hit-only client would mislead                                                                                                                                                                                        | **DONE (2026-10-20).** SPEC §13 row 4 promised that "citation/heading matches outrank body-only hits", but the ranking was bm25 column weights (10/5/1) alone — bm25 weighs term frequency WITHIN a column, so a section whose body repeats the phrase ten times outranked a section whose HEADING is the phrase, and there was no post-hoc rule at all. The ranking now carries an explicit key: a hit whose heading carries the query's content terms as a PHRASE (or the corpus phrase a synonym stands for) is ordered ahead of body-only hits, bm25 breaking ties. The key requires the phrase, NOT merely one of the query's words: counting the words improved the dev set (exact-citation 17/29 → 20/29, MRR 0.7098 → 0.7874) but LOST three of the holdout's seventeen exact-citation hits, because a heading containing a generic term ("rating", "service", "recipients") outranked the provision that answers the question. Shipped form, measured on the frozen 50: dev recall@5 26/29 → 27/29, MRR 0.7098 → 0.7356; holdout MRR 0.7402 → 0.7549; NO regression on either set (exact-citation unchanged at 17/29 dev and 12/17 holdout). SPEC §4.1 now states the rule and the measurement behind it. **Remaining retrieval gap: 15 of 50 queries still miss their expected provision — vocabulary (2: "hearing loss" vs the corpus's "hearing impairment"), AND-mode strictness (3), and the top hit itself (29 of 46 answerable queries return an expected citation FIRST).** |
 | M3-e | **AND-mode strictness keeps the governing section out of the candidate set** | the AND tier requires EVERY query word in a section, so a natural question's verb or noun can exclude the very provision that answers it: "how is hearing loss rated" wants § 4.85 "Evaluation of hearing impairment.", and § 4.85 contains neither "rated" nor "loss" — so it is not even a candidate, and no ranking rule can surface it. The OR tier only engages when the AND tier returns NOTHING, which it does not here | **DONE (2026-10-20).** The candidate set is now the OR tier — every provision matching AT LEAST ONE query term — and the AND tier is no longer a candidate tier but a RANKING boost. The order: the heading-phrase key (SPEC §4.1) DESC, the AND-tier membership DESC, bm25 ASC. The membership is computed in SQL (a CTE over the AND query, LEFT JOINed onto the ranked rows) — a JS prototype cost ~200 ms and ~700 ms on citation queries. `total` is the candidate set's size (plus the pinned citation when the candidate set did not hold it; the increment is identical on every page); `matchMode` stays and reports `or`. The pin's membership check asks about the OR tier: the AND tier reported an or-only pinned citation as absent and counted it twice. Measured on the frozen 50: dev exact-citation 17/29 → 17/29, recall@5 27/29 → 28/29, MRR 0.7356 → 0.7529; holdout unchanged (12/17, 14/17, MRR 0.7549). No regression on either set; the citation categories hold (the pin still firing). Candidate coverage of the 68 expected provisions: 50/68 → 67/68, and "how is hearing loss rated" now ranks § 4.85 SECOND (it was no candidate at all). SPEC §4.1 states the candidate set and the full order. **Remaining gap: 4 of the 46 answerable queries miss their expected provision (dev 1, holdout 3), 1 of the 68 expected provisions is outside the candidate set (§ 4.125 for PTSD), and 17 of the 46 do not return an expected citation FIRST.**              |
 
+**The subject gap (a decision, not a fix):** one frozen expectation is
+still unreachable — § 4.125 for "PTSD" — because § 4.125 is the general
+mental-disorders DIAGNOSIS section and its text contains no "PTSD", no
+"posttraumatic" and no "stress disorder" at all. It is relevant by SUBJECT,
+not by vocabulary, so no lexical mechanism can reach it. Closing that class
+needs a curated, corpus-verified subject index (a benefit/topic → sections
+map): a roadmap-sized build with a curation and maintenance cost, not a
+search tweak. **DEFERRED (operator, 2026-10-21): do not build it yet.** It
+is ticketed as a decision — the demand evidence is M6's practitioner study
+(does the workflow actually ask subject-level questions?), and the brief
+(topic map, curation effort over 2,970 provisions, corpus-change
+maintenance, the acceptance measure) is to be written when that evidence
+exists. The one known miss is recorded rather than papered over.
+
+**The holdout's status (recorded 2026-10-21, operator-approved):** all 50
+entries were read and adjudicated, so the holdout is BURNED for threshold
+selection and is never to be tuned against again. It is kept as the
+**regression set** — the role it actually served in the M3-d/M3-e rounds,
+where every shipped change was threshold-free, so nothing was fitted to it.
+A FRESH holdout is to be built immediately before the first
+threshold-bearing round, with the discipline the committee specified: at
+least 40 queries written without looking at the retriever's output, at least
+8–10 genuinely out-of-corpus cases each carrying a corpus-grep receipt, full
+expert adjudication before it gates anything, and read exactly once.
+
+**The operator's irreducible action (the one input no tooling replaces):**
+adjudicate the 39 provisional expectations — INCLUDING their ORDER. The
+order matters more than it looks: measured on the frozen 50, 42 answerable
+queries have their expected provision in the top five, but only 29 have it
+FIRST (the runner's measure: the top hit is one of the expected citations),
+and about ten of the thirteen in-window-but-not-first cases are
+sibling provisions where the retrieved section is a defensible answer
+(§ 3.351 for § 3.350, § 4.86 for § 4.85, § 4.17 for § 4.16). The "63%
+top-1" figure therefore measures the committee's ranking preferences as
+much as retrieval quality — so adjudicating the ORDER has TWO payoffs: it
+makes the thresholds trustworthy, and it separates the ranking gap from the
+ordering question. The next engineering round is scoped accordingly: split
+the gap FIRST (which cases are real ranking failures, and which are
+ordering preferences), then design an instrument for the real ones — from
+the corpus's own structure, not from another lexical rule (M3-d already
+measured and rejected the weight-tuning variant).
+
 **Completion records for the items above** (the roadmap asks for the
 implementation PR, the reviewed SHA and verdict, and the verified merge SHA):
 
@@ -380,7 +422,7 @@ remain visible. Checks: behavioral UI/API/MCP tests and `npm run ci`; disclose
 DOM-stub versus real-browser execution. Do not equate source-string tests with
 browser behavior or add authentication as incidental cleanup.
 
-### M5 — One complete research-and-citation workflow — SLICE 1 DONE (2026-10-20), 3 SLICES OPEN
+### M5 — One complete research-and-citation workflow — 4 OF 4 SLICES DONE (2026-10-21)
 
 **Slice 1 — copy-a-citation (SHIPPED, PR #83 → `6a2bb83`).** The section view
 builds a copy block of exactly the fields this roadmap decided: the legal
