@@ -147,7 +147,7 @@ concretely:
    never the coder's model, and never the FIRST reviewer's model. A
    Nemotron mirror OTHER THAN the first reviewer's model is used while
    the Nemotron family's quota allows.
-2. The mirror reviewer has NEVER seen the first verdict (packet rules
+2. The cross-check reviewer has NEVER seen the first verdict (packet rules
    apply in full; providing the first verdict to the cross-check reviewer is
    itself an anchoring violation). It returns the standard mandate
    format verbatim.
@@ -207,7 +207,8 @@ verdict is the paper trail the operator audits. Gate rounding:
   the IDENTICAL packet**, to any other free-tier model the operator has
   enabled (the working set is the `-free` tier) — for example
   `opencode/longcat-2.5-preview-free`, and only a model that is neither
-  the orchestrator's nor the coder's. Paid models remain an
+  the orchestrator's nor the coder's — nor, for a cross-check round, the
+  first reviewer's model. Paid models remain an
   operator-approved escalation only, made in chat. The rules bind ROLES,
   not IDs: if an ID is unavailable or renamed, the operator updates the
   roster and the ladder logic still holds.
