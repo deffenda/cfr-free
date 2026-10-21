@@ -667,6 +667,7 @@ components:
         - sourceUrl
         - direct
         - inResults
+        - partTitle
       properties:
         citation: { type: string }
         heading: { type: string }
@@ -685,6 +686,11 @@ components:
           {
             type: boolean,
             description: 'True when the section matched the ranked search. Always true for non-pin hits; for a pin (`direct: true`) it reports whether the pin also appeared in the ranked results.',
+          }
+        partTitle:
+          {
+            type: [string, 'null'],
+            description: 'The part title from the index structure tree, without the "Part N—" prefix; null when unknown.',
           }
       additionalProperties: false
     SectionDetail:
