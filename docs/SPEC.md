@@ -178,9 +178,11 @@ latency with machine/runtime/corpus provenance. Run it against an isolated
 copy of an index:
 `CFR_INDEX_PATH=/tmp/eval-index.sqlite npx tsx test/fixtures/retrieval/run.ts dev`.
 The baseline report is `docs/research/retrieval-baseline-2026-10-20.md`. The
-set's expectations are provisional (the orchestrator's assumptions) until an
-expert adjudicates them; a change to the set is a change to the benchmark and
-must be visible in the diff. The holdout set is not tuned on.
+set's expectations were adjudicated by a two-member committee on 2026-10-21 and
+cross-checked against each other and against the corpus — the record is
+`docs/research/expectation-adjudication-2026-10-21.md`, and an expert remains
+the authority. A change to the set is a change to the benchmark and must be
+visible in the diff. The holdout set is not tuned on.
 
 ### 4.1 The candidate set and the ranking order
 
@@ -193,9 +195,11 @@ candidate at all, and no ranking rule can surface a row that was never a
 candidate. The canonical case: "how is hearing loss rated" wants § 4.85
 "Evaluation of hearing impairment.", and § 4.85 carries neither "rated" nor
 "loss" — under the AND tier it was excluded from the results entirely.
-Measured on the frozen 50 (2026-10-16 corpus), the AND candidate set held
-**50 of the 68** expected provisions and the OR candidate set holds **67 of
-the 68**; § 4.85 now ranks **2nd** for that query (was absent).
+Measured on the frozen 50 (2026-10-16 corpus), the AND candidate set holds
+**71 of the 92** expected provisions and the OR candidate set holds **91 of
+the 92**; § 4.85 now ranks **2nd** for that query (was absent). (Before the
+2026-10-21 expectation adjudication the same figures were 50/68 and 67/68 —
+the expected sets grew, so the counts are not comparable.)
 
 `total` is the size of the candidate set — what the pagination walks — plus
 the pinned citation when the candidate set did not already hold it. The
