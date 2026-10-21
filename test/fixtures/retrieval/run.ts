@@ -10,6 +10,7 @@
  * Human use (run from the repo root, against your own index):
  *   npx tsx test/fixtures/retrieval/run.ts dev
  *   npx tsx test/fixtures/retrieval/run.ts holdout
+ *   npx tsx test/fixtures/retrieval/run.ts fresh
  *   CFR_INDEX_PATH=/tmp/some-index.sqlite npx tsx test/fixtures/retrieval/run.ts dev
  *
  * Deterministic: sorted keys, no timestamps in the compared output. The
@@ -21,6 +22,7 @@ import { CFRService } from '../../../src/core/service.js';
 import { Store } from '../../../src/core/store.js';
 import { DEV_QUERIES, type RetrievalQuery } from './queries.dev.js';
 import { HOLDOUT_QUERIES } from './queries.holdout.js';
+import { FRESH_QUERIES } from './queries.fresh.js';
 
 export interface QueryOutcome {
   readonly query: string;
@@ -44,7 +46,7 @@ export interface QueryOutcome {
 }
 
 export interface EvaluationReport {
-  readonly set: 'dev' | 'holdout';
+  readonly set: 'dev' | 'holdout' | 'fresh';
   readonly provenance: {
     readonly platform: string;
     readonly arch: string;
@@ -69,10 +71,12 @@ export interface EvaluationReport {
   readonly outcomes: readonly QueryOutcome[];
 }
 
-export type EvaluationSet = 'dev' | 'holdout';
+export type EvaluationSet = 'dev' | 'holdout' | 'fresh';
 
 export function queriesFor(set: EvaluationSet): readonly RetrievalQuery[] {
-  return set === 'holdout' ? HOLDOUT_QUERIES : DEV_QUERIES;
+  if (set === 'holdout') return HOLDOUT_QUERIES;
+  if (set === 'fresh') return FRESH_QUERIES;
+  return DEV_QUERIES;
 }
 
 function median(values: readonly number[]): number {
@@ -208,7 +212,10 @@ export function renderReport(report: EvaluationReport): string {
 
 // Human entry point: run a set against the index at CFR_INDEX_PATH.
 if (process.argv[1]?.endsWith('run.ts') || process.argv[1]?.endsWith('run.js')) {
-  const set = (process.argv[2] === 'holdout' ? 'holdout' : 'dev') as EvaluationSet;
+  const requestedSet = process.argv[2];
+  const set = (
+    requestedSet === 'holdout' || requestedSet === 'fresh' ? requestedSet : 'dev'
+  ) as EvaluationSet;
   const indexPath = process.env['CFR_INDEX_PATH'];
   if (indexPath === undefined) {
     console.error(
