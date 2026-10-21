@@ -314,8 +314,9 @@ expert adjudication before it gates anything, and read exactly once.
 **The operator's irreducible action (the one input no tooling replaces):**
 adjudicate the 39 provisional expectations — INCLUDING their ORDER. The
 order matters more than it looks: measured on the frozen 50, 42 answerable
-queries have their expected provision in the top five, but only 26 have it
-FIRST, and about ten of the sixteen in-window-but-not-first cases are
+queries have their expected provision in the top five, but only 29 have it
+FIRST (the runner's measure: the top hit is one of the expected citations),
+and about ten of the thirteen in-window-but-not-first cases are
 sibling provisions where the retrieved section is a defensible answer
 (§ 3.351 for § 3.350, § 4.86 for § 4.85, § 4.17 for § 4.16). The "63%
 top-1" figure therefore measures the committee's ranking preferences as
