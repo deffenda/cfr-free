@@ -256,7 +256,8 @@ function searchBody(citation: string, heading: string): Record<string, unknown> 
   return {
     total: 1,
     page: 1,
-    matchMode: 'and',
+    // The OR tier is the only candidate tier.
+    matchMode: 'or',
     matchedTerms: [],
     unmatchedTerms: [],
     hits: [
@@ -297,7 +298,7 @@ describe('UI search grounding', () => {
   it('shows the no-match wording when nothing was indexed', async () => {
     const harness = makeHarness();
     await harness.navigate('#/search?q=alpha');
-    harness.calls[0]?.respond(true, { total: 0, page: 1, matchMode: 'and', hits: [] });
+    harness.calls[0]?.respond(true, { total: 0, page: 1, matchMode: 'or', hits: [] });
     await harness.flush();
 
     const caution = harness.element('search-caution');
@@ -312,6 +313,20 @@ describe('UI search grounding', () => {
     await harness.flush();
 
     expect(harness.element('search-caution').hidden).toBe(true);
+  });
+
+  it('names the count candidates, not hits', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/search?q=alpha');
+    harness.calls[0]?.respond(true, { ...searchBody('4.16', 'Heading 4.16'), total: 42 });
+    await harness.flush();
+
+    // The total is the CANDIDATE SET (every provision matching at least one
+    // query term), so the status line must not call it "hits".
+    const status = harness.element('search-status').textContent ?? '';
+    expect(status).toContain('42 candidates');
+    expect(status).not.toContain('hit');
+    expect(status).not.toContain('match mode');
   });
 });
 

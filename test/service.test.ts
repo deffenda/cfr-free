@@ -28,7 +28,8 @@ describe('CFRService.search', () => {
       expect(result.perPage).toBe(10);
       expect(result.total).toBeGreaterThanOrEqual(2);
       expect(result.hits[0]?.citation).toBeTruthy();
-      expect(result.matchMode).toBe('and');
+      // The OR tier is the only candidate tier; the mode reports it.
+      expect(result.matchMode).toBe('or');
     });
   });
 
@@ -106,6 +107,65 @@ describe('CFRService.search', () => {
     }
   });
 
+  it('leads a quoted phrase with the heading-phrase hit', () => {
+    // A quoted span is a phrase query, and the heading key still applies:
+    // the section whose HEADING is the phrase leads, whatever its body says.
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '4.130',
+          heading: 'Evaluation of residual functional capacity.',
+          text: 'The schedule of ratings for mental disorders applies under the schedule of ratings.',
+        }),
+        makeSection({
+          citation: '4.87a',
+          heading: 'Schedule of ratings—ear.',
+          text: 'Ratings for the schedule of ratings apply.',
+        }),
+      ],
+    });
+    try {
+      const service = new CFRService(temp.store, 7);
+      const result = service.search({ query: '"schedule of ratings"' });
+      expect(result.hits[0]?.citation).toBe('4.87a');
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('keeps a provision that answers part of the question in the candidate set', () => {
+    // The candidate set is the OR tier: § 4.125 says "the rating agency",
+    // so it answers "rating" but not "schedule" — the old AND tier threw it
+    // out of the results entirely, which is how the governing provision of
+    // a natural question could go missing (SPEC §4.1).
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '4.130',
+          heading: 'Evaluation of residual functional capacity.',
+          text: 'Residual functional capacity evaluation for claims under the rating schedule.',
+        }),
+        makeSection({
+          citation: '4.125',
+          heading: 'Diagnosis of mental disorders.',
+          text: 'The rating agency shall return the report.',
+        }),
+      ],
+    });
+    try {
+      const service = new CFRService(temp.store, 7);
+      const result = service.search({ query: 'rating schedule' });
+      // Both sections are candidates now.
+      expect(result.total).toBe(2);
+      expect(result.hits.map((hit) => hit.citation)).toEqual(['4.130', '4.125']);
+      // § 4.130 carries EVERY query term and ranks first; § 4.125 carries one.
+      expect(result.hits[0]?.matches).toEqual(expect.arrayContaining(['rating', 'schedule']));
+      expect(result.hits[1]?.matches).toEqual(['rating']);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
   it('rejects short queries', () => {
     withService((service) => {
       expect(() => service.search({ query: 'ab' })).toThrow(ServiceError);
@@ -137,12 +197,15 @@ describe('CFRService.search', () => {
     withService((service) => {
       const appendixOnly = service.search({ query: 'rating schedule', kind: 'appendix' });
       expect(appendixOnly.hits.map((hit) => hit.citation)).toEqual(['Appendix A to Part 4']);
+      // The candidate set is the OR tier: § 4.125 answers "rating" (its
+      // text says "the rating agency") and is a candidate, ranked below
+      // § 4.130, which carries every query term.
       const sectionOnly = service.search({ query: 'rating schedule', kind: 'section' });
-      expect(sectionOnly.hits.map((hit) => hit.citation)).toEqual(['4.130']);
+      expect(sectionOnly.hits.map((hit) => hit.citation)).toEqual(['4.130', '4.125']);
       // No fixture row lives in chapter II — the filter empties the result set.
       expect(service.search({ query: 'rating schedule', chapter: 'II' }).total).toBe(0);
       // All fixture rows live in chapter I.
-      expect(service.search({ query: 'rating schedule', chapter: 'I' }).total).toBe(2);
+      expect(service.search({ query: 'rating schedule', chapter: 'I' }).total).toBe(3);
     });
   });
 });
@@ -556,9 +619,11 @@ describe('CFRService citation-direct search', () => {
   });
 
   it('keeps the pin-adjusted total consistent on later pages', () => {
-    // 4.132 matches the AND-mode citation query; the pinned 4.130 does not
-    // (its citation and text never say "38" or "cfr"), so the pin is added
-    // to the result union — and every page must report that same total.
+    // The candidate set is the OR tier: § 4.132 matches every term of the
+    // citation query, § 4.130 matches "4"/"130" only, and § 4.133 matches
+    // "130" only. All three are candidates, so the total is 3 on EVERY page
+    // — the pinned § 4.130 is already among them and must not be counted a
+    // second time.
     const temp = openTempStore({
       sections: [
         makeSection({
@@ -571,6 +636,10 @@ describe('CFRService citation-direct search', () => {
           citation: '4.132',
           text: 'Refer to 38 CFR 4.130 and the 38 CFR rule for details.',
         }),
+        makeSection({
+          citation: '4.133',
+          text: 'The 130 day waiting period applies to the claim.',
+        }),
       ],
     });
     try {
@@ -579,9 +648,11 @@ describe('CFRService citation-direct search', () => {
       const second = service.search({ query: '38 CFR 4.130', page: 2, perPage: 5 });
       expect(first.hits[0]?.citation).toBe('4.130');
       expect(first.hits[0]?.direct).toBe(true);
-      expect(first.total).toBe(2);
-      expect(second.total).toBe(2);
-      expect(second.hits).toHaveLength(0);
+      // The pinned section IS in the candidate set (the citation's own terms
+      // match it), so the pin adds nothing to the count.
+      expect(first.hits[0]?.inResults).toBe(true);
+      expect(first.total).toBe(3);
+      expect(second.total).toBe(3);
     } finally {
       temp.cleanup();
     }
