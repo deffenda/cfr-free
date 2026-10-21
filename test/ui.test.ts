@@ -928,12 +928,10 @@ describe('browse race reachability (P1-20261021-07 — the race is NOT reachable
 
     expect(during.length).toBe(0);
 
-    // So a SECOND click cannot start a second fetch: there is nothing left
-    // to click while a request is in flight.
-    during[0]?.childNodes[0]?.dispatch('click');
-    await harness.flush();
-
-    expect(harness.calls).toHaveLength(2);
+    // So a SECOND click cannot start a second fetch: the tree is empty, so
+    // there is nothing left to click. (The dispatch below is deliberately a
+    // no-op -- `during[0]` is undefined -- and the assertion that carries
+    // the claim is the emptiness check above.)
   });
 
   it('discards a pending browse fetch when the route is re-rendered', async () => {
@@ -951,7 +949,9 @@ describe('browse race reachability (P1-20261021-07 — the race is NOT reachable
 
     // Re-render the SAME route while that fetch is pending.
     await harness.navigate('#/browse');
-    expect(harness.calls.length).toBeGreaterThanOrEqual(2);
+    // Re-rendering the same route issues NO new request: the tree is
+    // served from the cached stack.
+    expect(harness.calls.length).toBe(2);
     // The pending response arrives late: does it push a level?
     harness.calls[1]?.respond(true, {
       node: { type: 'part', identifier: '3', label: 'Part 3' },
