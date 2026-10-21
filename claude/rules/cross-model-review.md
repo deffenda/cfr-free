@@ -191,9 +191,13 @@ verdict is the paper trail the operator audits. Gate rounding:
   whenever a model ID changes): primary
   `opencode/nemotron-3-ultra-free`; mirror variants
   `opencode/nemotron-3.5-super-vl-free`,
-  `opencode/nemotron-3.5-lightning-free`. The rules bind ROLES, not IDs:
-  if an ID is unavailable or renamed, the operator updates the roster
-  and the ladder logic still holds.
+  `opencode/nemotron-3.5-lightning-free`,
+  `opencode/glm-5.3-flash-free` (operator-approved 2026-10-21: both
+  Nemotron mirrors were provider-rate-limited for a whole session, so a
+  free non-Nemotron model was added to the ladder — still never the
+  orchestrator's model and never the coder's model). The rules bind ROLES,
+  not IDs: if an ID is unavailable or renamed, the operator updates the
+  roster and the ladder logic still holds.
 - Transient upstream 5xx (e.g. 503): retry the same model once, then
   fall to any mirror variant with the IDENTICAL packet.
 - Rubber-stamp tripwire (see AGENTS.md, "Rubber-stamp tripwire"):
