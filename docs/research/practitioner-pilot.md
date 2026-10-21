@@ -294,7 +294,11 @@ attempt cannot produce — which is why they are variants and not repeats.
 1. **A task attempt is "completed"** when the participant produces the
    artefact the task asks for (the provision, the citation block, the
    export, the comparison) — **not** when the observer judges the answer
-   correct. Completion and correctness are separate fields.
+   correct. Completion and correctness are separate fields. The artefact
+   must have been produced **through the tool** — at least one query or
+   read (§7.1's `tool_calls`) — because the study measures the tool; an
+   answer recalled from memory is not a completed attempt, whatever else
+   it is.
 2. **Every task attempt gets exactly one outcome class** from §6.8. There
    is no "partly right"; the partial cases are separate classes with
    their own names, because a half-chain (found the schedule, never
@@ -329,6 +333,10 @@ task — twice:
 **Order is counterbalanced** (AB/BA by participant number) so that neither
 tool benefits from being first. Run 1 is deliberately _not_ a trial
 session: the point is what they actually do today, warts included.
+
+**Run 2 (cfr-free) IS the §10.2 F2-A attempt — it is not an additional
+attempt.** The cohort therefore has **7 attempts per participant**, not 8,
+and every denominator in §5.2 and §10 counts it once.
 
 This produces the study's only **within-participant paired comparison** —
 and, with n = 5, it is a comparison of five paired observations, not a
@@ -387,19 +395,27 @@ workflow") is captured here and in the debrief (§6.9):**
 - The answer says the text is dated, and names the date: the index's issue
   date **2026-10-16**.
 - The block carries the legal display form `38 C.F.R. § 4.130`, the
-  heading, `Source: 38 CFR 4.130 (issue date 2026-10-16)`, and the dated
-  verification URL `https://www.ecfr.gov/on/2026-10-16/title-38/section-4.130`
+  heading, `Source: 38 CFR 4.130 (issue date <the index issue date at
+session time>)`, and the dated verification URL
+  `https://www.ecfr.gov/on/<issue date>/title-38/section-4.130`
   (`src/titan/ui.ts:629-648`, dated URL at `src/core/service.ts:280-283`).
+
+> **The dated URL is on the section read, not on the search hit** (measured
+> 2026-10-21: the hit's `sourceUrl` is the **current** URL and the dated one
+> appears only in the section detail). So a participant who copies the URL
+> out of the search results has the current one and must open the section to
+> get the dated one. That is the task working as intended, not a trap for
+> the participant's benefit — the observer records what they actually did.
 
 **Plausible wrong answers (pre-listed).**
 
-| #   | Wrong answer                                                                               | Class it should land in                     |
-| --- | ------------------------------------------------------------------------------------------ | ------------------------------------------- |
-| a   | Lands on **§ 4.126 "Evaluation of disability from mental disorders."**                     | sibling → §6.8 `S` if defensible, else `E1` |
-| b   | Uses the **current** eCFR URL (`/current/title-38/section-4.130`) instead of the dated one | `E5` — right text, unverifiable provenance  |
-| c   | Pastes `38 CFR 4.130` with **no issue date and no URL**                                    | `E5`                                        |
-| d   | Says the text is "**effective** 2026-10-16"                                                | `E4` — issue date read as an effective date |
-| e   | Pastes the **heading only**, with no source line                                           | `E5` (incomplete citation)                  |
+| #   | Wrong answer                                                                               | Class it should land in                                                                                              |
+| --- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| a   | Lands on **§ 4.126 "Evaluation of disability from mental disorders."**                     | `E1` — the sibling rule's third condition (§6.8) cannot be met for a citation lookup, so `S` is never available here |
+| b   | Uses the **current** eCFR URL (`/current/title-38/section-4.130`) instead of the dated one | `E5` — right text, unverifiable provenance                                                                           |
+| c   | Pastes `38 CFR 4.130` with **no issue date and no URL**                                    | `E5`                                                                                                                 |
+| d   | Says the text is "**effective** 2026-10-16"                                                | `E4` — issue date read as an effective date                                                                          |
+| e   | Pastes the **heading only**, with no source line                                           | `E5` (incomplete citation)                                                                                           |
 
 ### 6.4 F2 — Shorthand-to-criteria search
 
@@ -428,13 +444,13 @@ workflow") is captured here and in the debrief (§6.9):**
 
 **Plausible wrong answers (pre-listed).**
 
-| #   | Wrong answer                                                           | Why it is plausible                                                                                                                                         |
-| --- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| a   | **§ 4.86 "Exceptional patterns of hearing impairment."**               | The sibling. **Measured:** the frozen set ranks § 4.86 **first** and § 4.85 **second** for "how is hearing loss rated" — this is the canonical sibling case |
-| b   | **§ 4.87 "Schedule of ratings—ear."**                                  | The _schedule_ substituted for the _evaluation rule_ — a different object                                                                                   |
-| c   | **§ 17.149 "Sensori-neural aids."**                                    | Part 17 prosthetics; "hearing loss" also surfaces it (measured top-5: 4.86, 4.85, 17.149, 3.383, 3.350)                                                     |
-| d   | An **eye** provision (e.g. § 4.76a, § 4.77)                            | "designation" and "table" recur across body systems                                                                                                         |
-| e   | Names Table VI / VIa **as if the table content were in front of them** | § 4.85 names the tables but does not contain them — the marker is the whole point                                                                           |
+| #   | Wrong answer                                                           | Why it is plausible                                                                                                                                                                            |
+| --- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a   | **§ 4.86 "Exceptional patterns of hearing impairment."**               | The sibling. **Measured 2026-10-21:** § 4.85 ranks **first** and § 4.86 **second** for "how is hearing loss rated" (dev MRR 0.8448, holdout MRR 0.8137); § 4.86 remains the defensible sibling |
+| b   | **§ 4.87 "Schedule of ratings—ear."**                                  | The _schedule_ substituted for the _evaluation rule_ — a different object                                                                                                                      |
+| c   | **§ 17.149 "Sensori-neural aids."**                                    | Part 17 prosthetics; "hearing loss" also surfaces it (measured top-5: 4.86, 4.85, 17.149, 3.383, 3.350)                                                                                        |
+| d   | An **eye** provision (e.g. § 4.76a, § 4.77)                            | "designation" and "table" recur across body systems                                                                                                                                            |
+| e   | Names Table VI / VIa **as if the table content were in front of them** | § 4.85 names the tables but does not contain them — the marker is the whole point                                                                                                              |
 
 #### F2-B (variant; the subject-gap probe)
 
@@ -450,9 +466,19 @@ workflow") is captured here and in the debrief (§6.9):**
 - The traumatic-stress provision: **§ 4.129 "Mental disorders due to
   traumatic stress."**
 - All six sections of the Mental Disorders subject group are reachable by
-  **browsing** Part 4 → Subpart B → "Mental Disorders"
+  **browsing** Chapter I → Part 4 → Subpart B → "Mental Disorders"
   (`ECFRfa64377db09ae97`; measured) — so the answer is reachable by
-  structure even where it is not reachable by vocabulary.
+  structure even where it is not reachable by vocabulary. **The browse
+  request needs `chapter=I` at every level**: measured 2026-10-21,
+  `GET /api/v1/browse?part=4` returns 404 "no 'part' level under title 38"
+  because Part 4 sits under Chapter I, not directly under the title.
+- **§ 4.129 is not reachable from the query "PTSD"** (measured): the tool's
+  curated acronym expansion is `posttraumatic stress` / `post-traumatic
+stress` — both carry the prefix "post-" — while § 4.129's heading reads
+  _"Mental disorders due to traumatic stress."_ The phrase **"traumatic
+  stress"** reaches it at rank 1; "PTSD" never does. § 4.129 is reachable
+  by browsing, or by that phrase. This is a known limit of the acronym map
+  and a candidate for a future packet; it is **not** a participant error.
 
 **Plausible wrong answers (pre-listed).**
 
@@ -460,7 +486,7 @@ workflow") is captured here and in the debrief (§6.9):**
 | --- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | a   | **§ 3.304 "Direct service connection; wartime and peacetime."**  | Searching `PTSD` returns § 3.304 first, then § 17.644, § 61.1, § 3.12, § 9.21 — **no rating provision in the top five**                                                                   |
 | b   | **§ 3.309 "Disease subject to presumptive service connection."** | The corpus's "PTSD" vocabulary lives here (verified: § 3.309 carries "PTSD", "posttraumatic", "post-traumatic" and "stress disorder"); it is a service-connection rule, not a rating rule |
-| c   | **§ 4.130 only** — the schedule, and the chain stops there       | The half-answer. **This is the observation that matters for the deferred subject index**: the participant found the rating schedule and never reached the diagnosis rule                  |
+| c   | **§ 4.130 only** — the schedule, and the chain stops there       | The half-answer. **This is the observation that matters for the subject-index decision**: the participant found the rating schedule and never reached the diagnosis rule                  |
 
 **F2-B is scored on the chain, not on the first hit.** A participant who
 reaches § 4.130 and § 4.125 by any route (search, browse, or their own
@@ -485,8 +511,12 @@ the demand evidence for the subject-index decision
   § 3.352, § 3.401, § 3.552, § 3.810, § 4.115b, § 4.116, § 4.71a, § 4.73,
   § 4.75, § 4.79, § 4.85, § 4.96, § 4.97.
 - The participant says § 4.83 **exists in the CFR but is not in this
-  index** — the availability flag means "not in this copy", not "does not
-  exist".
+  index**. **The tool's flag does not say that for them** (measured): it
+  reads `available: false`, and the UI renders it as "(not indexed)". That
+  wording says the section is _not available here_, not that it does not
+  exist; drawing the distinction — that it is in the CFR and simply missing
+  from this copy — is **the participant's inference, not the tool's
+  statement**, and the observer scores it accordingly.
 
 **Plausible wrong answers (pre-listed).**
 
@@ -533,15 +563,27 @@ real content of the task:
    (`docs/SPEC.md:241`, `src/core/historical.ts:18-19`,
    `src/core/historical.ts:47`).
 
+> **The change view does not print that limit** (measured 2026-10-21):
+> `/api/v1/redline` returns `{fromIssueDate, toIssueDate, citation, status,
+fromText, toText, hunks, coarse}` and `/api/v1/diff` returns
+> `{fromIssueDate, toIssueDate, changed, added, removed, truncated}` — **no
+> notice field on either**, and neither CLI command prints one. The sentence
+> is emitted by `cfr-free historical 2026-01-01 3.17` and written in
+> `docs/SPEC.md`. So the participant runs `historical` (or reads the SPEC) to
+> obtain it; **the observer must not read its absence from the change view
+> as the participant's error** — this requirement is only met by a
+> participant who goes looking for the limit outside the surface the task
+> named.
+
 **Plausible wrong answers (pre-listed).**
 
-| #   | Wrong answer                                          | Class                                                                                                                             |
-| --- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| a   | Reports "**no change**" and stops                     | `E1` — the redline's answer, and it is incomplete                                                                                 |
-| b   | Reports "**changed**" without saying **what** changed | `E1` — the diff's answer, and it is equally incomplete                                                                            |
-| c   | Uses **today's text** as the 2026-01-01 text          | `E4` — the exact failure M2's dated-provenance work exists to prevent (`ROADMAP.md` §M2)                                          |
-| d   | Reads a **coarse** diff as a line-by-line one         | `E1` — the coarse flag exists precisely so this cannot happen silently (`src/core/redline.ts:270-279`, `src/titan/ui.ts:479-481`) |
-| e   | Claims the tool reports the **served revision date**  | `E4` — it does not, and the tool says so                                                                                          |
+| #   | Wrong answer                                          | Class                                                                                                                                                                       |
+| --- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a   | Reports "**no change**" and stops                     | `E6` — the right provision, an incomplete claim (the redline's answer, unfinished)                                                                                          |
+| b   | Reports "**changed**" without saying **what** changed | `E6` — the right provision, an equally incomplete claim                                                                                                                     |
+| c   | Uses **today's text** as the 2026-01-01 text          | `E4` — the exact failure M2's dated-provenance work exists to prevent (`ROADMAP.md` §M2)                                                                                    |
+| d   | Reads a **coarse** diff as a line-by-line one         | `E6` — the right provision, an overstated claim; the coarse flag exists precisely so this cannot happen silently (`src/core/redline.ts:270-279`, `src/titan/ui.ts:479-481`) |
+| e   | Claims the tool reports the **served revision date**  | `E4` — it does not, and the tool says so                                                                                                                                    |
 
 **Spare provision:** § 3.314 "Basic pension determinations" changes in body
 text over the same window (27 hunks, measured) — a plain-text-change task
@@ -563,20 +605,23 @@ if the operator prefers F4 to have no subtlety.
 - The citation block: display form `38 C.F.R. § 4.130`, the heading,
   `Source: 38 CFR 4.130 (issue date 2026-10-16)`, and the dated
   verification URL (`src/titan/ui.ts:629-648`).
-- An export (`cfr-free export <path>`, or `jsonl` / `md` —
-  `src/commands/export.ts:98-137`).
+- An export **as `jsonl` or `md`** (`cfr-free export <path> --format jsonl`,
+  `src/commands/export.ts:98-137`). **The default format is a SQLite
+  snapshot**, which needs a SQLite reader to verify and so cannot be checked
+  with the tools most participants have; the task specifies `jsonl` (or `md`)
+  so the read-back is answerable.
 - **The participant opens the exported file and confirms the provision's
   text is in it.** This third part is the task: an export that was never
   read back is not a verified export.
 
 **Plausible wrong answers (pre-listed).**
 
-| #   | Wrong answer                                                                                  | Class                                                                            |
-| --- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| a   | "The export worked" — **never reads the exported file back**                                  | `E1` (unverified completion — the count is reported, the content is not checked) |
-| b   | Pastes a citation with **no issue date and no dated URL**                                     | `E5`                                                                             |
-| c   | Runs the export into a path that **already exists** and reports the refusal as a tool failure | `E1` — the refusal is deliberate (`src/commands/export.ts:110-115`)              |
-| d   | Uses the **current** URL instead of the dated one                                             | `E5`                                                                             |
+| #   | Wrong answer                                                                                  | Class                                                                                                           |
+| --- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| a   | "The export worked" — **never reads the exported file back**                                  | `E6` (unverified completion — the count is reported, the content is not checked)                                |
+| b   | Pastes a citation with **no issue date and no dated URL**                                     | `E5`                                                                                                            |
+| c   | Runs the export into a path that **already exists** and reports the refusal as a tool failure | `E6` — the right artefact, a wrong claim about it; the refusal is deliberate (`src/commands/export.ts:110-115`) |
+| d   | Uses the **current** URL instead of the dated one                                             | `E5`                                                                                                            |
 
 #### F5-B (variant; the incompleteness warning)
 
@@ -591,6 +636,17 @@ provision contains graphic content (rating tables) that is **not included**
 in this text, and the participant says the table must be checked at eCFR
 (`src/titan/ui.ts:643-647`).
 
+> **The composed block and the warning are emitted by the web UI only**
+> (measured 2026-10-21, and confirmed in the served `/ui.js`): `fillCitationBlock`
+> and its NOTE live in `src/titan/ui.ts:643-672`. The HTTP JSON API, the MCP
+> `get_section` tool and the CLI return the raw `[image content not included:
+…]` marker and the block's **components**, with no composed NOTE — the tool
+> never gives those surfaces a warning to drop. So a participant on the CLI,
+> MCP or JSON who notices the marker and **states in words** that the rating
+> table is a graphic not included in this copy has answered the task: the
+> observer scores `E0`, **not `E5`**. `E5` here is reserved for a surface
+> that did emit the warning and whose participant pasted without it.
+
 > **Measured: 9 provisions in the 2026-10-16 corpus carry the image
 > marker** — § 1.9 "Description, use, and display of VA seal and flag",
 > § 4.71 "Measurement of ankylosis and joint motion", § 4.71a "Schedule of
@@ -603,11 +659,11 @@ in this text, and the participant says the table must be checked at eCFR
 
 **Plausible wrong answers (pre-listed).**
 
-| #   | Wrong answer                                                                    | Class                                                             |
-| --- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| a   | Pastes the citation and says the table **is** included                          | `E1` — the paste implies coverage it does not have                |
-| b   | Notices the marker in the raw text but pastes the block **without** the warning | `E5`                                                              |
-| c   | Replaces the missing table with a **typed-out** version                         | `E1` — the product never transcribes graphics (`README.md:19-23`) |
+| #   | Wrong answer                                                                    | Class                                                                             |
+| --- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| a   | Pastes the citation and says the table **is** included                          | `E6` — the right provision, a claim it does not support                           |
+| b   | Notices the marker in the raw text but pastes the block **without** the warning | `E5` — **on the web UI only**, where the warning was emitted (see the note above) |
+| c   | Replaces the missing table with a **typed-out** version                         | `E6` — the product never transcribes graphics (`README.md:19-23`)                 |
 
 ### 6.8 The outcome classes (the observer's sheet)
 
@@ -615,17 +671,18 @@ Exactly one class per task attempt. The classes are named so the two
 things the ROADMAP cares about — **wrong provision** and **wrong version** —
 cannot be blurred together.
 
-| Class | Name                               | Meaning                                                                                                                                                                                                                                                |
-| ----- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `E0`  | Correct                            | The expected provision, and the answer addresses the question asked.                                                                                                                                                                                   |
-| `E1`  | Wrong provision (not defensible)   | A provision that is neither the expected one nor a defensible sibling — e.g. § 3.304 for a rating question, § 61.1 "Definitions".                                                                                                                      |
-| `E2`  | Wrong provision (wrong **object**) | The right subject area, the wrong object: the definition instead of the schedule (§ 3.384 for § 4.130), the schedule instead of the evaluation rule (§ 4.87 for § 4.85), the service-connection rule instead of the rating rule (§ 3.309 for § 4.130). |
-| `S`   | Defensible sibling                 | A different provision that a competent practitioner could reasonably have cited in answer to the question as written. **Not a tool failure. Not counted as correct.** Reported on its own line, with the justification.                                |
-| `E3`  | Incomplete chain                   | A correct first step and a missing second step (F2-B: the schedule, never the diagnosis rule). Each `E3` entry also carries a recorded sub-reason — vocabulary mismatch or concept not indexed (§8, SC-7).                                             |
-| `E4`  | Wrong version / wrong date         | The text quoted is not the version the task asked for, or a date is misread (issue date read as effective date; today's text used as the dated text).                                                                                                  |
-| `E5`  | Unverifiable citation              | The citation as given cannot be checked: no issue date, no dated URL, the current URL used where the dated one was required, or a completeness warning dropped.                                                                                        |
-| `U`   | Upstream unavailable               | eCFR unreachable or slow; the task could not be run. **Excluded from the participant's denominator and reported as an exclusion.**                                                                                                                     |
-| `X`   | Abandoned                          | The participant chose not to continue the task.                                                                                                                                                                                                        |
+| Class | Name                               | Meaning                                                                                                                                                                                                                                                                          |
+| ----- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `E0`  | Correct                            | The expected provision, and the answer addresses the question asked.                                                                                                                                                                                                             |
+| `E1`  | Wrong provision (not defensible)   | A provision that is neither the expected one nor a defensible sibling — e.g. § 3.304 for a rating question, § 61.1 "Definitions".                                                                                                                                                |
+| `E2`  | Wrong provision (wrong **object**) | The right subject area, the wrong object: the definition instead of the schedule (§ 3.384 for § 4.130), the schedule instead of the evaluation rule (§ 4.87 for § 4.85), the service-connection rule instead of the rating rule (§ 3.309 for § 4.130).                           |
+| `S`   | Defensible sibling                 | A different provision that a competent practitioner could reasonably have cited in answer to the question as written. **Not a tool failure. Not counted as correct.** Reported on its own line, with the justification.                                                          |
+| `E3`  | Incomplete chain                   | A correct first step and a missing second step (F2-B: the schedule, never the diagnosis rule). Each `E3` entry also carries a recorded sub-reason — vocabulary mismatch or concept not indexed (§8, SC-7).                                                                       |
+| `E4`  | Wrong version / wrong date         | The text quoted is not the version the task asked for, or a date is misread (issue date read as effective date; today's text used as the dated text).                                                                                                                            |
+| `E6`  | Right provision, wrong claim       | **The provision is the expected one and the claim made about it is wrong or incomplete** — never read the export back, "no change" and stop, say the table is included. **Not a citation error and not counted as one**: it is a completeness failure, reported on its own line. |
+| `E5`  | Unverifiable citation              | The citation as given cannot be checked: no issue date, no dated URL, the current URL used where the dated one was required, or — on a surface that emitted it — a completeness warning dropped.                                                                                 |
+| `U`   | Upstream unavailable               | eCFR unreachable or slow; the task could not be run. **Excluded from the participant's denominator and reported as an exclusion.**                                                                                                                                               |
+| `X`   | Abandoned                          | The participant chose not to continue the task.                                                                                                                                                                                                                                  |
 
 **The sibling rule (`S`) is the one that decides this study, so it is
 written down before the first session and applied by the observer at the
@@ -685,13 +742,17 @@ with its denominator attached. Nothing is recorded as an impression.
 ### 7.1 Task completion
 
 - `completed` (boolean): the artefact the task asked for was produced.
-- `outcome_class`: one of `E0 E1 E2 S E3 E4 E5 U X` (§6.8).
+- `outcome_class`: one of `E0 E1 E2 S E3 E4 E5 E6 U X` (§6.8).
 - `provisions_visited`: the citations the participant actually opened,
   in order.
 - `final_provision`: the provision the participant's answer rests on.
 - `expected_rank_in_results`: if the expected provision appeared in the
   participant's result list, its 1-based rank (this is what separates
   "the tool ranked it third" from "the tool never showed it").
+- `tool_calls`: the number of tool calls the attempt took (queries, section
+  reads, browses). **Zero means the artefact came from the participant's own
+  knowledge, not from the tool** — §5.3 rule 1 then does not count the
+  attempt as completed.
 - `route`: the surface used (`ui` / `cli` / `mcp` / `assistant-over-mcp` /
   `mixed`) and the sequence of surfaces if mixed.
 
@@ -708,11 +769,12 @@ with its denominator attached. Nothing is recorded as an impression.
   demand signal).
 - `class_legend`: the mapping the ROADMAP's phrase is read through, stated
   once so the criterion is auditable: **"a citation error" = `E1` + `E2`
-  (the wrong provision); "a version error" = `E4` (the wrong text or the
+  (the WRONG provision); "a version error" = `E4` (the wrong text or the
   wrong date); `E5` (the provision is right but the citation as written
-  cannot be checked) and `E3` (a right first step and a missing second
-  step) are reported but are **not** inside SC-1** — they are a
-  completeness question, not a wrong-answer question.** The operator may
+  cannot be checked), `E6` (the right provision, a wrong or incomplete
+  claim) and `E3` (a right first step and a missing second step) are
+  reported but are **not** inside SC-1** — they are a completeness
+  question, not a wrong-answer question.** The operator may
   change this mapping in the §8 "revise" cell before recruitment; the
   mapping used is recorded in the cohort header (§10.1).
 
@@ -800,7 +862,7 @@ arranging the cohort is a matter of sending it, not writing it.
 
 | #        | Proposed criterion                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Evidence that settles it                                                                          | Decision                  |
 | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------- |
-| **SC-1** | **≥ 3 of N participants complete ≥ 4 of the 5 core tasks with no `E1`/`E2`/`E4` outcome, and request another session.** This is the ROADMAP's suggested continue signal (`ROADMAP.md` §M6). "Citation error" is read as `E1` + `E2` and "version error" as `E4` (§7.2). **The two components are reported separately with their denominators — "core tasks completed clean: x/N" and "requested another session: y/N" — because the conjunction otherwise hides which half failed.** **It is an initial decision threshold, not statistical proof and not a revenue forecast.**                                                                                                                                                                                                                                                                                                                             | The per-participant core-task table (§10.2) and the return measure (§7.6).                        | **☑ accept** (2026-10-21) |
+| **SC-1** | **≥ 3 of N participants complete ≥ 4 of the 5 core tasks with no `E1`/`E2`/`E4` (an `E6` — the right provision, an incomplete claim — is a completeness failure and is reported separately) outcome, and request another session.** This is the ROADMAP's suggested continue signal (`ROADMAP.md` §M6). "Citation error" is read as `E1` + `E2` and "version error" as `E4` (§7.2). **The two components are reported separately with their denominators — "core tasks completed clean: x/N" and "requested another session: y/N" — because the conjunction otherwise hides which half failed.** **It is an initial decision threshold, not statistical proof and not a revenue forecast.**                                                                                                                                                                                                                 | The per-participant core-task table (§10.2) and the return measure (§7.6).                        | **☑ accept** (2026-10-21) |
 | **SC-2** | **Descriptive, not a gate.** The paired timing — median seconds, existing tool vs cfr-free (§7.4) — and each participant's "usable without a second lookup" yes/no are **reported descriptively**. A timing difference counts only if it clears the larger of **2 minutes** and **25 % of the existing-tool time** — the saving must be **at least** that bar, not merely above one of the two; a smaller saving, and a saving exactly equal to the bar, is scored a **tie**. Worked example: existing tool 600 s, cfr-free 480 s is a 120 s (20 %) saving — the bar is the larger of 120 s and 150 s, i.e. 150 s, so that run is a **tie**, not "faster". This evidence supports SC-4 and SC-6 and is **not** a CONTINUE trigger: stated preference plus unblinded timing at n = 5 will not carry a decision.                                                                                              | The paired run (§6.1), the time measures (§7.4), the debrief question 2 (§6.9).                   | **☑ accept** (2026-10-21) |
 | **SC-3** | **≥ 4 of N participants reach their first successful query within 30 minutes of starting**, and **every** installation obstacle is listed, with minutes lost, not averaged away. The clock is **elapsed time from session start, installation included**, to the first successful query (§7.4, §7.5). `U`-class (network/environment) exclusions are reported next to the rate they affect, never silently dropped.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `seconds_to_first_successful_query` (§7.4), the obstacle list and `install_minutes_total` (§7.5). | **☑ accept** (2026-10-21) |
 | **SC-4** | **≥ 3 of N participants return for a second session within 30 days** — or by their next real task, whichever comes first — **of their own initiative.** The operator records **"invited to return: y/N"** per participant, so that the return count is interpretable at n = 5.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | `returned_within_30_days` (§7.6).                                                                 | **☑ accept** (2026-10-21) |
@@ -936,7 +998,13 @@ product as it stands, verified rather than asserted:
 ```
 Cohort:            ______________________
 Participants:       N = ______   (attempted: ____  completed: ____  abandoned: ____)
-Corpus issue date: 2026-10-16  (2 970 provisions)
+Corpus size:       2 970 provisions (measured 2026-10-21)
+Corpus issue date: taken from the index at session time, NOT assumed —
+                   eCFR re-issues the corpus under a new date without
+                   changing a single provision, so a hardcoded date goes
+                   stale and an observer could score a correct answer `E4`.
+                   (The 2026-10-16 corpus re-issues as 2026-10-19 with 0
+                   provisions differing — measured.)
 Index build:       local, per participant   |   index issue date at session: __________
 Success criteria:  as agreed on __________  (see §8; any revision after this date invalidates the pilot)
 Observers:         ______________________
@@ -944,9 +1012,12 @@ Observers:         ______________________
 
 ### 10.2 Per-participant task table — the primary record
 
-One row per task attempt. `class` is one of `E0 E1 E2 S E3 E4 E5 U X`.
+One row per task attempt. `class` is one of `E0 E1 E2 S E3 E4 E5 E6 U X`.
 `exp_rank` is the 1-based rank of the expected provision in the
-participant's own result list, or `—`.
+participant's own result list, or `—`. **F2-B has three expected provisions
+with three different ranks**, so for that row write **each** rank
+(`4.130@6; 4.125 —; 4.129 —` — measured 2026-10-21); `—` on its own means
+"not in the result list" for a task with a single expected provision.
 
 ```
 P#  | task | surface | completed | class | final provision | exp_rank | seconds | notes (tool behaviour only)
@@ -964,7 +1035,8 @@ P#  | task | surface | completed | class | final provision | exp_rank | seconds 
 **Per-participant roll-up** (every cell carries its denominator):
 
 ```
-P# | core tasks completed clean (of 5) | E1+E2 rate (n/N) | sibling rate (n/N) | E4 rate (n/N) | E5 rate (n/N) | E3 count | total minutes | requests another session
+P# | core tasks completed clean (of 5) | E1+E2 rate (n/7 − U) | sibling rate (n/7 − U) | E4 rate (n/7 − U) | E5 rate (n/7 − U) | E6 rate (n/7 − U) | E3 count | total minutes | requests another session
+(the denominators are this participant's own attempts: 7 less any `U`)
 ```
 
 **Cohort roll-up** — every rate written with its real N:
@@ -979,11 +1051,13 @@ paired run: faster (clears the larger of 2 min / 25 %) |    /    |    paired N  
 paired run: tied (does not clear that bar)   |    /    |    paired N     |                |
 paired run: median seconds, existing      |    s    |        N        |                |
 paired run: median seconds, cfr-free      |    s    |        N        |                |
-E1+E2 rate (all families)                 |    /    |        N        |                |
-sibling rate (S)                          |    /    |        N        |                |
-E4 rate (all families)                    |    /    |        N        |                |
+E1+E2 rate (all families)                 |    /    | completed attempts (7N − U) |          |
+sibling rate (S)                          |    /    | completed attempts (7N − U) |          |
+E4 rate (all families)                    |    /    | completed attempts (7N − U) |          |
 E4 count in F1/F4/F5 (SC-5)               |    #    |  3N (F1/F4/F5)  |                |
-E5 rate                                   |    /    |        N        |                |
+E5 rate                                   |    /    | completed attempts (7N − U) |          |
+E6 rate (completeness failures)           |    /    | completed attempts (7N − U) |          |
+participants with >=1 E1 or E2            |    /    |        N        |                |
 E3 count (subject-gap probe, total)       |    /    |    N (F2-B)     |                |
 E3 count — (a) vocabulary mismatch        |    /    |    N (F2-B)     |                |
 E3 count — (b) concept not indexed        |    /    |    N (F2-B)     |                |
@@ -1013,8 +1087,11 @@ are never merged.
 The **E3 sub-reason** column records, for every `E3` row, why the chain
 broke: **(a) vocabulary mismatch** — the provision exists, but the
 participant's own words did not reach it — or **(b) concept not indexed** —
-no section covers the concept at all (§8, SC-7). It is blank for every
-other class. **Before the count is used as demand evidence, a second
+no section covers the concept at all (§8, SC-7). **It is filled only for
+F2-B rows, which are the subject-gap probe; for every other family write
+`n/a — not a subject-gap probe`**, because neither sub-reason applies
+outside that probe (F4's incomplete third step is an `E6`, not a subject-gap
+failure). It is blank for every other class. **Before the count is used as demand evidence, a second
 observer re-classifies a sample of the `E3` entries**; the disagreements
 are resolved in writing and counted (§13).
 
@@ -1081,6 +1158,16 @@ named follow-up rather than used to reverse the decision.
 
 **This is an initial decision rule applied to five people, not statistical
 proof of a population effect.**
+
+**The thresholds assume the planned N = 5.** "≥ 3 of N", "≥ 4 of N" and
+"fewer than 2 of N" are **absolute counts**, so below N = 3 they are either
+unsatisfiable or decided by one or two people. For **N < 3 the mapping is
+not evaluable**: report the evidence, and record the decision as `not
+evaluable at this N` — **not STOP**. (Measured 2026-10-21: at N = 1 the
+mapping produced `STOP` on "fewer than 2 of N requested another session",
+a field nobody can fill at that N, while every task had been answered
+correctly. §5.2's "the protocol works at any N" means the _tables_ fit any
+N — not that these _thresholds_ do.)
 
 **Two rules that go with the decision:**
 
@@ -1198,7 +1285,7 @@ F2-A SHORTHAND → CRITERIA  (also the paired-baseline task)
   Read: "A colleague's note reads: 'Hearing. Find the provision that tells
   you how to evaluate it, and tell me which Roman-numeral tables it uses.'"
   CORRECT: § 4.85 "Evaluation of hearing impairment."; Table VI and Table VIa
-  WRONG: 4.86 (sibling — measured FIRST for this query) | 4.87 (wrong object)
+  WRONG: 4.86 (sibling — measured SECOND; 4.85 now leads) | 4.87 (wrong object)
     | 17.149 | an eye section
 
 F2-B SHORTHAND → CRITERIA (variant; subject-gap probe)
