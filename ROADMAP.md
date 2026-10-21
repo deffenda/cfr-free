@@ -355,13 +355,43 @@ question: "is the top hit a DEFENSIBLE ANSWER?". Top-hit accuracy on the 46
 answerable queries is therefore **34 of 46** (was 29 of 46) and in-window
 **43 of 46** (was 42 of 46) — **a change in what the metric asks, not a
 retrieval improvement**; no ranking rule, synonym or candidate-set rule
-changed, and the two figures are not the same measurement. What survives as
-genuine ranking work: about **nine** in-window-but-not-first cases where the
-retrieved provision is a different benefit type, a narrower exception, or a
-mechanic that presupposes the entitlement — and **one** clear failure, § 9.21
-for "traumatic brain injury compensation", a Part 9 servicemembers'-insurance
-provision whose (c)(17) names "Traumatic Brain Injury" verbatim and pays
-$25,000 for it, beating the real rating provision on body repetition.
+changed, and the two figures are not the same measurement.
+
+**And the residual has been worked (2026-10-21, `496d24f`).** The ranking
+round shipped a demotion for a heading that ANNOUNCES an exception (§ 4.86
+"Exceptional patterns of hearing impairment." above § 4.85 "Evaluation of
+hearing impairment.") and a deterministic `s.citation` tie-break for rows
+that tie on score. Top-hit accuracy is now **35 of 46** — this time a
+genuine retrieval improvement, measured as one dev query changing and the
+holdout's per-query output staying identical. What survives as ranking work
+is **eight** in-window-but-not-first cases, every sibling the committee
+proposed for them REJECTED on the question-asked principle
+(`docs/research/expectation-adjudication-2026-10-21.md` §11.2): a different
+benefit type (§ 17.151's invalid lifts, three queries), an eligibility rule
+where a rate was asked for (§ 3.1701), who may be **examined** rather than
+who is **eligible** (§ 17.160), the lender's authority to **close** a loan
+rather than the underwriting standards (§ 36.4225), and **apportionment** —
+a mechanic that presupposes the entitlement (§ 3.455). Plus **one** clear
+failure, § 9.21 for "traumatic brain injury compensation", a Part 9
+servicemembers'-insurance provision whose (c)(17) names "Traumatic Brain
+Injury" verbatim and pays $25,000 for it, beating the real rating
+provision on body repetition.
+
+**§ 9.21 is NOT fixable by a ranking rule** and is not fixed here. The
+heading-phrase key has nothing to fire on (no heading carries the query's
+phrase, and "compensation" has no entry in the curated expansion map); all
+of § 9.21, § 3.350 and § 4.124a match the AND tier; and only bm25's body
+frequency separates them ("traumatic" 15 times against 2, 2 and 1). The
+fixes that would work — a per-part rule, a § 9.21 blocklist, a bm25 retune,
+an abstention band — have each been measured and rejected. The honest
+provisioning is **context, not rank**: the part title beside each hit, so a
+reader sees at a glance that § 9.21 is Part 9 (servicemembers' group life
+insurance) and the rating provisions are not. That is a wire-contract change
+(MEDIUM), and it is **not** a schema change: the eCFR structure tree is
+already in the index as `meta.structure_json`, `listParts()` already joins
+parts to their titles, and every part in use has a title (measured on the
+2026-10-16 corpus: 59 part nodes, 54 parts in use, no section without a
+part).
 
 **Completion records for the items above** (the roadmap asks for the
 implementation PR, the reviewed SHA and verdict, and the verified merge SHA),
@@ -374,6 +404,7 @@ plus the M1 inventory correction recorded below:
 | M3-c (the ORDER of the 39 + the sibling proposals)                                | #99      | `3a68bdc` → RE_AFFIRM 0/0/0                                                                    | `4c5060e`                        | `npm run ci` exit 0, `scripts/validate.sh` GATE: PASS, 636 tests                                                    |
 | M3-a (the narrower grounding form)                                                | #89, #90 | `f4790dc` → APPROVE 0/0/2 (#89); `a1c1084` → APPROVE 0/0/0, RE_AFFIRM 0/0/0 at `44cdd35` (#90) | `2256ad8` (#89), `1ce6e28` (#90) | `npm run ci` exit 0, `scripts/validate.sh` GATE: PASS, 609 tests                                                    |
 | M3-d (the heading-phrase ranking key)                                             | #92      | `e0ca4ed` → APPROVE (no P0/P1; both sets re-measured by the reviewer against the base)         | `69ea296`                        | `npm run ci` exit 0 (97.27% stmts / 91.27% branches), `scripts/validate.sh` GATE: PASS, 610 tests                   |
+| M3-d follow-up (the exception demotion + the citation tie-break)                  | #105     | `d0fc259` → APPROVE 0/0/0; `3f17920` → APPROVE 0/0/0 (re-affirm after the merge)               | `496d24f`                        | `npm run ci` exit 0 (97.31% stmts / 91.21% branches), 639 passed \| 1 skipped, `scripts/validate.sh` GATE: PASS     |
 | M3-e (the hearing vocabulary bridge)                                              | #93      | `6e14e00` → APPROVE 0/0/0; `f6ce915` → RE_AFFIRM 0/0/0                                         | `86619eb`                        | `npm run ci` exit 0 (97.29% stmts / 91.21% branches), `scripts/validate.sh` GATE: PASS, 610 tests                   |
 | M3-e (the OR candidate set)                                                       | #94      | `f8baa21` → APPROVE 0/0/0                                                                      | `8d9f6a3`                        | `npm run ci` exit 0 (97.29% stmts / 91.2% branches), `scripts/validate.sh` GATE: PASS, 614 tests                    |
 | M5 slice 4 (browse descent)                                                       | #88      | `d6fadff` → APPROVE_WITH_NITS 0/0/2                                                            | `b0b2bf2`                        | `npm run ci` exit 0 (97.28% / 91.21%), `scripts/validate.sh` GATE: PASS, 44/44 openapi-conformance                  |
