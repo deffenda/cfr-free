@@ -250,7 +250,7 @@ FROM sections_fts
 JOIN sections s ON s.id = sections_fts.rowid
 LEFT JOIN and_hits a ON a.citation = s.citation
 WHERE sections_fts MATCH ?${where}
-ORDER BY ${orderBy}score
+ORDER BY ${orderBy}score, s.citation
 LIMIT ? OFFSET ?`;
 
 /**
@@ -625,6 +625,22 @@ function headingMatchKey(terms: readonly QueryTerm[]): { clause: string; params:
   return { clause: `(CASE WHEN ${tests.join(' OR ')} THEN 1 ELSE 0 END) DESC, `, params };
 }
 
+/**
+ * A heading that ANNOUNCES an exception ("Exceptional patterns of ...",
+ * "Exceptions to ...") names a case the rule does not cover, not the rule
+ * the question asks about: for "how is hearing loss rated" both § 4.85
+ * ("Evaluation of hearing impairment.") and § 4.86 ("Exceptional patterns of
+ * hearing impairment.") carry the corpus's bridge phrase, so the
+ * heading-phrase key ties and body repetition hands the answer to the
+ * exception. Demote the announcing heading — unless the query itself asks
+ * about exceptions, in which case it IS the answer. ONE fixed GLOB prefix
+ * deliberately covers both spellings ('exception*' matches "Excepted",
+ * "Exceptions" and "Exceptional"); it reads the corpus's own headings and
+ * no per-query or per-part list.
+ */
+const EXCEPTION_DEMOTION_KEY =
+  "(CASE WHEN lower(s.heading) GLOB 'exception*' THEN 1 ELSE 0 END) ASC";
+
 /** True for SQLITE_BUSY/SQLITE_LOCKED failures (concurrent writer). */
 function isBusyError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
@@ -993,7 +1009,10 @@ export class Store {
    *
    *   1. the heading-phrase key (SPEC §4.1) DESC,
    *   2. the AND-tier membership DESC,
-   *   3. bm25 ASC (lower is better).
+   *   3. the exception demotion ASC (gated off when the query itself
+   *      asks about exceptions),
+   *   4. bm25 ASC (lower is better),
+   *   then `s.citation` ASC as the deterministic tie-break.
    *
    * `total` is the size of the candidate set — what the pagination walks.
    * Optional `part`/`kind`/`chapter` filters are exact column matches
@@ -1021,7 +1040,13 @@ export class Store {
     }
 
     const key = headingMatchKey(terms);
-    const sql = SELECT_MATCHES_SQL(filterClause(filters), `${key.clause}${AND_TIER_KEY}, `);
+    const demotion = terms.some((term) => term.term.toLowerCase().startsWith('exception'))
+      ? ''
+      : `${EXCEPTION_DEMOTION_KEY}, `;
+    const sql = SELECT_MATCHES_SQL(
+      filterClause(filters),
+      `${key.clause}${AND_TIER_KEY}, ${demotion}`,
+    );
     const rows = this.stmt(sql).all(
       andQuery,
       orQuery,
