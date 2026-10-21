@@ -270,9 +270,9 @@ if ! tool_ok npx; then
   finish tests UNAVAILABLE "$((SECONDS - start))" 'npx not found'
 elif [ "$all" -eq 1 ]; then
   printf 'note: test/live.test.ts excluded (network-dependent live test)\n'
-  # test/no-conflict-markers.test.ts is excluded here and run by the
-  # markers section below, so it runs exactly once in every mode.
-  if npx vitest run --exclude 'test/live.test.ts' --exclude 'test/no-conflict-markers.test.ts' >"$tmp/tests.log" 2>&1; then
+  # The two document-shape tests are excluded here and run by the markers
+  # and tables sections below, so each runs exactly once in every mode.
+  if npx vitest run --exclude 'test/live.test.ts' --exclude 'test/no-conflict-markers.test.ts' --exclude 'test/markdown-tables.test.ts' >"$tmp/tests.log" 2>&1; then
     finish tests pass "$((SECONDS - start))"
   else
     finish tests FAIL "$((SECONDS - start))" "$(fail_reason "$tmp/tests.log")"
@@ -324,6 +324,25 @@ elif npx vitest run test/no-conflict-markers.test.ts >"$tmp/markers.log" 2>&1; t
   fi
 else
   finish markers FAIL "$((SECONDS - start))" "$(fail_reason "$tmp/markers.log")"
+fi
+
+section 'tables (every markdown table is rectangular — test/markdown-tables.test.ts)'
+start=$SECONDS
+# A ragged markdown table is invisible in a diff and to prettier: the row
+# count and the cell count have to be computed. The TEST is the source of
+# truth for the rule; this section runs it rather than re-implementing it.
+if ! tool_ok npx; then
+  finish tables UNAVAILABLE "$((SECONDS - start))" 'npx not found'
+elif [ ! -f test/markdown-tables.test.ts ]; then
+  finish tables UNAVAILABLE "$((SECONDS - start))" 'test/markdown-tables.test.ts not found'
+elif npx vitest run test/markdown-tables.test.ts >"$tmp/tables.log" 2>&1; then
+  if grep -q 'skipped' "$tmp/tables.log"; then
+    finish tables skip "$((SECONDS - start))" 'scan skipped (no git checkout or no tracked files)'
+  else
+    finish tables pass "$((SECONDS - start))"
+  fi
+else
+  finish tables FAIL "$((SECONDS - start))" "$(fail_reason "$tmp/tables.log")"
 fi
 
 section 'scan (tools/security-scan.sh — npm audit, osv-scanner, gitleaks, trivy, semgrep)'
