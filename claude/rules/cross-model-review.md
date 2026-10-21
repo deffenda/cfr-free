@@ -192,9 +192,10 @@ verdict is the paper trail the operator audits. Gate rounding:
   `opencode/nemotron-3-ultra-free`; mirror variants
   `opencode/nemotron-3.5-super-vl-free`,
   `opencode/nemotron-3.5-lightning-free`,
-  `opencode/glm-5.3-flash-free` (operator-approved 2026-10-21: both
-  Nemotron mirrors were provider-rate-limited for a whole session, so a
-  free non-Nemotron model was added to the ladder — still never the
+  `opencode/glm-5.3-flash-free`,
+  `opencode/longcat-2.5-preview-free` (operator-approved 2026-10-21:
+  both Nemotron mirrors were provider-rate-limited for a whole session, so
+  free non-Nemotron models were added to the ladder — still never the
   orchestrator's model and never the coder's model). The rules bind ROLES,
   not IDs: if an ID is unavailable or renamed, the operator updates the
   roster and the ladder logic still holds.
