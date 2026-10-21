@@ -11,6 +11,12 @@ the operator to send in their own voice, to people they already know.
 Nothing here is sent automatically, there is no telemetry, and the tool
 never initiates follow-up (`practitioner-pilot.md` §9.7).
 
+**This pack is used alongside the protocol**, not instead of it: the
+scenario texts are in the protocol's Appendix A, and the results templates
+are in its §10. The pack carries the invitation, the consent conversation
+and the run order; the protocol carries the scenarios and the sheets, so
+the two cannot drift apart.
+
 ---
 
 ## 1. The invitation (draft — edit, then send)
@@ -37,7 +43,7 @@ never initiates follow-up (`practitioner-pilot.md` §9.7).
 > Want to take a look?
 
 **Before sending it, check:** the participant can run Node.js ≥ 22.5 and
-reach `ecfr.gov` (§5.1) — the tool is not on npm and there is no hosted
+reach `ecfr.gov` (§5.1 inclusion; §12) — the tool is not on npm and there is no hosted
 service, so the session runs on _their_ machine (§12).
 
 ---

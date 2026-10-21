@@ -313,8 +313,9 @@ needs a curated, corpus-verified subject index (a benefit/topic → sections
 map): a roadmap-sized build with a curation and maintenance cost, not a
 search tweak. **DECIDED (2026-10-21): the subject index is NOT BUILT**, and the
 decision is not a deferral. The measured demand is **one expected provision
-in 92** unreachable by vocabulary, against a curation and maintenance
-burden over 2,970 provisions — and the repository's standing rule is that
+in the current 92-member expected set** unreachable by vocabulary (the
+M3-e row's 68 is the PRE-adjudication count), against a curation and
+maintenance burden over 2,970 provisions — and the repository's standing rule is that
 scope does not grow ahead of evidence. The reopen condition is **fixed now,
 before any data exists**, so the decision cannot be reopened by
 re-interpreting it later:
@@ -641,9 +642,9 @@ reviewed the seven success criteria in `docs/research/practitioner-pilot.md`
 revised**, as recorded in the protocol, and the previously unhandled §11.2
 branch is closed — a cohort that misses SC-1 while at least 2 of N asked
 for another session is a CHANGE, not an unhandled case. **Operator
-acceptance of the criteria remains the precondition before recruitment:**
-the committee's review is not acceptance, and the pilot is not recruited
-until the operator ticks accept / revise / reject per criterion.
+**The criteria were agreed on 2026-10-21** (the §8 table's decision column
+records it), so the M6 acceptance condition is met; what remains is
+operator-arranged: recruitment and consent, and the sessions themselves.
 
 ### M7 — Integrations and support, conditional on pilot demand
 
