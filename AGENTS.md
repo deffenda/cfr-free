@@ -173,9 +173,10 @@ Two consecutive rounds by the SAME reviewer model whose verdicts
 classify as mechanically weak-effort is a process fault:
 
 1. The next round executes the **cross-check round protocol** in
-   `claude/rules/cross-model-review.md` ("Elevated rubric"): the
-   mirror-variant reviewer re-runs the SAME packet, never having seen
-   the first verdict; the adjudicator compares the verdict class, the
+   `claude/rules/cross-model-review.md` ("Elevated rubric"): a
+   different eligible free-tier reviewer — never the orchestrator's
+   model, never the coder's, and never the first reviewer's — re-runs
+   the SAME packet, never having seen the first verdict; the adjudicator compares the verdict class, the
    P0 counts, and the P1 counts — a different class, differing P0
    counts, or P1 counts differing by 2 or more escalate to the
    operator with both verdicts attached, as does a pair where neither

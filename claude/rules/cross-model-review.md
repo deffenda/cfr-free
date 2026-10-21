@@ -142,8 +142,10 @@ concretely:
 
 1. The SAME original packet — unchanged, or re-issued with only
    verbatim fixes if the packet itself was audited and found
-   defective — is re-sent to a **mirror-variant reviewer model** (see
-   the model roster above).
+   defective — is re-sent to a **different eligible free-tier reviewer
+   model** (see the model roster above): never the orchestrator's model,
+   never the coder's model, and never the FIRST reviewer's model. A
+   Nemotron mirror is used while the Nemotron family's quota allows.
 2. The mirror reviewer has NEVER seen the first verdict (packet rules
    apply in full; providing the first verdict to the mirror reviewer is
    itself an anchoring violation). It returns the standard mandate
@@ -183,9 +185,10 @@ verdict is the paper trail the operator audits. Gate rounding:
 
 ## Reviewer model and availability ladder
 
-- Primary reviewer role: a Nemotron-family free variant, **never the
-  orchestrator's model, never the coder's model**. Fresh subagent
-  context, model passed explicitly per round.
+- Primary reviewer role: the preferred free-tier model — the Nemotron
+  family when its quota allows — **never the orchestrator's model, never
+  the coder's model**. Fresh subagent context, model passed explicitly
+  per round.
 - **Model roster** (operator-maintained; current values are visible in
   this file's git history — the roster is updated by a one-line PR
   whenever a model ID changes): **free is the roster.** Any free-tier
@@ -195,16 +198,21 @@ verdict is the paper trail the operator audits. Gate rounding:
   `opencode/nemotron-3-ultra-free`, mirrors
   `opencode/nemotron-3.5-super-vl-free` and
   `opencode/nemotron-3.5-lightning-free` — and is used whenever its
-  quota allows. When it does not (as on 2026-10-21, when both mirrors
-  were provider-rate-limited for a whole session and the primary carried
-  every review alone), the ladder falls to any other free-tier model the
-  operator has enabled — `opencode/glm-5.3-flash-free`,
-  `opencode/longcat-2.5-preview-free`, and any further free model. Paid
-  models remain an operator-approved escalation only, made in chat. The
-  rules bind ROLES, not IDs: if an ID is unavailable or renamed, the
-  operator updates the roster and the ladder logic still holds.
-- Transient upstream 5xx (e.g. 503): retry the same model once, then
-  fall to any mirror variant with the IDENTICAL packet.
+  quota allows. When it does not (as on 2026-10-21, when both **Nemotron**
+  mirrors were provider-rate-limited for a whole session and the Nemotron
+  primary carried every **Nemotron-family** review alone — operator
+  roster decision, learning journal 2026-10-21), the ladder falls, **with
+  the IDENTICAL packet**, to any other free-tier model the operator has
+  enabled (the working set is the `-free` tier) — for example
+  `opencode/longcat-2.5-preview-free`, and only a model that is neither
+  the orchestrator's nor the coder's. Paid models remain an
+  operator-approved escalation only, made in chat. The rules bind ROLES,
+  not IDs: if an ID is unavailable or renamed, the operator updates the
+  roster and the ladder logic still holds.
+- Transient upstream 5xx (e.g. 503), or an exhausted quota: retry the
+  same model once, then fall to the next eligible free-tier model in the
+  ladder (a Nemotron mirror while the Nemotron family's quota allows) —
+  always with the IDENTICAL packet.
 - Rubber-stamp tripwire (see AGENTS.md, "Rubber-stamp tripwire"):
   two consecutive mechanically weak-effort rounds by the same reviewer
   model → the next round executes the "Elevated rubric (cross-check
