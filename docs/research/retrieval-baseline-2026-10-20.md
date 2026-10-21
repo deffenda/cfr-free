@@ -293,3 +293,10 @@ The demotion flips "how is hearing loss rated" from `4.86, 4.85` to
 `4.85, 4.86`. The dev per-query diff against baseline is that single line
 and nothing else; the holdout per-query list is identical to baseline
 (only timings differ).
+
+Combined over both sets, and against the committee's adjudicated expected
+sets, that is **35 of 46** answerable queries with an expected citation
+first (was 34 of 46) and **43 of 46** in the top five — the first number
+a genuine retrieval improvement, the second unchanged. The eight
+remaining in-window-but-not-first cases are listed with the committee's
+ruling on each in `docs/research/practitioner-pilot.md` §2.

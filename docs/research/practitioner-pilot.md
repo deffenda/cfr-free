@@ -33,16 +33,26 @@ output.
    protocol must therefore measure whether subject-level questions arise
    in real use, not whether a specific retrieval misses.
 3. **The ranking investment is currently unmeasurable as a _preference_.**
-   On the frozen 50-query evaluation set, **42 of the 46 answerable
-   queries have their expected provision in the top five, but only 29 have
-   it first** — the top hit is right about **63%** of the time
-   (re-measured 2026-10-21; the runner's own metric — §4). About **ten of
-   the thirteen** in-window-but-not-first cases are _sibling provisions
-   where the retrieved section is a defensible answer_ (§ 3.351 for
-   § 3.350, § 4.86 for § 4.85, § 4.17 for § 4.16), which is the
-   ROADMAP's recorded characterisation (`ROADMAP.md` §M3). Because so
-   many of those are defensible answers, "top-1 is 63%" **cannot be read as
-   "37% of the time the tool misleads the practitioner."** This study is
+   On the frozen 50-query evaluation set, **43 of the 46 answerable
+   queries have their expected provision in the top five, but only 35 have
+   it first** — the top hit is right about **76%** of the time (measured
+   2026-10-21 on the committee's adjudicated expectations, re-measured
+   after the ranking round in PR #105; the runner's own metric — §4). The
+   **eight** in-window-but-not-first cases are _not_ a block of harmless
+   near-misses: the adjudication committee **rejected** every sibling
+   proposed for them — § 17.151 (invalid lifts) for the three
+   special-monthly-compensation queries, plus § 17.160, § 3.1701,
+   § 36.4225 and § 3.455 — on the principle that a sibling counts when it
+   **answers the question the query asks**, not when it merely shares
+   vocabulary with the expected provision
+   (`docs/research/expectation-adjudication-2026-10-21.md` §11.2). What is
+   left is a different benefit type, an eligibility rule where a rate was
+   asked for, a mechanic that presupposes the entitlement, and one
+   phrase-perfect hit on the wrong programme (§ 9.21). The exception case
+   (§ 4.86 for § 4.85) was rejected on the same principle and has since
+   been closed by the ranking round in PR #105; the rest are recorded in
+   the ROADMAP (`ROADMAP.md` §M3). So "top-1 is 76%" **cannot be read as
+   "24% of the time the tool misleads the practitioner."** This study is
    the instrument that separates the two readings: it observes whether a
    practitioner, shown the heading and the snippet, lands on the right
    provision anyway.
@@ -159,51 +169,54 @@ CFR_INDEX_PATH=/tmp/eval-index.sqlite npx tsx test/fixtures/retrieval/run.ts dev
 CFR_INDEX_PATH=/tmp/eval-index.sqlite npx tsx test/fixtures/retrieval/run.ts holdout
 ```
 
-| Metric (frozen 50: 30 dev + 20 holdout) | Measured 2026-10-21                    |
-| --------------------------------------- | -------------------------------------- |
-| Queries / answerable                    | 50 / 46                                |
-| Expected provision in the **top five**  | **42 of 46**                           |
-| Expected provision **first**            | **29 of 46** (top hit right ≈ **63%**) |
-| In-window-but-not-first                 | **13**                                 |
-| Mean reciprocal rank                    | dev 0.7529 · holdout 0.7549            |
+| Metric (frozen 50: 30 dev + 20 holdout) | Measured 2026-10-21, adjudicated expectations |
+| --------------------------------------- | --------------------------------------------- |
+| Queries / answerable                    | 50 / 46                                       |
+| Expected provision in the **top five**  | **43 of 46**                                  |
+| Expected provision **first**            | **35 of 46** (top hit right ≈ **76%**)        |
+| In-window-but-not-first                 | **8**                                         |
+| Mean reciprocal rank                    | dev 0.8448 · holdout 0.8137                   |
 
 The runner's own definitions are at `test/fixtures/retrieval/run.ts:110-113`
 and its aggregation at `test/fixtures/retrieval/run.ts:151-162`. The
-"29 / 42 / 13" figures match the ROADMAP's recorded numbers
-(`ROADMAP.md` §M3) and the M3-e row in the same section.
+"35 / 43 / 8" figures are the run at `496d24f` — the ranking round's merge —
+against the committee's adjudicated expectations. The pre-adjudication
+figures they replace were 29 / 42 / 13; both sets of numbers are recorded
+in the ROADMAP (`ROADMAP.md` §M3).
 
 Two things the tasks are built on, and one thing they are not:
 
-- **The thirteen in-window-but-not-first cases** (re-measured; each row is
-  the runner's own output):
+- **The eight in-window-but-not-first cases** (re-measured at `496d24f`; each
+  row is the runner's own output):
 
-  | #   | Query                                              | Top hit  | Expected (rank)          |
-  | --- | -------------------------------------------------- | -------- | ------------------------ |
-  | 1   | `SMC`                                              | 17.151   | 3.350 (2)                |
-  | 2   | `schizophrenia`                                    | 3.384    | 4.130 (2)                |
-  | 3   | `how is hearing loss rated`                        | **4.86** | **4.85 (2)**             |
-  | 4   | `total disability rating based on unemployability` | **4.17** | **4.16 (2)**             |
-  | 5   | `traumatic brain injury compensation`              | 9.21     | 3.350 (3), 4.124a (4)    |
-  | 6   | `Persian Gulf veterans compensation`               | 3.320    | 3.317 (2)                |
-  | 7   | `"schedule of ratings"`                            | 4.87a    | 4.130 (3)                |
-  | 8   | `special monthly compensation`                     | 17.151   | 3.350 (2)                |
-  | 9   | `veterans dental benefits eligibility`             | 17.160   | 17.161 (4), 3.381 (3)    |
-  | 10  | `military burial allowance rate table`             | 3.1701   | 3.1704 (2), 3.1705 (4)   |
-  | 11  | `va loan underwriting guidelines`                  | 36.4225  | 36.4340 (3), 36.4206 (4) |
-  | 12  | `DIC`                                              | 3.455    | 3.10 (5), 3.25 (3)       |
-  | 13  | `"special monthly compensation"`                   | 17.151   | 3.350 (2)                |
+  | #   | Query                                  | Top hit | Expected (rank)          |
+  | --- | -------------------------------------- | ------- | ------------------------ |
+  | 1   | `SMC`                                  | 17.151  | 3.350 (2)                |
+  | 2   | `special monthly compensation`         | 17.151  | 3.350 (2)                |
+  | 3   | `"special monthly compensation"`       | 17.151  | 3.350 (2)                |
+  | 4   | `traumatic brain injury compensation`  | 9.21    | 3.350 (3), 4.124a (4)    |
+  | 5   | `veterans dental benefits eligibility` | 17.160  | 17.161 (4), 3.381 (3)    |
+  | 6   | `military burial allowance rate table` | 3.1701  | 3.1704 (2), 3.1705 (4)   |
+  | 7   | `va loan underwriting guidelines`      | 36.4225 | 36.4206 (4), 36.4340 (3) |
+  | 8   | `DIC`                                  | 3.455   | 3.10 (5), 3.25 (3)       |
 
-  Rows 3 and 4 are the canonical sibling cases the ROADMAP names
-  (`ROADMAP.md` §M3): § 4.86 "Exceptional patterns of hearing
-  impairment" for § 4.85 "Evaluation of hearing impairment", and § 4.17
-  "Total disability ratings for **pension**…" for § 4.16 "…for
-  **compensation**…". Row 2 is the definition-instead-of-the-schedule case
-  (§ 3.384 "Psychosis" above § 4.130).
-  **This protocol does not re-adjudicate the ROADMAP's "about ten of the
-  thirteen" characterisation.** That adjudication — including the _order_
-  of the expectations — is the operator's recorded open action
-  (`ROADMAP.md` §M3). What the protocol does is observe whether a
-  practitioner experiences these same cases as failures.
+  Every sibling the committee proposed for these eight was **rejected**
+  (`docs/research/expectation-adjudication-2026-10-21.md` §11.2), each on
+  the question-asked principle: § 17.151 furnishes **invalid lifts** — a
+  different benefit type from the rating schedule (rows 1–3); § 17.160 says
+  who may be **examined**, not who is **eligible** (row 5); § 3.1701 is
+  **eligibility**, not the **rate** (row 6); § 36.4225 is the lender's
+  authority to **close** a loan, not the **underwriting standards** (row 7);
+  and § 3.455 is **apportionment** — a mechanic that presupposes the
+  entitlement rather than stating it (row 8). Row 4 is the record's one
+  clear ranking failure: § 9.21, the Part 9 servicemembers'-insurance loss
+  schedule, which names "Traumatic Brain Injury" verbatim and pays $25,000.
+  The hearing case that stood here before the ranking round (§ 4.86 for
+  § 4.85 — the exception, not the general rule) is **closed**: PR #105
+  demotes a heading that announces an exception, and the general evaluation
+  § 4.85 now leads. **This protocol does not re-adjudicate the committee's
+  rulings.** What it does is observe whether a practitioner experiences
+  these same cases as failures.
 
 - **The vocabulary gap is real and measurable.** The corpus says "hearing
   impairment" (14 provisions) where clients say "hearing loss" (3), and a
@@ -1017,14 +1030,14 @@ date | item | options considered | decision | evidence (table + row) | decided b
 **Pre-seeded rows** — the decisions this study exists to inform, each with
 its current state, so the log starts populated rather than empty:
 
-| Item                                                            | Current state                                                                                     | This study settles                                                                   |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| **M7 — integrations**                                           | Gated on M6 evidence (`ROADMAP.md` §M7)                                                           | Whether a destination is demonstrated; feeds `docs/research/integration-decision.md` |
-| **M8 — corpus/platform expansion**                              | Gated on M6 evidence + operator scope approval (`ROADMAP.md` §M8)                                 | Whether expansion has a demonstrated need, not a speculative one                     |
-| **The subject index** (curated benefit/topic → sections map)    | **DEFERRED** pending this study (`ROADMAP.md` §M3)                                                | The `E3` count (SC-7): do practitioners actually need subject-level reach?           |
-| **The ranking investment** (top-1 accuracy)                     | Scoped, not built; ~10 of 13 in-window-not-first cases are defensible siblings (`ROADMAP.md` §M3) | The sibling rate from §10.2: does the top-1 gap reach the practitioner as a failure? |
-| **The M5 workflow** (find → read → follow → change view → copy) | 4 of 4 slices shipped (`ROADMAP.md` §M5)                                                          | Whether the five steps are usable end to end by someone who did not build them       |
-| **The M6 study itself**                                         | Design proposed in this document                                                                  | Continue / change / stop, below                                                      |
+| Item                                                            | Current state                                                                                                                                         | This study settles                                                                   |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| **M7 — integrations**                                           | Gated on M6 evidence (`ROADMAP.md` §M7)                                                                                                               | Whether a destination is demonstrated; feeds `docs/research/integration-decision.md` |
+| **M8 — corpus/platform expansion**                              | Gated on M6 evidence + operator scope approval (`ROADMAP.md` §M8)                                                                                     | Whether expansion has a demonstrated need, not a speculative one                     |
+| **The subject index** (curated benefit/topic → sections map)    | **DEFERRED** pending this study (`ROADMAP.md` §M3)                                                                                                    | The `E3` count (SC-7): do practitioners actually need subject-level reach?           |
+| **The ranking investment** (top-1 accuracy)                     | Partly built: the exception case shipped in PR #105, leaving 8 in-window-but-not-first cases whose siblings the committee REJECTED (`ROADMAP.md` §M3) | The sibling rate from §10.2: does the top-1 gap reach the practitioner as a failure? |
+| **The M5 workflow** (find → read → follow → change view → copy) | 4 of 4 slices shipped (`ROADMAP.md` §M5)                                                                                                              | Whether the five steps are usable end to end by someone who did not build them       |
+| **The M6 study itself**                                         | Design proposed in this document                                                                                                                      | Continue / change / stop, below                                                      |
 
 ### 11.2 The continue / change / stop decision
 
