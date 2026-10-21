@@ -239,6 +239,22 @@ follow cross-references → paste-ready citations with source URLs.
 `cfr_free_disk_free_bytes`/`cfr_free_disk_total_bytes` gauges when the platform
 provides `fs.statfs` (as of boot or last refresh round); omitted otherwise.
 
+The three index-backed reads (`/api/v1/search`, `/api/v1/sections/:citation`,
+`/api/v1/browse`) send a strong `ETag` over the response payload. Resend it as
+`If-None-Match` and the server answers `304 Not Modified` with no body when the
+text has not changed, so a client can confirm the provision it quotes without
+downloading it again:
+
+```bash
+etag=$(curl -sD - -o /dev/null 'http://127.0.0.1:8787/api/v1/sections/4.125' \
+  | awk 'tolower($1) == "etag:" { print $2 }' | tr -d '\r')
+curl -s -o /dev/null -w '%{http_code}\n' -H "If-None-Match: $etag" \
+  'http://127.0.0.1:8787/api/v1/sections/4.125'   # 304
+```
+
+`/health`, `/metrics` and the two eCFR-fetching routes (`/api/v1/diff`,
+`/api/v1/redline`) carry no validator, and an error response is never a 304.
+
 ```bash
 curl 'http://127.0.0.1:8787/api/v1/search?q=traumatic%20brain%20injury&part=4'
 curl 'http://127.0.0.1:8787/api/v1/sections/4.125'

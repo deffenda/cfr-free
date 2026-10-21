@@ -15,11 +15,16 @@ info:
     [docs/SPEC.md §5](docs/SPEC.md#5-titan-http-api-get-only-json-bind-127001).
     No request bodies, no auth (loopback bind by default; `CFR_ALLOW_REMOTE=1`
     is required to expose it); every `GET` route has a `HEAD` twin with
-    identical status/headers and an empty body (src/titan/http-server.ts:63),
+    identical status/headers and an empty body (src/titan/http-server.ts:192),
     and the non-JSON routes are `GET /metrics` (Prometheus exposition) and the
     read-only web UI (`GET /`, `/ui.js`, `/ui.css` — static asset strings from
     src/titan/ui.ts; the HTML shell ships a strict Content-Security-Policy and
     zero inline script).
+    The three index-backed reads (`/api/v1/search`, `/api/v1/sections/{citation}`,
+    `/api/v1/browse`) carry a strong `ETag` over the response payload and answer
+    a matching `If-None-Match` with a bodyless `304` (RFC 9110 §13.1.2); the
+    eCFR-fetching routes, `/health`, `/metrics` and every error response carry
+    no validator.
     Errors are JSON `{ error, message }`; paths not listed under `paths` return
     404, and any method other than `GET`/`HEAD` returns 405 with
     `allow: GET, HEAD`. All schema fields listed under `required` are always
@@ -31,7 +36,7 @@ servers:
     description: Default loopback bind (CFR_HOST/CFR_PORT may override deliberately).
 paths:
   /:
-    # source: src/titan/http-server.ts:414
+    # source: src/titan/http-server.ts:544
     get:
       summary: Read-only web UI (HTML shell)
       responses:
@@ -49,19 +54,19 @@ paths:
       summary: Headers-only web UI probe
       responses:
         '200':
-          description: 'Status and headers as GET, including the Content-Security-Policy, empty body (src/titan/http-server.ts:109); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, including the Content-Security-Policy, empty body (src/titan/http-server.ts:238); errors mirror GET, also body-less.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /ui.js:
-    # source: src/titan/http-server.ts:418
+    # source: src/titan/http-server.ts:548
     get:
       summary: Web UI script (embedded string, no external assets)
       responses:
         '200':
-          description: 'The UI page script as text/javascript — an embedded string constant from src/titan/ui.ts, nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts:93).'
+          description: 'The UI page script as text/javascript — an embedded string constant from src/titan/ui.ts, nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts:222).'
           content:
             text/javascript:
               schema: { type: string }
@@ -74,19 +79,19 @@ paths:
       summary: Headers-only web UI script probe
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:109); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:238); errors mirror GET, also body-less.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /ui.css:
-    # source: src/titan/http-server.ts:422
+    # source: src/titan/http-server.ts:552
     get:
       summary: Web UI stylesheet (embedded string, no external assets)
       responses:
         '200':
-          description: 'The UI stylesheet as text/css — an embedded string constant from src/titan/ui.ts, nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts:93).'
+          description: 'The UI stylesheet as text/css — an embedded string constant from src/titan/ui.ts, nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts:222).'
           content:
             text/css:
               schema: { type: string }
@@ -99,14 +104,14 @@ paths:
       summary: Headers-only web UI stylesheet probe
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:109); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:238); errors mirror GET, also body-less.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /health:
-    # source: src/titan/http-server.ts:371
+    # source: src/titan/http-server.ts:501
     get:
       summary: Index freshness report
       responses:
@@ -124,14 +129,14 @@ paths:
       summary: Headers-only health check
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:63); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:192); errors mirror GET, also body-less.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /metrics:
-    # source: src/titan/http-server.ts:390
+    # source: src/titan/http-server.ts:520
     get:
       summary: Prometheus exposition
       responses:
@@ -149,28 +154,38 @@ paths:
       summary: Headers-only metrics check
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:63); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:192); errors mirror GET, also body-less.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/search:
-    # source: src/titan/http-server.ts:394
+    # source: src/titan/http-server.ts:524 (router), :279 (revalidatable send)
     get:
       summary: Full-text search over the local index
       responses:
         '200':
           description: 'Ranked hits plus the index freshness envelope; a query that is itself a citation (4.130, 38 CFR 4.16) is pinned first on page 1. Cache-Control: public, max-age=300.'
+          headers:
+            ETag:
+              description: 'Strong validator over the response payload — a quoted sha256 of the exact response bytes ("sha256-<hex>", src/titan/http-server.ts:70). Send it back as If-None-Match to revalidate.'
+              schema: { type: string }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SearchResponse' }
+        '304': { $ref: '#/components/responses/NotModified' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
       parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          description: 'Conditional request — when this header matches the current ETag (weak comparison, RFC 9110 §13.1.2), the server answers 304 Not Modified with no body.'
+          schema: { type: string }
         - name: q
           in: query
           required: true
@@ -197,13 +212,19 @@ paths:
       summary: Headers-only search probe
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:63); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:192); errors mirror GET, also body-less.'
+        '304': { $ref: '#/components/responses/NotModified' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
       parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          description: 'Conditional request — when this header matches the current ETag (weak comparison, RFC 9110 §13.1.2), the server answers 304 Not Modified with no body.'
+          schema: { type: string }
         - name: q
           in: query
           required: true
@@ -227,15 +248,20 @@ paths:
           description: 'Restrict to one chapter by Roman-numeral identifier — exact and case-sensitive (e.g. "I").'
           schema: { type: string, minLength: 1, maxLength: 8, pattern: '^[IVXLCDM]+$' }
   /api/v1/sections/{citation}:
-    # source: src/titan/http-server.ts:398
+    # source: src/titan/http-server.ts:528 (router), :297 (revalidatable send)
     get:
       summary: Full text of one section or appendix
       responses:
         '200':
           description: 'Markdown + text + metadata + cross-references. Cache-Control: public, max-age=3600.'
+          headers:
+            ETag:
+              description: 'Strong validator over the response payload — a quoted sha256 of the exact response bytes ("sha256-<hex>", src/titan/http-server.ts:70). Send it back as If-None-Match to revalidate.'
+              schema: { type: string }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SectionDetail' }
+        '304': { $ref: '#/components/responses/NotModified' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -243,6 +269,11 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
       parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          description: 'Conditional request — when this header matches the current ETag (weak comparison, RFC 9110 §13.1.2), the server answers 304 Not Modified with no body.'
+          schema: { type: string }
         - name: citation
           in: path
           required: true
@@ -252,7 +283,8 @@ paths:
       summary: Headers-only section probe
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:63); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:192); errors mirror GET, also body-less.'
+        '304': { $ref: '#/components/responses/NotModified' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -260,21 +292,31 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
       parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          description: 'Conditional request — when this header matches the current ETag (weak comparison, RFC 9110 §13.1.2), the server answers 304 Not Modified with no body.'
+          schema: { type: string }
         - name: citation
           in: path
           required: true
           description: 'Citation or appendix name — 4.125, § 4.125, or 38 CFR 4.125 — URL-encoded (≤ 120 chars).'
           schema: { type: string, maxLength: 120 }
   /api/v1/browse:
-    # source: src/titan/http-server.ts:402
+    # source: src/titan/http-server.ts:532 (router), :312 (revalidatable send)
     get:
       summary: Structure-tree navigation
       responses:
         '200':
           description: 'The node, its ancestor path, and its children; empty query returns the chapters. Cache-Control: public, max-age=3600.'
+          headers:
+            ETag:
+              description: 'Strong validator over the response payload — a quoted sha256 of the exact response bytes ("sha256-<hex>", src/titan/http-server.ts:70). Send it back as If-None-Match to revalidate.'
+              schema: { type: string }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BrowseResult' }
+        '304': { $ref: '#/components/responses/NotModified' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -282,6 +324,11 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
       parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          description: 'Conditional request — when this header matches the current ETag (weak comparison, RFC 9110 §13.1.2), the server answers 304 Not Modified with no body.'
+          schema: { type: string }
         - name: chapter
           in: query
           description: Chapter identifier (1–20 chars).
@@ -302,7 +349,8 @@ paths:
       summary: Headers-only browse probe
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:63); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:192); errors mirror GET, also body-less.'
+        '304': { $ref: '#/components/responses/NotModified' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -310,6 +358,11 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
       parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          description: 'Conditional request — when this header matches the current ETag (weak comparison, RFC 9110 §13.1.2), the server answers 304 Not Modified with no body.'
+          schema: { type: string }
         - name: chapter
           in: query
           description: Chapter identifier (1–20 chars).
@@ -327,7 +380,7 @@ paths:
           description: "Subject-group identifier (1–40 chars; the eCFR node id, e.g. `ECFRd158704dcab040e`); requires `part`. Subject groups hang off a part or a subpart, and hold the sections the flat tree could not reach (1,910 of the corpus's 2,953 sections)."
           schema: { type: string, minLength: 1, maxLength: 40 }
   /api/v1/diff:
-    # source: src/titan/http-server.ts:406
+    # source: src/titan/http-server.ts:536
     get:
       summary: Point-in-time provision diff between two eCFR issue dates
       responses:
@@ -356,7 +409,7 @@ paths:
       summary: Headers-only diff probe
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:63); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:192); errors mirror GET, also body-less.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '414': { $ref: '#/components/responses/UriTooLong' }
@@ -374,7 +427,7 @@ paths:
           description: 'End issue date (YYYY-MM-DD), later than `from`.'
           schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
   /api/v1/redline:
-    # source: src/titan/http-server.ts:410
+    # source: src/titan/http-server.ts:540
     get:
       summary: Line redline of one provision between two eCFR issue dates
       responses:
@@ -409,7 +462,7 @@ paths:
       summary: Headers-only redline probe
       responses:
         '200':
-          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:63); errors mirror GET, also body-less.'
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts:192); errors mirror GET, also body-less.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -435,19 +488,19 @@ paths:
 components:
   responses:
     BadRequest:
-      # source: src/titan/http-server.ts:164,489,494 (encoding, URL parse, byte caps) + :298 (service input) + :217 (diff params) + :279 (redline params)
+      # source: src/titan/http-server.ts:293,619,624 (encoding, URL parse, byte caps) + :428 (service input) + :347 (diff params) + :409 (redline params)
       description: '{ error: "invalid_input", message } — malformed URL or citation encoding, oversized q (800 bytes) or part (10 bytes), a service-level input rejection (incl. missing/empty `from`/`to` on /api/v1/diff, missing/empty `from`/`to`/`citation` on /api/v1/redline, and impossible dates like month 13).'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     NotFound:
-      # source: src/titan/http-server.ts:426 (no route), :295 (structure/service miss)
+      # source: src/titan/http-server.ts:556 (no route), :425 (structure/service miss)
       description: '{ error: "not_found", message } — any path not listed here, a citation absent from the index, a citation missing from BOTH dates on /api/v1/redline, or a nonexistent browse node (browse adds `available`: the identifiers that do exist).'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     MethodNotAllowed:
-      # source: src/titan/http-server.ts:465
+      # source: src/titan/http-server.ts:595
       description: '{ error: "method_not_allowed", message } — any method other than GET/HEAD, on any path.'
       headers:
         allow: { description: 'Always GET, HEAD.', schema: { type: string } }
@@ -455,13 +508,13 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     UriTooLong:
-      # source: src/titan/http-server.ts:481
+      # source: src/titan/http-server.ts:611
       description: '{ error: "uri_too_long", message } — request URL over 2048 bytes.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     RateLimited:
-      # source: src/titan/http-server.ts:472
+      # source: src/titan/http-server.ts:602
       description: '{ error: "rate_limited", message } — per-peer token bucket exhausted (armed only when CFR_ALLOW_REMOTE=1; loopback never throttles).'
       headers:
         retry-after: { description: Seconds to wait., schema: { type: integer } }
@@ -469,11 +522,21 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     InternalError:
-      # source: src/titan/http-server.ts:538
+      # source: src/titan/http-server.ts:668
       description: '{ error: "internal_error", message } — unexpected failure; details are logged server-side only.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    NotModified:
+      # source: src/titan/http-server.ts:157
+      description: "Not modified — the request's If-None-Match matched the current ETag (weak comparison, RFC 9110 §13.1.2: `*` matches any representation, a list matches when any member matches, and a weak validator matches the strong one). The ETag and Cache-Control of the 200 it replaces, and NO body. Only the index-backed reads can answer this way; an error response never does."
+      headers:
+        ETag:
+          description: 'The current strong validator — unchanged from the 200 it replaces.'
+          schema: { type: string }
+        Cache-Control:
+          description: 'The same cache policy as the 200 it replaces.'
+          schema: { type: string }
   schemas:
     Error:
       type: object
