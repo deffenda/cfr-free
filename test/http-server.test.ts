@@ -863,6 +863,9 @@ describe('Titan HTTP /api/v1/diff', () => {
     expect(headers.get('cache-control')).toBe('public, max-age=3600');
     expect(headers.get('x-content-type-options')).toBe('nosniff');
     expect(headers.get('cross-origin-resource-policy')).toBe('same-origin');
+    // The diff route fetches from eCFR per call: it is not an index-backed
+    // read, so it carries no validator and never answers a 304.
+    expect(headers.get('etag')).toBeNull();
   });
 
   it('rejects missing or empty date params with 400 before the service', async () => {
@@ -1036,6 +1039,9 @@ describe('Titan HTTP /api/v1/redline', () => {
     expect(headers.get('cache-control')).toBe('public, max-age=300');
     expect(headers.get('x-content-type-options')).toBe('nosniff');
     expect(headers.get('cross-origin-resource-policy')).toBe('same-origin');
+    // The redline route fetches from eCFR per call: it is not an index-backed
+    // read, so it carries no validator and never answers a 304.
+    expect(headers.get('etag')).toBeNull();
   });
 
   it('rejects each missing or empty required param with 400 before the service', async () => {
@@ -1108,5 +1114,225 @@ describe('Titan HTTP /api/v1/redline', () => {
       toIssueDate: TO_DATE,
       citation: '4.125',
     });
+  });
+});
+
+describe('Titan HTTP conditional requests (ETag / 304)', () => {
+  let temp: TempStore;
+  let server: http.Server;
+  let base: string;
+
+  beforeEach(async () => {
+    temp = openTempStore();
+    server = createHttpServer(new CFRService(temp.store, 7), createTestLogger());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      server.closeAllConnections();
+    });
+    temp.cleanup();
+  });
+
+  /** Fetch a path; the body is read once, as text (a 304 has none). */
+  async function request(
+    pathname: string,
+    init?: RequestInit,
+  ): Promise<{ status: number; text: string; headers: Headers }> {
+    const response = await fetch(`${base}${pathname}`, init);
+    return { status: response.status, text: await response.text(), headers: response.headers };
+  }
+
+  /** The three index-backed reads, with the Cache-Control each one carries. */
+  const INDEX_READS = [
+    { path: '/api/v1/search?q=mental+disorder', cacheControl: 'public, max-age=300' },
+    { path: '/api/v1/sections/4.125', cacheControl: 'public, max-age=3600' },
+    { path: '/api/v1/browse', cacheControl: 'public, max-age=3600' },
+  ] as const;
+
+  /** The ETag shape: a quoted sha256 over the response payload. */
+  const ETAG_SHAPE = /^"sha256-[0-9a-f]{64}"$/;
+
+  for (const route of INDEX_READS) {
+    it(`GET ${route.path} carries an ETag and the usual Cache-Control`, async () => {
+      const { status, headers } = await request(route.path);
+      expect(status).toBe(200);
+      expect(headers.get('etag')).toMatch(ETAG_SHAPE);
+      expect(headers.get('cache-control')).toBe(route.cacheControl);
+    });
+
+    it(`GET ${route.path} answers 304 to a matching If-None-Match`, async () => {
+      const first = await request(route.path);
+      const etag = first.headers.get('etag');
+      expect(etag).not.toBeNull();
+
+      const { status, text, headers } = await request(route.path, {
+        headers: { 'if-none-match': etag as string },
+      });
+      expect(status).toBe(304);
+      expect(headers.get('etag')).toBe(etag);
+      expect(headers.get('cache-control')).toBe(route.cacheControl);
+      // The same representation metadata as the 200 it replaces...
+      expect(headers.get('content-type')).toBe(first.headers.get('content-type'));
+      // ...and no body. No content-length either: on a 304 that field would
+      // describe the CACHED representation, not an empty one.
+      expect(text).toBe('');
+      expect(headers.get('content-length')).toBeNull();
+    });
+
+    it(`GET ${route.path} answers 200 with the body to a non-matching If-None-Match`, async () => {
+      const { status, text } = await request(route.path, {
+        headers: { 'if-none-match': '"something-else"' },
+      });
+      expect(status).toBe(200);
+      expect(text.length).toBeGreaterThan(0);
+      expect((JSON.parse(text) as Json)['error']).toBeUndefined();
+    });
+  }
+
+  it('matches If-None-Match per RFC 9110 §13.1.2 (star, weak validator, list)', async () => {
+    const path = '/api/v1/search?q=mental+disorder';
+    const etag = (await request(path)).headers.get('etag') as string;
+
+    // `*` matches any current representation.
+    const star = await request(path, { headers: { 'if-none-match': '*' } });
+    expect(star.status).toBe(304);
+    expect(star.text).toBe('');
+
+    // The comparison is the WEAK one: W/"x" matches the strong "x".
+    const weak = await request(path, { headers: { 'if-none-match': `W/${etag}` } });
+    expect(weak.status).toBe(304);
+    expect(weak.text).toBe('');
+
+    // A list matches when ANY member matches.
+    const list = await request(path, { headers: { 'if-none-match': `"other", ${etag}` } });
+    expect(list.status).toBe(304);
+    expect(list.text).toBe('');
+
+    // A member whose quoted tag holds a comma or an escaped quote must not
+    // break the list: the current ETag is still found after it.
+    const awkward = await request(path, {
+      headers: { 'if-none-match': `"a,b", "c\\"d", ${etag}` },
+    });
+    expect(awkward.status).toBe(304);
+    expect(awkward.text).toBe('');
+
+    // A list whose members all miss is a normal 200.
+    const miss = await request(path, { headers: { 'if-none-match': '"other", "another"' } });
+    expect(miss.status).toBe(200);
+    expect(miss.text.length).toBeGreaterThan(0);
+  });
+
+  it('gives different responses different ETags and the same response the same one', async () => {
+    // Two different sections.
+    const first = await request('/api/v1/sections/4.125');
+    const second = await request('/api/v1/sections/4.130');
+    expect(first.headers.get('etag')).not.toBe(second.headers.get('etag'));
+
+    // Two different searches.
+    const searchA = await request('/api/v1/search?q=mental+disorder');
+    const searchB = await request('/api/v1/search?q=hearing+impairment');
+    expect(searchA.headers.get('etag')).not.toBe(searchB.headers.get('etag'));
+
+    // The same request twice: the validator is deterministic.
+    const again = await request('/api/v1/search?q=mental+disorder');
+    expect(again.headers.get('etag')).toBe(searchA.headers.get('etag'));
+    const sectionAgain = await request('/api/v1/sections/4.125');
+    expect(sectionAgain.headers.get('etag')).toBe(first.headers.get('etag'));
+  });
+
+  it('changes the ETag when the indexed text changes, and only then', async () => {
+    const before = await request('/api/v1/sections/4.125');
+    const beforeEtag = before.headers.get('etag') as string;
+
+    // Re-index the same citation with different text.
+    temp.store.replaceAll(
+      [makeSection({ citation: '4.125', text: 'Amended body text for the same citation.' })],
+      '2026-10-09',
+      {
+        issue_date: '2026-10-09',
+        synced_at: new Date().toISOString(),
+        appendices_count: '0',
+        parser_version: '1',
+      },
+    );
+
+    const after = await request('/api/v1/sections/4.125');
+    const afterEtag = after.headers.get('etag') as string;
+    expect(afterEtag).not.toBe(beforeEtag);
+    // The stale validator gets the new body, not a 304: the text DID change.
+    const revalidated = await request('/api/v1/sections/4.125', {
+      headers: { 'if-none-match': beforeEtag },
+    });
+    expect(revalidated.status).toBe(200);
+    expect(revalidated.text).toContain('Amended body text');
+  });
+
+  it('never answers an error with a 304, whatever the request carries', async () => {
+    // A 404 for an unknown citation.
+    const missing = await request('/api/v1/sections/99.999', {
+      headers: { 'if-none-match': '*' },
+    });
+    expect(missing.status).toBe(404);
+    expect((JSON.parse(missing.text) as Json)['error']).toBe('not_found');
+    // An error carries no validator to revalidate.
+    expect(missing.headers.get('etag')).toBeNull();
+
+    // A 400 from the service's own input validation.
+    const invalid = await request('/api/v1/search?q=no', {
+      headers: { 'if-none-match': '*' },
+    });
+    expect(invalid.status).toBe(400);
+    expect(invalid.headers.get('etag')).toBeNull();
+
+    // A 404 for an unknown browse node.
+    const unknownNode = await request('/api/v1/browse?chapter=I&part=999', {
+      headers: { 'if-none-match': '*' },
+    });
+    expect(unknownNode.status).toBe(404);
+    expect(unknownNode.headers.get('etag')).toBeNull();
+
+    // The 405 precheck answers before any routing.
+    const wrongMethod = await request('/api/v1/search?q=mental+disorder', {
+      method: 'POST',
+      headers: { 'if-none-match': '*' },
+    });
+    expect(wrongMethod.status).toBe(405);
+    expect(wrongMethod.headers.get('etag')).toBeNull();
+  });
+
+  it('keeps HEAD as it was: the full headers and an empty body', async () => {
+    const get = await request('/api/v1/sections/4.125');
+    const head = await request('/api/v1/sections/4.125', { method: 'HEAD' });
+    expect(head.status).toBe(200);
+    expect(head.text).toBe('');
+    expect(head.headers.get('etag')).toBe(get.headers.get('etag'));
+    expect(head.headers.get('content-type')).toBe(get.headers.get('content-type'));
+    expect(head.headers.get('content-length')).toBe(get.headers.get('content-length'));
+    expect(head.headers.get('cache-control')).toBe(get.headers.get('cache-control'));
+  });
+
+  it('answers a HEAD with a matching If-None-Match with a bodyless 304', async () => {
+    const get = await request('/api/v1/sections/4.125');
+    const head = await request('/api/v1/sections/4.125', {
+      method: 'HEAD',
+      headers: { 'if-none-match': get.headers.get('etag') as string },
+    });
+    expect(head.status).toBe(304);
+    expect(head.text).toBe('');
+    expect(head.headers.get('etag')).toBe(get.headers.get('etag'));
+    expect(head.headers.get('cache-control')).toBe(get.headers.get('cache-control'));
+  });
+
+  it('gives no validator to the routes that are not index-backed reads', async () => {
+    // /health and /metrics are no-store; the UI assets are static.
+    for (const path of ['/health', '/metrics', '/', '/ui.js', '/ui.css']) {
+      const { status, headers } = await request(path);
+      expect(status, `${path} must stay a 200`).toBe(200);
+      expect(headers.get('etag'), `${path} must carry no ETag`).toBeNull();
+    }
   });
 });

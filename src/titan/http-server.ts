@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import http from 'node:http';
 import { CHANGE_LIST_CAP } from '../core/changes.js';
 import { ServiceError, type CFRService } from '../core/service.js';
@@ -44,20 +45,148 @@ const MAX_PART_BYTES = 10;
 
 type JsonBody = Record<string, unknown>;
 
+/**
+ * Options for the JSON sender. `revalidatable` marks the response as a
+ * cacheable index read: it carries a strong `ETag` over the payload and
+ * answers a matching `If-None-Match` with a bodyless 304. Only the three
+ * index-backed reads use it — `/health`, `/metrics`, the two eCFR-fetching
+ * routes and every error response answer normally.
+ */
+interface JsonSendOptions {
+  readonly revalidatable: boolean;
+}
+
+/** The marker for a revalidatable index read (see `JsonSendOptions`). */
+const REVALIDATABLE: JsonSendOptions = { revalidatable: true };
+
+/**
+ * The strong validator of an index-backed read: a quoted sha256 over the
+ * EXACT bytes the response carries (`"sha256-<hex>"`). It is derived from
+ * the payload, so the tag changes if and only if the body changes — the
+ * property a client needs to confirm the text it quoted is unchanged
+ * without downloading it again.
+ */
+function etagFor(payload: string): string {
+  return `"sha256-${createHash('sha256').update(payload, 'utf8').digest('hex')}"`;
+}
+
+/**
+ * The opaque tag of an entity-tag, without its weak marker. The
+ * `If-None-Match` comparison is the WEAK one (RFC 9110 §13.1.2): `W/"x"`
+ * and `"x"` are the same validator. The weak marker is `%s"W/"` — the
+ * grammar is case-sensitive, so a lowercase `w/` is not a weak marker.
+ */
+function stripWeak(tag: string): string {
+  return tag.startsWith('W/') ? tag.slice(2) : tag;
+}
+
+/**
+ * Split an `If-None-Match` field value into its entity-tag members. The
+ * members are comma-separated, but a comma inside a quoted opaque tag is
+ * part of that tag, so the scan tracks the quoting instead of splitting
+ * the raw string (RFC 9110 §5.6.1 list syntax).
+ */
+function splitEntityTags(value: string): string[] {
+  const members: string[] = [];
+  let current = '';
+  let quoted = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value.charAt(index);
+    if (quoted && char === '\\' && index + 1 < value.length) {
+      current += char + value.charAt(index + 1);
+      index += 1;
+      continue;
+    }
+    if (char === '"') {
+      quoted = !quoted;
+      current += char;
+      continue;
+    }
+    if (char === ',' && !quoted) {
+      members.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  members.push(current.trim());
+  return members;
+}
+
+/**
+ * Whether the request's `If-None-Match` matches the current ETag
+ * (RFC 9110 §13.1.2): `*` matches any current representation, a
+ * comma-separated list matches when ANY member matches, and a weak
+ * validator (`W/"x"`) matches the strong one (`"x"`).
+ */
+function ifNoneMatchMatches(req: http.IncomingMessage, etag: string): boolean {
+  const header = req.headers['if-none-match'];
+  // Node joins a repeated header with ", "; the array form is defensive.
+  const value = Array.isArray(header) ? header.join(', ') : header;
+  if (value === undefined) return false;
+  const trimmed = value.trim();
+  if (trimmed === '*') return true;
+  const current = stripWeak(etag);
+  for (const member of splitEntityTags(trimmed)) {
+    if (member === '') continue;
+    if (stripWeak(member) === current) return true;
+  }
+  return false;
+}
+
+/**
+ * The 304 (Not Modified) answer to a matching `If-None-Match`: the
+ * representation metadata of the 200 it replaces (content type, ETag,
+ * Cache-Control) and NO body. It carries no `content-length` either — on a
+ * 304 that field describes the CACHED representation, not an empty one, and
+ * a zero would tell the cache the text is empty.
+ */
+function sendNotModified(
+  res: http.ServerResponse,
+  etag: string,
+  cacheControl: string | undefined,
+): void {
+  const headers: http.OutgoingHttpHeaders = {
+    'content-type': JSON_HEADER,
+    etag,
+    [NOSNIFF]: 'nosniff',
+  };
+  if (cacheControl !== undefined) headers['cache-control'] = cacheControl;
+  res.setHeader('cross-origin-resource-policy', 'same-origin');
+  res.writeHead(304, headers);
+  res.end();
+}
+
+/**
+ * The JSON sender. A response marked `revalidatable` carries a strong
+ * `ETag` over the payload bytes and answers a matching `If-None-Match`
+ * with a bodyless 304; every other response answers with its body as
+ * before.
+ *
+ * Only a 200 is eligible for the conditional flow: an error response
+ * (400/404/405/…) is never a 304 and carries no validator to revalidate.
+ */
 function sendJson(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   status: number,
   body: JsonBody,
   cacheControl?: string,
+  options?: JsonSendOptions,
 ): void {
   const payload = JSON.stringify(body);
+  const etag = options?.revalidatable === true ? etagFor(payload) : undefined;
+  if (etag !== undefined && status === 200 && ifNoneMatchMatches(req, etag)) {
+    sendNotModified(res, etag, cacheControl);
+    return;
+  }
   const headers: http.OutgoingHttpHeaders = {
     'content-type': JSON_HEADER,
     'content-length': Buffer.byteLength(payload, 'utf8'),
     [NOSNIFF]: 'nosniff',
   };
   if (cacheControl !== undefined) headers['cache-control'] = cacheControl;
+  if (etag !== undefined) headers['etag'] = etag;
   res.setHeader('cross-origin-resource-policy', 'same-origin');
   res.writeHead(status, headers);
   if (req.method === 'HEAD') res.end();
@@ -147,7 +276,7 @@ function handleSearch(
     kind: (url.searchParams.get('kind') ?? undefined) as 'section' | 'appendix' | undefined,
     chapter: url.searchParams.get('chapter') ?? undefined,
   });
-  sendJson(req, res, 200, { ...result }, 'public, max-age=300');
+  sendJson(req, res, 200, { ...result }, 'public, max-age=300', REVALIDATABLE);
 }
 
 function handleSection(
@@ -165,7 +294,7 @@ function handleSection(
     return;
   }
   const section = service.getSection(citation);
-  sendJson(req, res, 200, { ...section }, 'public, max-age=3600');
+  sendJson(req, res, 200, { ...section }, 'public, max-age=3600', REVALIDATABLE);
 }
 
 function handleBrowse(
@@ -186,6 +315,7 @@ function handleBrowse(
     200,
     { node: result.node, path: result.path, children: result.children },
     'public, max-age=3600',
+    REVALIDATABLE,
   );
 }
 
