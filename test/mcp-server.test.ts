@@ -87,6 +87,16 @@ describe('MCP server (in-memory transport)', () => {
     expect(parsed.total).toBe(result.structuredContent?.['total']);
   });
 
+  it('search_regulations carries the term grounding', async () => {
+    const result = (await client.callTool({
+      name: 'search_regulations',
+      arguments: { query: 'mental disorder' },
+    })) as ToolCallResult;
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent?.['matchedTerms']).toEqual(['mental', 'disorder']);
+    expect(result.structuredContent?.['unmatchedTerms']).toEqual([]);
+  });
+
   it('search_regulations forwards pagination and part filters', async () => {
     const result = (await client.callTool({
       name: 'search_regulations',

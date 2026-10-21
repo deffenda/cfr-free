@@ -257,6 +257,8 @@ function searchBody(citation: string, heading: string): Record<string, unknown> 
     total: 1,
     page: 1,
     matchMode: 'and',
+    matchedTerms: [],
+    unmatchedTerms: [],
     hits: [
       {
         citation,
@@ -270,6 +272,48 @@ function searchBody(citation: string, heading: string): Record<string, unknown> 
     ],
   };
 }
+
+describe('UI search grounding', () => {
+  it('warns about the terms the results did not answer, without claiming coverage', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/search?q=alpha');
+    harness.calls[0]?.respond(true, {
+      ...searchBody('4.16', 'Heading 4.16'),
+      unmatchedTerms: ['appendices', 'amendments'],
+    });
+    await harness.flush();
+
+    const caution = harness.element('search-caution');
+    expect(caution.hidden).toBe(false);
+    expect(caution.textContent).toContain('"appendices" or "amendments"');
+    expect(caution.textContent).toContain('may not be among them');
+    // The wording is about the RESULTS: it never claims the corpus does or
+    // does not cover the question.
+    for (const forbidden of ['not covered', 'no rule', 'does not cover', 'Title 38 does not']) {
+      expect(caution.textContent).not.toContain(forbidden);
+    }
+  });
+
+  it('shows the no-match wording when nothing was indexed', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/search?q=alpha');
+    harness.calls[0]?.respond(true, { total: 0, page: 1, matchMode: 'and', hits: [] });
+    await harness.flush();
+
+    const caution = harness.element('search-caution');
+    expect(caution.hidden).toBe(false);
+    expect(caution.textContent).toContain('No indexed provision matched these terms');
+  });
+
+  it('shows no caution when every term was answered', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/search?q=alpha');
+    harness.calls[0]?.respond(true, searchBody('4.16', 'Heading 4.16'));
+    await harness.flush();
+
+    expect(harness.element('search-caution').hidden).toBe(true);
+  });
+});
 
 describe('UI route ownership (P1-02)', () => {
   it('lets the newest route win when responses resolve out of order', async () => {

@@ -169,6 +169,18 @@ describe('Titan HTTP API', () => {
     expect(Array.isArray(body['hits'])).toBe(true);
   });
 
+  it('carries the term grounding on the wire', async () => {
+    const { status, body } = await get('/api/v1/search?q=mental+disorder');
+    expect(status).toBe(200);
+    expect(Array.isArray(body['matchedTerms'])).toBe(true);
+    expect(Array.isArray(body['unmatchedTerms'])).toBe(true);
+    // The two partition the query's content terms.
+    const matched = body['matchedTerms'] as string[];
+    const unmatched = body['unmatchedTerms'] as string[];
+    expect(matched).toContain('mental');
+    expect(unmatched).toEqual([]);
+  });
+
   it('supports pagination and part filters', async () => {
     const { body } = await get('/api/v1/search?q=disorder&page=1&per_page=1&part=4');
     expect((body['hits'] as unknown[]).length).toBeLessThanOrEqual(1);
