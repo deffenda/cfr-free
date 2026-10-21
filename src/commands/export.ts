@@ -92,8 +92,8 @@ function writeMarkdown(store: Store, target: string): number {
  * overwrites: the target must not exist, and the source index must.
  *
  * @param format omit for the sqlite snapshot (unchanged default behavior).
- * @throws {CommandError} exit 3 when there is no index; exit 2 when the
- *   target already exists.
+ * @throws {CommandError} exit 3 when there is no index; exit 5 when the
+ *   target already exists (a deliberate refusal, not a usage error).
  */
 export function runExportCommand(
   config: AppConfig,
@@ -110,7 +110,7 @@ export function runExportCommand(
   if (existsSync(target)) {
     throw new CommandError(
       `refusing to overwrite existing file: ${target} — remove it first`,
-      EXIT.USAGE,
+      EXIT.REFUSED,
     );
   }
 
