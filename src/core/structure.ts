@@ -87,7 +87,10 @@ function findChild(node: StructureNode, type: string, identifier: string): Struc
  *
  * A subject group is the level that holds the sections of one regulatory
  * subject; descending into it is what makes those sections reachable (1,910
- * of the corpus's 2,953 sections sit under a subject group).
+ * of the corpus's 2,953 sections sit under a subject group). A group hangs
+ * off a PART or off a SUBPART, so `subjgrp` needs `part` but NOT `subpart`:
+ * `subpart` stays optional, and a group under a part is reached with
+ * chapter + part + subjgrp.
  */
 export function browse(
   root: StructureNode,
