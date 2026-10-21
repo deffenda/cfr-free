@@ -160,6 +160,30 @@ describe('CFRService.browse', () => {
     });
   });
 
+  it('descends into a subject group', () => {
+    withService((service) => {
+      const result = service.browse({
+        chapter: 'I',
+        part: '17',
+        subjgrp: 'ECFRfixturegroup0001',
+      });
+      expect(result.node.type).toBe('subject_group');
+      expect(result.children.map((child) => child.identifier)).toEqual(['17.15']);
+    });
+  });
+
+  it('rejects subject-group navigation without a part', () => {
+    withService((service) => {
+      try {
+        service.browse({ subjgrp: 'ECFRfixturegroup0001' });
+        expect.unreachable('should have thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(ServiceError);
+        if (error instanceof ServiceError) expect(error.code).toBe('invalid_input');
+      }
+    });
+  });
+
   it('propagates structure misses for the HTTP layer to map', () => {
     withService((service) => {
       expect(() => service.browse({ chapter: 'I', part: '999' })).toThrow(StructureError);

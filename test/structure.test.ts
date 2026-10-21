@@ -71,6 +71,33 @@ describe('browse', () => {
     expect(result.children[0]?.identifier).toBe('4.125');
   });
 
+  it('descends into a subject group and lists the sections it holds', () => {
+    const result = browse(root, { chapter: 'I', part: '17', subjgrp: 'ECFRfixturegroup0001' });
+    expect(result.node.type).toBe('subject_group');
+    expect(result.node.identifier).toBe('ECFRfixturegroup0001');
+    expect(result.path.map((entry) => entry.type)).toEqual(['chapter', 'part', 'subject_group']);
+    expect(result.children.map((child) => child.identifier)).toEqual(['17.15']);
+  });
+
+  it('rejects subject-group navigation without a part', () => {
+    expect(() => browse(root, { chapter: 'I', subjgrp: 'ECFRfixturegroup0001' })).toThrow(
+      /requires 'part'/,
+    );
+  });
+
+  it('lists the available subject groups when one is not found', () => {
+    try {
+      browse(root, { chapter: 'I', part: '17', subjgrp: 'ECFRnope' });
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(StructureError);
+      if (error instanceof StructureError) {
+        expect(error.available).toEqual(['ECFRfixturegroup0001']);
+        expect(error.message).toContain("subject_group 'ECFRnope'");
+      }
+    }
+  });
+
   it('lists available identifiers when a level is missing', () => {
     try {
       browse(root, { chapter: 'I', part: '999' });
@@ -103,6 +130,6 @@ describe('countNodes', () => {
     expect(countNodes(root, 'section')).toBe(2);
     expect(countNodes(root, 'part')).toBe(2);
     expect(countNodes(root, 'appendix')).toBe(1);
-    expect(countNodes(root, 'subject_group')).toBe(0);
+    expect(countNodes(root, 'subject_group')).toBe(1);
   });
 });

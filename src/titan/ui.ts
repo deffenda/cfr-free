@@ -668,7 +668,7 @@ export const UI_JS = String.raw`(function () {
       });
   }
 
-  // ---- #/browse: lazy chapter/part/subpart tree over /api/v1/browse ----
+  // ---- #/browse: lazy chapter/part/subpart/subject-group tree over /api/v1/browse ----
 
   /** Node text: the entry's label, or a "type: identifier" fallback. */
   function browseLabel(entry) {
@@ -683,6 +683,7 @@ export const UI_JS = String.raw`(function () {
     if (level.chapter !== '') params.set('chapter', level.chapter);
     if (level.part !== '') params.set('part', level.part);
     if (level.subpart !== '') params.set('subpart', level.subpart);
+    if (level.subjgrp !== '') params.set('subjgrp', level.subjgrp);
     var query = params.toString();
     return '/api/v1/browse' + (query === '' ? '' : '?' + query);
   }
@@ -690,10 +691,16 @@ export const UI_JS = String.raw`(function () {
   /** The next level reached by opening 'entry' from 'parent'. */
   function childLevel(parent, entry) {
     var type = String(entry.type);
-    var next = { chapter: parent.chapter, part: parent.part, subpart: parent.subpart };
+    var next = {
+      chapter: parent.chapter,
+      part: parent.part,
+      subpart: parent.subpart,
+      subjgrp: parent.subjgrp,
+    };
     if (type === 'chapter') next.chapter = String(entry.identifier);
     else if (type === 'part') next.part = String(entry.identifier);
     else if (type === 'subpart') next.subpart = String(entry.identifier);
+    else if (type === 'subject_group') next.subjgrp = String(entry.identifier);
     return next;
   }
 
@@ -710,7 +717,15 @@ export const UI_JS = String.raw`(function () {
       item.appendChild(leaf);
       return;
     }
-    if (type === 'chapter' || type === 'part' || type === 'subpart') {
+    // A subject group is a DESCENDABLE level: its sections are the ones the
+    // flat tree could not reach (1,910 of the corpus's 2,953 sections), so the
+    // row opens them instead of rendering as inert text.
+    if (
+      type === 'chapter' ||
+      type === 'part' ||
+      type === 'subpart' ||
+      type === 'subject_group'
+    ) {
       var nav = document.createElement('button');
       nav.type = 'button';
       nav.textContent = text;
@@ -723,8 +738,7 @@ export const UI_JS = String.raw`(function () {
       item.appendChild(nav);
       return;
     }
-    // subject_group (and any future type the wire cannot descend into): browse
-    // takes only chapter/part/subpart params and entries are flat
+    // Any other type (a level the wire cannot descend into): entries are flat
     // {type, identifier, label} — no deeper fetch exists, so the row renders
     // expanded in place: label only, no link, no request, no dead end.
     item.textContent = text;
@@ -811,6 +825,7 @@ export const UI_JS = String.raw`(function () {
           chapter: level.chapter,
           part: level.part,
           subpart: level.subpart,
+          subjgrp: level.subjgrp,
           result: result.body,
         });
         renderBrowseLevel();
@@ -832,7 +847,7 @@ export const UI_JS = String.raw`(function () {
       renderBrowseLevel();
       return;
     }
-    loadBrowseLevel({ chapter: '', part: '', subpart: '' }, generation);
+    loadBrowseLevel({ chapter: '', part: '', subpart: '', subjgrp: '' }, generation);
   }
 
   searchForm.addEventListener('submit', function (event) {

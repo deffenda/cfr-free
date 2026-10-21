@@ -113,7 +113,16 @@ export const FIXTURE_STRUCTURE: unknown = {
           type: 'part',
           identifier: '17',
           label: 'Part 17—Medical Care',
-          children: [{ type: 'section', identifier: '17.15', label: '§ 17.15', children: [] }],
+          // The real corpus hangs subject groups off parts AND subparts; a
+          // group holds the sections of one regulatory subject.
+          children: [
+            {
+              type: 'subject_group',
+              identifier: 'ECFRfixturegroup0001',
+              label: 'Subgroup—Hospitalization and Emergency Care',
+              children: [{ type: 'section', identifier: '17.15', label: '§ 17.15', children: [] }],
+            },
+          ],
         },
       ],
     },
