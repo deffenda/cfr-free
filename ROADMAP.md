@@ -2,6 +2,13 @@
 
 ## Open review findings — dispatch first
 
+The **six P1 findings from the 2026-10-21 implementation audit are OPEN**.
+Evidence, pinned SHAs, reproductions, candidate manifests, acceptance
+criteria, and risk-specific gates are in
+[the 2026-10-21 review handoff](docs/research/review-2026-10-21.md).
+Finding 06 targets PR #105; revalidate its current head before updating it.
+This is a review handoff, not an implementation or a closure record.
+
 The four P1 findings from the 2026-10-20 review were **OPEN** at the time
 of this grooming; **all four are now CLOSED** (PR #66 → `6a3637e`, reviewed
 `a793fe1`, APPROVE 0/0/0; PR #68 → `de524f5`, reviewed `61e7b43`, APPROVE
