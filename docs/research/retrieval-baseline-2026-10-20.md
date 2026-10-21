@@ -315,3 +315,15 @@ terms keep the existing prefix behaviour. Grounding is a reporting layer, so
 no ranking number moved: dev 22/29 first, 28/29 recall@5, MRR 0.8448;
 holdout 13/17, 15/17, MRR 0.8137; combined 35/46 first, 43/46 in the top
 five. Per-query lists identical to baseline (only timings differ).
+
+**Update (2026-10-21) — the gate missed QUOTED spans (P1-20261021-06).**
+The audit found that the "query asks about exceptions" gate tested only the
+START of a term, so the quoted form `"hearing impairment exceptions"` (one
+term) kept the demotion on and ranked the general § 4.85 ahead of the
+exception § 4.86 — the opposite of what the user asked for. The gate now
+looks for an exception word INSIDE any term, as a whole word. Re-measured
+on the frozen set, base `496d24f` vs branch: dev 22/29 first, 28/29
+recall@5, MRR 0.8448; holdout 13/17, 15/17, MRR 0.8137; combined 35/46
+first, 43/46 in the top five — identical, with an empty per-query diff on
+all 50 queries. No frozen-set query names an exception, so the demotion
+still fires for every one of them.
