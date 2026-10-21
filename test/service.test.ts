@@ -763,6 +763,57 @@ describe('CFRService phrase and acronym search', () => {
       temp.cleanup();
     }
   });
+
+  it('does not claim a scattered quoted phrase was answered (service envelope)', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '1.1',
+          heading: 'Compensation.',
+          text: 'Compensation includes attendance records and emergency aid.',
+        }),
+      ],
+    });
+    try {
+      const service = new CFRService(temp.store, 7);
+      // The phrase alone is not contiguous in the text, so FTS returns 0.
+      expect(service.search({ query: '"aid and attendance"' }).total).toBe(0);
+      const result = service.search({ query: '"aid and attendance" compensation' });
+      expect(result.total).toBe(1);
+      const hit = result.hits[0];
+      expect(hit?.matches).not.toContain('aid and attendance');
+      expect(hit?.matches).toContain('compensation');
+      expect(result.matchedTerms).not.toContain('aid and attendance');
+      expect(result.unmatchedTerms).toContain('aid and attendance');
+      expect(result.matchedTerms).toContain('compensation');
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('claims a contiguous quoted phrase was answered (service envelope)', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '1.1',
+          heading: 'Compensation.',
+          text: 'Compensation includes aid and attendance benefits.',
+        }),
+      ],
+    });
+    try {
+      const service = new CFRService(temp.store, 7);
+      expect(service.search({ query: '"aid and attendance"' }).total).toBe(1);
+      const result = service.search({ query: '"aid and attendance" compensation' });
+      const hit = result.hits[0];
+      expect(hit?.matches).toContain('aid and attendance');
+      expect(result.matchedTerms).toContain('aid and attendance');
+      expect(result.matchedTerms).toContain('compensation');
+      expect(result.unmatchedTerms).not.toContain('aid and attendance');
+    } finally {
+      temp.cleanup();
+    }
+  });
 });
 
 describe('CFRService.getSection references', () => {
