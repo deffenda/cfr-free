@@ -11,7 +11,7 @@ import { formatSectionRedline, runRedlineCommand } from './commands/redline.js';
 import { formatHistoricalSection, runHistoricalCommand } from './commands/historical.js';
 import { formatSearchResults, runSearchCommand } from './commands/search.js';
 import { CommandError, EXIT } from './exit-codes.js';
-import { createLogger } from './logger.js';
+import { createLogger, type Logger } from './logger.js';
 import { VERSION } from './version.js';
 
 /** CLI usage text. */
@@ -208,6 +208,32 @@ export interface MainIO {
   env: NodeJS.ProcessEnv;
 }
 
+/** Commands that read one provision across eCFR revisions (`historical`, `redline`). */
+const PROVISION_READ_COMMANDS: ReadonlySet<Command> = new Set<Command>(['historical', 'redline']);
+
+async function runProvisionRead(
+  parsed: ParsedCommand,
+  logger: Logger,
+  io: MainIO,
+): Promise<number> {
+  if (parsed.command === 'historical') {
+    // A historical read that succeeds is a success (exit 0) whatever the
+    // text says; a bad date, an unknown citation or a date outside
+    // eCFR's archive surfaces as a throw.
+    const section = await runHistoricalCommand(logger, parsed.atDate, parsed.citation);
+    io.out(formatHistoricalSection(section));
+    return 0;
+  }
+  if (parsed.command === 'redline') {
+    // A redline WITH changes is a success: exit 0 regardless of content
+    // (same policy as `diff`). Validation/lookup errors surface as throws.
+    const report = await runRedlineCommand(logger, parsed.fromDate, parsed.toDate, parsed.citation);
+    io.out(formatSectionRedline(report));
+    return 0;
+  }
+  return EXIT.ERROR;
+}
+
 /** CLI entry point. Returns the process exit code. */
 export async function main(argv: readonly string[], io: MainIO): Promise<number> {
   try {
@@ -265,25 +291,8 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
       io.out(formatSearchResults(result));
       return 0;
     }
-    if (command === 'historical') {
-      // A historical read that succeeds is a success (exit 0) whatever the
-      // text says; a bad date, an unknown citation or a date outside
-      // eCFR's archive surfaces as a throw.
-      const section = await runHistoricalCommand(logger, parsed.atDate, parsed.citation);
-      io.out(formatHistoricalSection(section));
-      return 0;
-    }
-    if (command === 'redline') {
-      // A redline WITH changes is a success: exit 0 regardless of content
-      // (same policy as `diff`). Validation/lookup errors surface as throws.
-      const report = await runRedlineCommand(
-        logger,
-        parsed.fromDate,
-        parsed.toDate,
-        parsed.citation,
-      );
-      io.out(formatSectionRedline(report));
-      return 0;
+    if (PROVISION_READ_COMMANDS.has(command)) {
+      return await runProvisionRead(parsed, logger, io);
     }
     if (command === 'serve') return await runServeCommand(config, logger);
     await runMcpCommand(config, logger);
