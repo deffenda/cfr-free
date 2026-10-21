@@ -47,6 +47,7 @@ const searchOutputSchema = z.object({
       citation: z.string(),
       citationDisplay: z.string(),
       sourceUrl: z.string(),
+      sourceUrlAtIndexDate: z.string(),
       direct: z.boolean(),
       heading: z.string(),
       part: z.string().nullable(),
