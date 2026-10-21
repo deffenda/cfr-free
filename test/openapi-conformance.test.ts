@@ -905,6 +905,9 @@ describe('OpenAPI response conformance (in-process server vs spec)', () => {
       Array.isArray(hits) && hits.length > 0,
       'fixture index must yield at least one hit',
     ).toBe(true);
+    const hit = (hits as Array<Record<string, unknown>>)[0] as Record<string, unknown>;
+    expect('partTitle' in hit).toBe(true);
+    expect(hit['partTitle'] === null || typeof hit['partTitle'] === 'string').toBe(true);
     const operation = operationOf('/api/v1/search', 'get');
     const ok200 = responseFor(operation, '200');
     if (ok200 === undefined) throw new Error('search 200 response does not resolve');

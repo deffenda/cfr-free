@@ -299,6 +299,16 @@ describe('MCP server (in-memory transport)', () => {
     expect(hits[0]?.matches).toContain('disorder');
   });
 
+  it('search_regulations carries the part title when a title is known', async () => {
+    const result = (await client.callTool({
+      name: 'search_regulations',
+      arguments: { query: 'mental disorder' },
+    })) as ToolCallResult;
+    expect(result.isError).toBeFalsy();
+    const hits = result.structuredContent?.['hits'] as Array<{ partTitle: string | null }>;
+    expect(hits[0]?.partTitle).toBe('Schedule for Rating Disabilities');
+  });
+
   it('browse_title38 surfaces structure misses as tool errors', async () => {
     const result = (await client.callTool({
       name: 'browse_title38',
