@@ -294,6 +294,13 @@ The demotion flips "how is hearing loss rated" from `4.86, 4.85` to
 and nothing else; the holdout per-query list is identical to baseline
 (only timings differ).
 
+Combined over both sets, and against the committee's adjudicated expected
+sets, that is **35 of 46** answerable queries with an expected citation
+first (was 34 of 46) and **43 of 46** in the top five — the first number
+a genuine retrieval improvement, the second unchanged. The eight
+remaining in-window-but-not-first cases are listed with the committee's
+ruling on each in `docs/research/practitioner-pilot.md` §2.
+
 **Update (2026-10-21) — the gate missed QUOTED spans (P1-20261021-06).**
 The audit found that the "query asks about exceptions" gate tested only the
 START of a term, so the quoted form `"hearing impairment exceptions"` (one
