@@ -271,7 +271,9 @@ if ! tool_ok npx; then
 elif [ "$all" -eq 1 ]; then
   printf 'note: test/live.test.ts excluded (network-dependent live test)\n'
   # The two document-shape tests are excluded here and run by the markers
-  # and tables sections below, so each runs exactly once in every mode.
+  # and tables sections below, so in --all mode each runs exactly once. In
+  # changed-set mode the general run may still include them, if the test
+  # file itself is what changed.
   if npx vitest run --exclude 'test/live.test.ts' --exclude 'test/no-conflict-markers.test.ts' --exclude 'test/markdown-tables.test.ts' >"$tmp/tests.log" 2>&1; then
     finish tests pass "$((SECONDS - start))"
   else

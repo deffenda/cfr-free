@@ -73,6 +73,7 @@ export function tableCells(line: string): string[] | null {
   const cells: string[] = [];
   let current = '';
   let inCode = false;
+  let codeFence = 0;
   for (let index = 0; index < trimmed.length; index += 1) {
     const char = trimmed[index];
     if (char === '\\' && trimmed[index + 1] === '|') {
@@ -81,8 +82,19 @@ export function tableCells(line: string): string[] | null {
       continue;
     }
     if (char === '`') {
-      inCode = !inCode;
-      current += char;
+      // A code span is opened by a run of N backticks and closed by a run
+      // of the SAME length, so a double-backtick span may contain a pipe
+      // (and a backtick of its own).
+      let run = 0;
+      while (trimmed[index + run] === '`') run += 1;
+      if (!inCode) {
+        inCode = true;
+        codeFence = run;
+      } else if (run === codeFence) {
+        inCode = false;
+      }
+      current += '`'.repeat(run);
+      index += run - 1;
       continue;
     }
     if (char === '|' && !inCode) {
@@ -113,10 +125,16 @@ export function raggedTables(text: string): string[] {
     }
     if (inFence) continue;
     if (isSeparatorRow(line)) {
-      const header = lines[index - 1] ?? '';
-      const cells = tableCells(header);
-      if (cells) headerColumns = cells.length;
-      continue;
+      // A separator row establishes a table's column count ONLY when no
+      // table is open. Inside a table it is an ordinary body row: GFM
+      // merges consecutive table lines into ONE table, so a second
+      // separator does not start a new one.
+      if (headerColumns === null) {
+        const header = lines[index - 1] ?? '';
+        const cells = tableCells(header);
+        if (cells) headerColumns = cells.length;
+        continue;
+      }
     }
     const cells = tableCells(line);
     if (!cells) {
@@ -160,6 +178,40 @@ describe('every markdown table is rectangular', () => {
     expect(tableCells('| `a|b` | c |')).toEqual([' `a|b` ', ' c ']);
     // a line that is not a table row
     expect(tableCells('not a table row')).toBeNull();
+  });
+
+  it('treats a second separator row inside a table as a body row', () => {
+    // GFM merges consecutive table lines into ONE table, so a second
+    // separator is an ordinary body row -- and a row with a different
+    // cell count is ragged, in either reading.
+    const merged = [
+      '| a | b |',
+      '| --- | --- |',
+      '| 1 | 2 |',
+      '| x | y | z |',
+      '| --- | --- | --- |',
+      '| 1 | 2 | 3 |',
+    ].join('\n');
+    expect(raggedTables(merged)).toEqual([
+      'line 4: 3 cells, expected 2',
+      'line 5: 3 cells, expected 2',
+      'line 6: 3 cells, expected 2',
+    ]);
+    // A blank line starts a NEW table, whose header is its own.
+    const separate = [
+      '| a | b |',
+      '| --- | --- |',
+      '| 1 | 2 |',
+      '',
+      '| c | d |',
+      '| --- | --- |',
+      '| 3 | 4 |',
+    ].join('\n');
+    expect(raggedTables(separate)).toEqual([]);
+  });
+
+  it('keeps a pipe inside a double-backtick code span', () => {
+    expect(tableCells('| ``a|b`` | c |')).toEqual([' ``a|b`` ', ' c ']);
   });
 
   it('finds a ragged table and leaves a well-formed one alone', () => {
