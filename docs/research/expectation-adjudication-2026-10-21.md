@@ -218,21 +218,21 @@ corpus evidence.
 Each row is the measured rank-1 hit and the corpus heading of that hit, checked
 against the corpus by hand.
 
-| query                                              | set     | rank-1 hit (measured) | expected provision     | the retrieved section's corpus heading                                                        | sibling?                 |
-| -------------------------------------------------- | ------- | --------------------- | ---------------------- | --------------------------------------------------------------------------------------------- | ------------------------ |
-| `SMC`                                              | dev     | 17.151                | 3.350                  | Invalid lifts for recipients of aid and attendance allowance or special monthly compensation. | yes (weak)               |
-| `special monthly compensation`                     | dev     | 17.151                | 3.350                  | Invalid lifts for recipients of aid and attendance allowance or special monthly compensation. | yes (weak)               |
-| `"special monthly compensation"`                   | holdout | 17.151                | 3.350                  | Invalid lifts for recipients of aid and attendance allowance or special monthly compensation. | yes (weak)               |
-| `schizophrenia`                                    | dev     | 3.384                 | 4.130                  | Psychosis.                                                                                    | yes                      |
-| `how is hearing loss rated`                        | dev     | 4.86                  | 4.85                   | Exceptional patterns of hearing impairment.                                                   | yes (but see §5, item 6) |
-| `total disability rating based on unemployability` | dev     | 4.17                  | 4.16                   | Total disability ratings for pension based on unemployability and age of the individual.      | yes                      |
-| `Persian Gulf veterans compensation`               | dev     | 3.320                 | 3.317                  | Claims based on exposure to fine particulate matter.                                          | yes                      |
-| `"schedule of ratings"`                            | dev     | 4.87a                 | 4.130                  | Schedule of ratings—other sense organs.                                                       | yes                      |
-| `veterans dental benefits eligibility`             | dev     | 17.160                | 17.161, 17.162, 3.381  | Authorization of dental examinations.                                                         | yes                      |
-| `military burial allowance rate table`             | dev     | 3.1701                | 3.1704, 3.1705, 3.1700 | Deceased veterans for whom VA may provide burial benefits.                                    | yes                      |
-| `va loan underwriting guidelines`                  | dev     | 36.4225               | 36.4340, 36.4206       | Authority to close manufactured home loans on the automatic basis.                            | yes                      |
-| `DIC`                                              | holdout | 3.455                 | 3.5, 3.10, 3.25        | Apportionment of a surviving spouse's dependency and indemnity compensation.                  | yes                      |
-| `traumatic brain injury compensation`              | dev     | 9.21                  | 3.350, 4.124a          | Schedule of Losses.                                                                           | **no — see §7**          |
+| query                                              | set     | rank-1 hit (measured) | expected provision     | the retrieved section's corpus heading                                                        | sibling?                                        |
+| -------------------------------------------------- | ------- | --------------------- | ---------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `SMC`                                              | dev     | 17.151                | 3.350                  | Invalid lifts for recipients of aid and attendance allowance or special monthly compensation. | **OPERATOR DECISION REQUIRED** (weakest)        |
+| `special monthly compensation`                     | dev     | 17.151                | 3.350                  | Invalid lifts for recipients of aid and attendance allowance or special monthly compensation. | **OPERATOR DECISION REQUIRED** (weakest)        |
+| `"special monthly compensation"`                   | holdout | 17.151                | 3.350                  | Invalid lifts for recipients of aid and attendance allowance or special monthly compensation. | **OPERATOR DECISION REQUIRED** (weakest)        |
+| `schizophrenia`                                    | dev     | 3.384                 | 4.130                  | Psychosis.                                                                                    | yes                                             |
+| `how is hearing loss rated`                        | dev     | 4.86                  | 4.85                   | Exceptional patterns of hearing impairment.                                                   | **OPERATOR DECISION REQUIRED** (see §5, item 6) |
+| `total disability rating based on unemployability` | dev     | 4.17                  | 4.16                   | Total disability ratings for pension based on unemployability and age of the individual.      | yes                                             |
+| `Persian Gulf veterans compensation`               | dev     | 3.320                 | 3.317                  | Claims based on exposure to fine particulate matter.                                          | yes                                             |
+| `"schedule of ratings"`                            | dev     | 4.87a                 | 4.130                  | Schedule of ratings—other sense organs.                                                       | yes                                             |
+| `veterans dental benefits eligibility`             | dev     | 17.160                | 17.161, 17.162, 3.381  | Authorization of dental examinations.                                                         | yes                                             |
+| `military burial allowance rate table`             | dev     | 3.1701                | 3.1704, 3.1705, 3.1700 | Deceased veterans for whom VA may provide burial benefits.                                    | yes                                             |
+| `va loan underwriting guidelines`                  | dev     | 36.4225               | 36.4340, 36.4206       | Authority to close manufactured home loans on the automatic basis.                            | yes                                             |
+| `DIC`                                              | holdout | 3.455                 | 3.5, 3.10, 3.25        | Apportionment of a surviving spouse's dependency and indemnity compensation.                  | yes                                             |
+| `traumatic brain injury compensation`              | dev     | 9.21                  | 3.350, 4.124a          | Schedule of Losses.                                                                           | **no — see §7**                                 |
 
 **Twelve of the thirteen** have a rank-1 hit that (a) exists in the corpus,
 (b) sits in the same subject area as the expected provision, and (c) is a
@@ -280,22 +280,24 @@ decision.** The proposal is: for each of the fourteen queries below, add the
 measured rank-1 hit to the entry's `expected` set, so that a retrieval which
 leads with that section counts as answering the question.
 
-| query                                              | set     | add     | expected today         | corpus heading of the added section                                                           | same subject as the expected provision?                          |
-| -------------------------------------------------- | ------- | ------- | ---------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `SMC`                                              | dev     | 17.151  | 3.350                  | Invalid lifts for recipients of aid and attendance allowance or special monthly compensation. | yes — names SMC                                                  |
-| `special monthly compensation`                     | dev     | 17.151  | 3.350                  | Invalid lifts for recipients of aid and attendance allowance or special monthly compensation. | yes — names SMC                                                  |
-| `"special monthly compensation"`                   | holdout | 17.151  | 3.350                  | Invalid lifts for recipients of aid and attendance allowance or special monthly compensation. | yes — names SMC                                                  |
-| `schizophrenia`                                    | dev     | 3.384   | 4.130                  | Psychosis.                                                                                    | yes — VA's mental-disorders criteria                             |
-| `how is hearing loss rated`                        | dev     | 4.86    | 4.85                   | Exceptional patterns of hearing impairment.                                                   | yes — but it is the _exception_ to the general rule (§5, item 6) |
-| `total disability rating based on unemployability` | dev     | 4.17    | 4.16                   | Total disability ratings for pension based on unemployability and age of the individual.      | yes — the pension half of the same formula pair                  |
-| `Persian Gulf veterans compensation`               | dev     | 3.320   | 3.317                  | Claims based on exposure to fine particulate matter.                                          | yes — the same Gulf-service family                               |
-| `"schedule of ratings"`                            | dev     | 4.87a   | 4.130                  | Schedule of ratings—other sense organs.                                                       | yes — same "Schedule of ratings" heading family                  |
-| `veterans dental benefits eligibility`             | dev     | 17.160  | 17.161, 17.162, 3.381  | Authorization of dental examinations.                                                         | yes — the dental-benefit authorization pair                      |
-| `military burial allowance rate table`             | dev     | 3.1701  | 3.1704, 3.1705, 3.1700 | Deceased veterans for whom VA may provide burial benefits.                                    | yes — the burial-benefit set                                     |
-| `va loan underwriting guidelines`                  | dev     | 36.4225 | 36.4340, 36.4206       | Authority to close manufactured home loans on the automatic basis.                            | yes — Part 36 loan-guaranty                                      |
-| `DIC`                                              | holdout | 3.455   | 3.5, 3.10, 3.25        | Apportionment of a surviving spouse's dependency and indemnity compensation.                  | yes — names DIC                                                  |
-| `veteran with a mental disorder rating`            | holdout | 4.126   | 4.130                  | Evaluation of disability from mental disorders.                                               | yes — Part 4 mental disorders                                    |
-| `dependency and indemnity compensation`            | holdout | 3.658   | 3.5, 3.10, 3.25        | Offsets; dependency and indemnity compensation.                                               | yes — names DIC                                                  |
+| query                                              | set     | add     | expected today         | corpus heading of the added section                                                           | same subject as the expected provision?                                                 |
+| -------------------------------------------------- | ------- | ------- | ---------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `SMC`                                              | dev     | 17.151  | 3.350                  | Invalid lifts for recipients of aid and attendance allowance or special monthly compensation. | yes — names SMC                                                                         |
+| `special monthly compensation`                     | dev     | 17.151  | 3.350                  | Invalid lifts for recipients of aid and attendance allowance or special monthly compensation. | yes — names SMC                                                                         |
+| `"special monthly compensation"`                   | holdout | 17.151  | 3.350                  | Invalid lifts for recipients of aid and attendance allowance or special monthly compensation. | yes — names SMC                                                                         |
+| `schizophrenia`                                    | dev     | 3.384   | 4.130                  | Psychosis.                                                                                    | yes — VA's mental-disorders criteria                                                    |
+| `how is hearing loss rated`                        | dev     | 4.86    | 4.85                   | Exceptional patterns of hearing impairment.                                                   | **OPERATOR DECISION REQUIRED** — it is the _exception_ to the general rule (§5, item 6) |
+| `total disability rating based on unemployability` | dev     | 4.17    | 4.16                   | Total disability ratings for pension based on unemployability and age of the individual.      | yes — the pension half of the same formula pair                                         |
+| `Persian Gulf veterans compensation`               | dev     | 3.320   | 3.317                  | Claims based on exposure to fine particulate matter.                                          | yes — the same Gulf-service family                                                      |
+| `"schedule of ratings"`                            | dev     | 4.87a   | 4.130                  | Schedule of ratings—other sense organs.                                                       | yes — same "Schedule of ratings" heading family                                         |
+| `veterans dental benefits eligibility`             | dev     | 17.160  | 17.161, 17.162, 3.381  | Authorization of dental examinations.                                                         | yes — the dental-benefit authorization pair                                             |
+| `military burial allowance rate table`             | dev     | 3.1701  | 3.1704, 3.1705, 3.1700 | Deceased veterans for whom VA may provide burial benefits.                                    | yes — the burial-benefit set                                                            |
+| `va loan underwriting guidelines`                  | dev     | 36.4225 | 36.4340, 36.4206       | Authority to close manufactured home loans on the automatic basis.                            | yes — Part 36 loan-guaranty                                                             |
+| `DIC`                                              | holdout | 3.455   | 3.5, 3.10, 3.25        | Apportionment of a surviving spouse's dependency and indemnity compensation.                  | yes — names DIC                                                                         |
+| `veteran with a mental disorder rating`            | holdout | 4.126   | 4.130                  | Evaluation of disability from mental disorders.                                               | yes — Part 4 mental disorders                                                           |
+| `dependency and indemnity compensation`            | holdout | 3.658   | 3.5, 3.10, 3.25        | Offsets; dependency and indemnity compensation.                                               | yes — names DIC                                                                         |
+
+**Two of the fourteen proposals are the weakest and need an explicit operator decision, not inheritance:**
 
 Two of the fourteen are the weakest, and the operator should decide them
 explicitly rather than inherit them:
@@ -384,6 +386,13 @@ Two smaller things about this case, both measured:
   own output.
 
 ## 8. The measured consequence of the sibling proposals
+
+**Neither scenario involves any change to ranking behaviour, a ranking rule,
+a synonym expansion, or the expected set itself.** The measured numbers move
+only because the metric's _definition_ changes — from "the top hit is an
+expected citation" to "the top hit is a defensible answer" — and no
+retriever change ships in this round. Read the numbers below as "what the
+operator's content decision would imply", not as a retrieval improvement.
 
 Two readings, because the fourteen proposals in §6.3 fall into two groups:
 twelve sit on the in-window-but-not-first cases of §6.1, and two sit on
