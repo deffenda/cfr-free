@@ -287,23 +287,44 @@ none is ticketed anywhere else.**
 | M3-e | **AND-mode strictness keeps the governing section out of the candidate set** | the AND tier requires EVERY query word in a section, so a natural question's verb or noun can exclude the very provision that answers it: "how is hearing loss rated" wants § 4.85 "Evaluation of hearing impairment.", and § 4.85 contains neither "rated" nor "loss" — so it is not even a candidate, and no ranking rule can surface it. The OR tier only engages when the AND tier returns NOTHING, which it does not here | **DONE (2026-10-20).** The candidate set is now the OR tier — every provision matching AT LEAST ONE query term — and the AND tier is no longer a candidate tier but a RANKING boost. The order: the heading-phrase key (SPEC §4.1) DESC, the AND-tier membership DESC, bm25 ASC. The membership is computed in SQL (a CTE over the AND query, LEFT JOINed onto the ranked rows) — a JS prototype cost ~200 ms and ~700 ms on citation queries. `total` is the candidate set's size (plus the pinned citation when the candidate set did not hold it; the increment is identical on every page); `matchMode` stays and reports `or`. The pin's membership check asks about the OR tier: the AND tier reported an or-only pinned citation as absent and counted it twice. Measured on the frozen 50: dev exact-citation 17/29 → 17/29, recall@5 27/29 → 28/29, MRR 0.7356 → 0.7529; holdout unchanged (12/17, 14/17, MRR 0.7549). No regression on either set; the citation categories hold (the pin still firing). Candidate coverage of the 68 expected provisions: 50/68 → 67/68, and "how is hearing loss rated" now ranks § 4.85 SECOND (it was no candidate at all). SPEC §4.1 states the candidate set and the full order. **Remaining gap: 4 of the 46 answerable queries miss their expected provision (dev 1, holdout 3), 1 of the 68 expected provisions is outside the candidate set (§ 4.125 for PTSD), and 17 of the 46 do not return an expected citation FIRST.**              |
 
 **Completion records for the items above** (the roadmap asks for the
-implementation PR, the reviewed SHA and verdict, and the verified merge SHA):
+implementation PR, the reviewed SHA and verdict, and the verified merge SHA),
+plus the M1 inventory correction recorded below:
 
-| Item                                  | PR       | Reviewed SHA → verdict                                                                 | Merge SHA       | Local gate evidence                                                                                 |
-| ------------------------------------- | -------- | -------------------------------------------------------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------- |
-| M3-b (abbreviation coverage)          | #87      | `a5ad606` → APPROVE_WITH_NITS 0/0/3                                                    | `45cfef5`       | `npm run ci` exit 0 (97.28% stmts / 91.21% branches), `scripts/validate.sh` GATE: PASS, 48/48 store |
-| M3-c (query-set adjudication)         | #86      | `b2426aa` → APPROVE 0/0/0 (re-AFFIRM at `51c7d2d`)                                     | `65c8b3c`       | `npm run ci` exit 0 (97.25% / 91.21%), 8/8 retrieval-eval                                           |
-| M3-a (the narrower grounding form)    | #89, #90 | `f4790dc` → APPROVE 0/0/2; `#90` pending                                               | `2256ad8` (#89) | `npm run ci` exit 0, `scripts/validate.sh` GATE: PASS, 609 tests                                    |
-| M3-d (the heading-phrase ranking key) | #92      | `e0ca4ed` → APPROVE (no P0/P1; both sets re-measured by the reviewer against the base) | `69ea296`       | `npm run ci` exit 0 (97.27% stmts / 91.27% branches), `scripts/validate.sh` GATE: PASS, 610 tests   |
-| M3-e (the hearing vocabulary bridge)  | #93      | `6e14e00` → APPROVE 0/0/0                                                              | pending         | `npm run ci` exit 0 (97.29% stmts / 91.21% branches), `scripts/validate.sh` GATE: PASS, 610 tests   |
-| M3-e (the OR candidate set)           | pending  | pending                                                                                | pending         | `npm run ci` exit 0 (97.29% stmts / 91.2% branches), `scripts/validate.sh` GATE: PASS, 614 tests    |
-| M5 slice 4 (browse descent)           | #88      | `d6fadff` → APPROVE_WITH_NITS 0/0/2                                                    | `b0b2bf2`       | `npm run ci` exit 0 (97.28% / 91.21%), `scripts/validate.sh` GATE: PASS, 44/44 openapi-conformance  |
+| Item                                                                              | PR       | Reviewed SHA → verdict                                                                 | Merge SHA       | Local gate evidence                                                                                 |
+| --------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------- |
+| M3-b (abbreviation coverage)                                                      | #87      | `a5ad606` → APPROVE_WITH_NITS 0/0/3                                                    | `45cfef5`       | `npm run ci` exit 0 (97.28% stmts / 91.21% branches), `scripts/validate.sh` GATE: PASS, 48/48 store |
+| M3-c (query-set adjudication)                                                     | #86      | `b2426aa` → APPROVE 0/0/0 (re-AFFIRM at `51c7d2d`)                                     | `65c8b3c`       | `npm run ci` exit 0 (97.25% / 91.21%), 8/8 retrieval-eval                                           |
+| M3-a (the narrower grounding form)                                                | #89, #90 | `f4790dc` → APPROVE 0/0/2; `#90` pending                                               | `2256ad8` (#89) | `npm run ci` exit 0, `scripts/validate.sh` GATE: PASS, 609 tests                                    |
+| M3-d (the heading-phrase ranking key)                                             | #92      | `e0ca4ed` → APPROVE (no P0/P1; both sets re-measured by the reviewer against the base) | `69ea296`       | `npm run ci` exit 0 (97.27% stmts / 91.27% branches), `scripts/validate.sh` GATE: PASS, 610 tests   |
+| M3-e (the hearing vocabulary bridge)                                              | #93      | `6e14e00` → APPROVE 0/0/0                                                              | pending         | `npm run ci` exit 0 (97.29% stmts / 91.21% branches), `scripts/validate.sh` GATE: PASS, 610 tests   |
+| M3-e (the OR candidate set)                                                       | pending  | pending                                                                                | pending         | `npm run ci` exit 0 (97.29% stmts / 91.2% branches), `scripts/validate.sh` GATE: PASS, 614 tests    |
+| M5 slice 4 (browse descent)                                                       | #88      | `d6fadff` → APPROVE_WITH_NITS 0/0/2                                                    | `b0b2bf2`       | `npm run ci` exit 0 (97.28% / 91.21%), `scripts/validate.sh` GATE: PASS, 44/44 openapi-conformance  |
+| M1 correction (the footnote-gap artifact — the probe's own over-matching pattern) | pending  | pending                                                                                | pending         | `npm run ci` exit 0 (97.29% stmts / 91.2% branches), `scripts/validate.sh` GATE: PASS, 621 tests    |
 
 **Also carried from M1's inventory (a genuine product defect, not a
 measurement one):** four provisions LOSE their footnote text entirely —
 § 17.610, § 36.4221, § 36.4520, § 36.4527 (signature blocks and one
 complex footnote). The text is not in the index at all, so no label can
 help; the next M1(b) candidate.
+
+**CORRECTED (2026-10-21): that item is WITHDRAWN — it was a MEASUREMENT
+defect, not a product one, and there is no M1(b) candidate here.** The
+four provisions DO keep their footnote text: every `<FP>` element's text
+and every `<FP-1>` list item's text is present VERBATIM in the local
+corpus (`~/.cfr-free/index.sqlite`, table `sections`, columns `text` AND
+`markdown`) for all four — § 17.610 (1 `<FP>` + 4 list items), § 36.4221
+(1 + 7), § 36.4520 (1 + 7), § 36.4527 (1 + 8), none missing. The
+finding was an artifact of the fidelity probe's OWN pattern: its literal
+`<FP>` pattern ended the tag name in `\b`, and a word boundary matches
+the hyphen of `<FP-1>`, so the capture began at a LIST ITEM and ran to the
+`</FP>` closing the real footnote — a span that exists in no rendered
+output, and so always read as `lost`. The pattern now ends in
+`(?:\s[^>]*)?` (exact tag name). Re-measured on the SAME snapshot
+(2026-10-16, 9 613 330 bytes, sha256 `9506de6c…`): footnotes are **56
+intact / 0 partial / 0 lost**, and the before/after probe outputs differ
+in that one row and nowhere else. The parser was never wrong here; the
+M1 inventory's own report is corrected in place at
+`docs/research/corpus-fidelity-2026-10-20.md` (§1 and G2).
 
 ### M4 — A verified first-use path
 
@@ -354,6 +375,30 @@ provisions lose their footnote text entirely** (§ 17.610, 36.4221, 36.4520,
 36.4527). The M1 report is corrected (footnotes 52 intact / 4 lost) with a
 dated note recording the under-counts; the lost-footnote gap is the next
 M1(b) candidate.
+
+**CORRECTED (2026-10-21): the "real gap" this round reported was NOT
+real — it was a third bug in the same probe, and the lost-footnote gap
+never existed.** The literal patterns this round introduced ended the tag
+name in `\b` (`/<FP\b[^>]*>([\s\S]*?)<\/FP>/`), and a word boundary is
+not an exact tag name: a hyphen is a non-word character, so `\b` sits
+between "FP" and the "-" of `<FP-1>` and the pattern matched the LIST
+ITEM. In the four provisions named above the upstream shape is an
+`<EXTRACT>` of `<FP-1>` signature items FOLLOWED by the real `<FP>`
+footnote, so the capture began at the list item and ran to the `</FP>`
+closing the footnote — a span that is in no rendered output and therefore
+always read as `lost`. Measured against the local corpus
+(`~/.cfr-free/index.sqlite`), all four provisions keep their footnote
+text verbatim in both the `text` and the `markdown` columns, together
+with every one of their `<FP-1>` list items (1 `<FP>` + 4/7/7/8 list
+items; none missing). The pattern now ends in `(?:\s[^>]*)?` (exact tag
+name), and re-measured on the SAME snapshot (2026-10-16, 9 613 330 bytes,
+sha256 `9506de6c…`) the class reads **56 intact / 0 partial / 0 lost**;
+the before/after probe outputs differ in that one row and nowhere else.
+The M1 report is corrected again in place (footnotes 56 intact / 0 lost)
+with a dated note. **There is no lost-footnote gap, no M1(b) candidate
+and no parser change owed here** — the text was in the index all along,
+and the probe's over-matching pattern is now pinned by
+`test/fidelity-probe.test.ts`.
 
 ### M5 — One complete research-and-citation workflow
 

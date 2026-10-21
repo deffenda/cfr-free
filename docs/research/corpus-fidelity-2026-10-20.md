@@ -52,37 +52,88 @@ probe with two measurement bugs that the repo's own security scan
 surfaced (it built `RegExp()` from a variable, which the pre-commit gate
 rejects). Once fixed with literal patterns — and once the per-class scan
 was extended to appendices, which it had been skipping entirely — the
-numbers moved and ONE REAL GAP appeared: **4 provisions lose their
-footnote text** (§ 17.610, § 36.4221, § 36.4520, § 36.4527 — signature
-blocks and one complex footnote). The original table showed footnotes as
-fully intact. The appendix-blind scan also under-counted source credits
-(1895 → 1907 provisions), authority notes (1265 → 1267), sub-headings
-(1 → 2) and images (8 → 9). Numbers below are the corrected ones,
-re-verified against the live document.
+numbers moved and what looked like ONE REAL GAP appeared: **4 provisions
+lose their footnote text** (§ 17.610, § 36.4221, § 36.4520, § 36.4527 —
+signature blocks and one complex footnote). The original table showed
+footnotes as fully intact. The appendix-blind scan also under-counted
+source credits (1895 → 1907 provisions), authority notes (1265 → 1267),
+sub-headings (1 → 2) and images (8 → 9).
+
+**Correction (2026-10-21, the footnote gap was a MEASUREMENT artifact):
+the "4 provisions lose their footnote text" finding above is WITHDRAWN —
+no provision loses footnote text. The literal patterns the M4 fix
+introduced ended the tag name in `\b` (`/<FP\b[^>]*>([\s\S]*?)<\/FP>/`),
+and a word boundary is NOT an exact tag name: a hyphen is a non-word
+character, so `\b` sits between "FP" and the "-" of `<FP-1>` and the
+pattern matched the LIST ITEM. The capture then ran from the list item to
+the next `</FP>` close tag, so the "fragment" was a span that exists
+nowhere in the rendered output and the provision was reported as `lost`
+— an artifact that reads exactly like lost content. The four provisions
+were collateral damage of that pattern, not casualties of the parser.
+`<FP-1>`/`<FP-2>` are LIST ITEMS — 212 of them across 11 provisions in
+this snapshot — and exactly four provisions carry BOTH a list item and a
+real `<FP>`, with the LIST ITEM FIRST (§ 17.610, § 36.4221, § 36.4520,
+§ 36.4527: an `<EXTRACT>` of signature items, then the footnote). In
+those four, the over-matching pattern began its capture at the list item
+and ran to the `</FP>` that closes the real footnote, so the "fragment"
+was the list plus the footnote — a span in no rendered output. The other
+seven list-item provisions carry no `<FP>` at all, so the pattern had no
+close tag to run to and never matched. The patterns now end the tag name
+in `(?:\s[^>]*)?` — whitespace-and-attributes, or the closing ">" — never
+a hyphen, a digit or any other continuation of the name. Re-measured on
+the SAME snapshot (2026-10-16, 9 613 330 bytes, sha256 `9506de6c…` — the
+very bytes the numbers below were measured against): footnotes are **56
+intact / 0 partial / 0 lost**, and every other class is unchanged (the
+before/after outputs differ in that one row and nowhere else).
+The finding is corrected in place below, in the same spirit as the
+corrections above: the earlier claim is kept, dated and marked, not
+deleted.
+
+**Evidence that the four provisions keep their footnote text** (checked
+directly against the local corpus, `~/.cfr-free/index.sqlite`, table
+`sections`, columns `text` and `markdown`): for each of § 17.610,
+§ 36.4221, § 36.4520 and § 36.4527, every `<FP>` element's text is
+present VERBATIM in the stored `text` AND in the stored `markdown`, and
+so is every `<FP-1>` list item (1 `<FP>` plus 4 list items; 1 plus 7;
+1 plus 7; 1 plus 8 respectively — 0 missing in every case). The
+before/after probe outputs on the identical snapshot are the second,
+independent witness: the same document, the same parser, the same
+fragments — only the pattern changed.
 
 **The two columns measure different populations, deliberately.** _Occurrences_
 counts the elements present in the document; _Provisions_ counts the
 provisions from which the probe could EXTRACT fragments to compare. They
 differ where a construct nests its text in markup the probe does not extract
 (e.g. an `<EXTRACT>` wrapping non-standard nested tags): EXTRACT shows 36
-occurrences across 29 extractable provisions, CITA 1,910 across 1,895. The
+occurrences across 29 extractable provisions, CITA 1,910 across 1,907. The
 occurrences figure is the complete count; the provisions figure is the
 population the survival check could actually test — so it is a floor, not a
 total.
 
 | Construct                      | Occurrences | Provisions | Intact | Partial | Lost |
 | ------------------------------ | ----------- | ---------- | ------ | ------- | ---- |
-| footnotes (`<FP>`)             | 62          | 56         | 52     | 0       | 4    |
+| footnotes (`<FP>`)             | 62          | 56         | 56     | 0       | 0    |
 | notes (`<NOTE>`)               | 70          | 49         | 49     | 0       | 0    |
 | editorial notes (`<EDNOTE>`)   | 33          | 28         | 28     | 0       | 0    |
-| sub-headings (`<HD2>`)         | 3           | 1          | 1      | 0       | 0    |
+| sub-headings (`<HD2>`)         | 3           | 2          | 2      | 0       | 0    |
 | extracts (`<EXTRACT>`)         | 36          | 29         | 29     | 0       | 0    |
-| source credits (`<CITA>`)      | 1,910       | 1,895      | 1,895  | 0       | 0    |
-| authority notes (`<SECAUTH>`)  | 1,270       | 1,265      | 1,265  | 0       | 0    |
+| source credits (`<CITA>`)      | 1,910       | 1,907      | 1,907  | 0       | 0    |
+| authority notes (`<SECAUTH>`)  | 1,270       | 1,267      | 1,267  | 0       | 0    |
 | table footers (`<TFOOT>`)      | 33          | 19         | 19     | 0       | 0    |
 | graphic placeholders (`<GPH>`) | 0           | 0          | 0      | 0       | 0    |
 | formulas (`<FORMULA>`)         | 0           | 0          | 0      | 0       | 0    |
-| images (`<img>`)               | 15          | 8          | 8      | 0       | 0    |
+| images (`<img>`)               | 15          | 9          | 9      | 0       | 0    |
+
+**Row-level notes (2026-10-21).** The footnotes row was 52 intact / 4 lost
+until the pattern fix above (the 4 were an artifact, not lost text). The
+sub-headings, source credits, authority notes and image rows were still
+carrying their PRE-appendix-scan counts (1 / 1,895 / 1,265 and 8) in this
+table even though the M4 correction paragraph above already gave the
+corrected values (2, 1,907, 1,267 and 9) — the table had not been updated
+with them. Every row now carries the value re-measured on the snapshot
+above by the fixed probe; the before/after outputs of the two probe
+versions differ in the footnotes row ONLY, so these four rows are
+unchanged by the pattern fix and were simply stale.
 
 **No construct class loses text in this snapshot.** Numeric entities: 0
 (named entities: 178, all decoded). Graphics are handled by the explicit
@@ -139,7 +190,7 @@ VA will charge fees consistent with the salary scale published by the Office of 
 The same pattern splits "For **Federal Register** citations" in § 2.6's
 editorial note into three lines.
 
-### G2 — Footnotes: RESOLVED by M1(b2) (labelled; anchoring is impossible)
+### G2 — Footnotes: RESOLVED by M1(b2) (labelled; anchoring is impossible); no gap remains
 
 **Harm (before the fix):** a reader could not tell a footnote from the
 rule, and could not tell which claim a footnote qualifies.
@@ -152,6 +203,25 @@ marker tying it to the sentence it belongs to.
 **Still open (measured in M4):** four provisions LOSE their footnote
 text entirely — § 17.610, § 36.4221, § 36.4520, § 36.4527 — so no label
 can help: the text is not in the index at all. The next M1(b) candidate.
+
+**Corrected (2026-10-21): the "still open" item above is CLOSED, and it
+was never a gap.** The four provisions do NOT lose their footnote text:
+every `<FP>` element's text — and every `<FP-1>` list item's text — is
+present VERBATIM in the local corpus (§ 17.610: 1 `<FP>` + 4 list items;
+§ 36.4221: 1 + 7; § 36.4520: 1 + 7; § 36.4527: 1 + 8; none missing), in
+both the `text` and the `markdown` columns of `sections` in
+`~/.cfr-free/index.sqlite`. What the M4 measurement actually found was
+the probe's OWN pattern: the literal `<FP>` pattern ended in `\b`, and a
+word boundary matches the hyphen of `<FP-1>`, so the capture spanned
+from a list item to the next `</FP>` close tag — a span that is in no
+rendered output, and therefore always reported as `lost`. The pattern now
+ends in `(?:\s[^>]*)?` (exact tag name), and re-measured on the same
+snapshot the four provisions are **intact**, with footnotes at **56
+intact / 0 partial / 0 lost**. There is no missing-footnote defect to
+fix, and no parser change is owed: the text was in the index all along.
+The probe's own output is now pinned by
+`test/fidelity-probe.test.ts`, so the over-matching pattern cannot come
+back silently.
 
 **Now labelled:** a footnote renders as its own `Footnote:` block followed
 by its text (the document's own label style — the NOTE/EDNOTE headings
@@ -215,6 +285,14 @@ the output should **label** it (`[footnote]`, `Note:`, `Editorial note:`),
 `src/core/xml.ts` accordingly, with offline fixtures for each class. Until
 then, the index is content-complete but presentation-lossy for these
 constructs.
+
+**Historical note (2026-10-21):** the follow-up described above has since
+shipped — M1(b1) fixed the inline rendering gap (G1) and M1(b2) labelled
+footnotes and extracts and rendered sub-headings as headings (G2, G4, G5).
+The one item this inventory still listed as open — the four provisions
+"losing" their footnote text — was withdrawn on 2026-10-21 as a
+measurement artifact of the probe's own pattern (see §1 and G2): the text
+was in the index all along, so no parser change was owed for it.
 
 **This inventory does not change parser behavior.** The behaviour is pinned
 where it is desirable (footnote/note/editorial-note text survives) and

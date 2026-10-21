@@ -23,8 +23,9 @@
  */
 
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
-import { parseTitleXml } from '../dist/core/xml.js';
+import { fileURLToPath } from 'node:url';
 
 const BASE_URL = 'https://www.ecfr.gov/api/versioner/v1';
 const TITLE = 38;
@@ -109,6 +110,35 @@ async function resolveIssueDate() {
 }
 
 /**
+ * Element name -> a pattern that matches EXACTLY that element name.
+ *
+ * EXACT tag name: `<FP>` must not match `<FP-1>`/`<FP-2>`. A word boundary
+ * after the tag name (`\b`) is NOT exact — a hyphen is a non-word character,
+ * so `\b` sits between "FP" and the "-" of "<FP-1>" and the pattern matches
+ * the LIST ITEM. The capture then runs from the list item to the next `</FP>`
+ * close tag, so the "fragment" is a span that exists nowhere in the rendered
+ * output and the provision is reported as `lost` — a measurement artifact
+ * that reads exactly like lost content. Hence the tag name is followed by
+ * `(?:\s[^>]*)?`: whitespace-and-attributes, or the closing ">" — never a
+ * hyphen, a digit or any other continuation of the name.
+ *
+ * A LITERAL pattern per element name — not built from a variable (that trips
+ * the repo's ReDoS linter, semgrep detect-non-literal-regexp, which the
+ * pre-commit scan enforces) and not one shared alternation (an alternation
+ * closes on the first matching close tag and can truncate).
+ */
+export const ELEMENT_PATTERNS = {
+  FP: /<FP(?:\s[^>]*)?>([\s\S]*?)<\/FP>/gi,
+  NOTE: /<NOTE(?:\s[^>]*)?>([\s\S]*?)<\/NOTE>/gi,
+  EDNOTE: /<EDNOTE(?:\s[^>]*)?>([\s\S]*?)<\/EDNOTE>/gi,
+  HD2: /<HD2(?:\s[^>]*)?>([\s\S]*?)<\/HD2>/gi,
+  EXTRACT: /<EXTRACT(?:\s[^>]*)?>([\s\S]*?)<\/EXTRACT>/gi,
+  CITA: /<CITA(?:\s[^>]*)?>([\s\S]*?)<\/CITA>/gi,
+  SECAUTH: /<SECAUTH(?:\s[^>]*)?>([\s\S]*?)<\/SECAUTH>/gi,
+  TFOOT: /<TFOOT(?:\s[^>]*)?>([\s\S]*?)<\/TFOOT>/gi,
+};
+
+/**
  * Element name -> the text it contains, with tags stripped and whitespace collapsed.
  *
  * Limitation (stated in the inventory): this extracts text nested directly
@@ -117,28 +147,11 @@ async function resolveIssueDate() {
  * comparison — the "provisions" figure is therefore a floor for such classes
  * (the "occurrences" figure still counts every element in the document).
  */
-function elementText(block, tag) {
+export function elementText(block, tag) {
   const out = [];
-  // EXACT tag name: `<FP>` must not match `<FP-1>`/`<FP-2>` (a word
-  // boundary after "FP" matches the hyphen), or the capture would span
-  // list items and the fragment would never be found in the output.
-  // A LITERAL pattern for THIS element name only — not built from the
-  // `tag` variable (that trips the repo's ReDoS linter, semgrep
-  // detect-non-literal-regexp, which the pre-commit scan enforces) and
-  // not one shared alternation (an alternation closes on the first
-  // matching close tag and can truncate).
-  const LITERAL_PATTERNS = {
-    FP: /<FP\b[^>]*>([\s\S]*?)<\/FP>/gi,
-    NOTE: /<NOTE\b[^>]*>([\s\S]*?)<\/NOTE>/gi,
-    EDNOTE: /<EDNOTE\b[^>]*>([\s\S]*?)<\/EDNOTE>/gi,
-    HD2: /<HD2\b[^>]*>([\s\S]*?)<\/HD2>/gi,
-    EXTRACT: /<EXTRACT\b[^>]*>([\s\S]*?)<\/EXTRACT>/gi,
-    CITA: /<CITA\b[^>]*>([\s\S]*?)<\/CITA>/gi,
-    SECAUTH: /<SECAUTH\b[^>]*>([\s\S]*?)<\/SECAUTH>/gi,
-    TFOOT: /<TFOOT\b[^>]*>([\s\S]*?)<\/TFOOT>/gi,
-  };
-  const pattern = LITERAL_PATTERNS[tag];
+  const pattern = ELEMENT_PATTERNS[tag];
   if (pattern === undefined) return out;
+  pattern.lastIndex = 0;
   let match;
   while ((match = pattern.exec(block)) !== null) {
     // Tags become NOTHING (not a space): the parser concatenates inline
@@ -162,8 +175,7 @@ function elementText(block, tag) {
 
 /**
  * Count elements with EXACTLY this tag name: `<FP>` must not count the
- * `<FP-1>`/`<FP-2>` list items (the word boundary after "FP" matches the
- * hyphen), and `<E>` must not count `<ECFR>`.
+ * `<FP-1>`/`<FP-2>` list items, and `<E>` must not count `<ECFR>`.
  */
 function countTag(xml, tag) {
   let count = 0;
@@ -174,6 +186,9 @@ function countTag(xml, tag) {
 }
 
 async function main() {
+  // Imported lazily: the parser is a BUILD artifact, and this module is also
+  // imported by the pattern test — which must not need a build to run.
+  const { parseTitleXml } = await import('../dist/core/xml.js');
   const requested = process.argv[2];
   const issueDate = requested ?? (await resolveIssueDate());
   const url = `${BASE_URL}/full/${issueDate}/title-${TITLE}.xml`;
@@ -210,10 +225,11 @@ async function main() {
       const block = xml.slice(start, end === -1 ? undefined : end);
 
       // An image has no inner text: the thing to survive is the marker the
-      // parser emits in its place.
+      // parser emits in its place. EXACT tag name here too: a plain
+      // "contains <img" test would also fire on a sibling like "<img-1>".
       const fragments =
         entry.key === 'IMG'
-          ? block.includes('<img')
+          ? /<img(?:\s[^>]*)?>/.test(block)
             ? ['[image content not included:']
             : []
           : entry.tags.flatMap((tag) => elementText(block, tag));
@@ -296,7 +312,24 @@ async function main() {
   console.log('output — see docs/research/corpus-fidelity-2026-10-20.md for that assessment.');
 }
 
-main().catch((error) => {
-  console.error(`probe failed: ${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 1;
-});
+/**
+ * True when this file is the process entry point (the repo's `isMainModule`
+ * convention, as in `src/cli.ts`). Importing the module — the pattern test
+ * does — must not fetch the document or print a report.
+ */
+function isMainModule() {
+  const entry = process.argv[1];
+  if (entry === undefined) return false;
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
+  main().catch((error) => {
+    console.error(`probe failed: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  });
+}
