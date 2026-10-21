@@ -145,7 +145,16 @@ describe('retrieval evaluation runner (M3)', () => {
           .join('\n');
       expect(strip(a)).toBe(strip(b));
       expect(a).toContain('retrieval evaluation — dev set');
-      expect(a).toContain('provisional');
+      // The report's own provenance line must carry the frozen set's REAL
+      // adjudication counts. Asserting only that the word "provisional"
+      // appears passed whatever the report said — the legend always
+      // contains it — so a miscount (or a report that quietly dropped the
+      // adjudication status) would have gone unnoticed.
+      const dev = queriesFor('dev');
+      const adjudicated = dev.filter((query) => query.adjudication === 'adjudicated').length;
+      expect(a).toContain(
+        `expectations: ${adjudicated} adjudicated, ${dev.length - adjudicated} provisional`,
+      );
     });
   });
 
