@@ -33,16 +33,26 @@ output.
    protocol must therefore measure whether subject-level questions arise
    in real use, not whether a specific retrieval misses.
 3. **The ranking investment is currently unmeasurable as a _preference_.**
-   On the frozen 50-query evaluation set, **42 of the 46 answerable
-   queries have their expected provision in the top five, but only 29 have
-   it first** — the top hit is right about **63%** of the time
-   (re-measured 2026-10-21; the runner's own metric — §4). About **ten of
-   the thirteen** in-window-but-not-first cases are _sibling provisions
-   where the retrieved section is a defensible answer_ (§ 3.351 for
-   § 3.350, § 4.86 for § 4.85, § 4.17 for § 4.16), which is the
-   ROADMAP's recorded characterisation (`ROADMAP.md` §M3). Because so
-   many of those are defensible answers, "top-1 is 63%" **cannot be read as
-   "37% of the time the tool misleads the practitioner."** This study is
+   On the frozen 50-query evaluation set, **43 of the 46 answerable
+   queries have their expected provision in the top five, but only 35 have
+   it first** — the top hit is right about **76%** of the time (measured
+   2026-10-21 on the committee's adjudicated expectations, re-measured
+   after the ranking round in PR #105; the runner's own metric — §4). The
+   **eight** in-window-but-not-first cases are _not_ a block of harmless
+   near-misses: the adjudication committee **rejected** every sibling
+   proposed for them — § 17.151 (invalid lifts) for the three
+   special-monthly-compensation queries, plus § 17.160, § 3.1701,
+   § 36.4225 and § 3.455 — on the principle that a sibling counts when it
+   **answers the question the query asks**, not when it merely shares
+   vocabulary with the expected provision
+   (`docs/research/expectation-adjudication-2026-10-21.md` §11.2). What is
+   left is a different benefit type, an eligibility rule where a rate was
+   asked for, a mechanic that presupposes the entitlement, and one
+   phrase-perfect hit on the wrong programme (§ 9.21). The exception case
+   (§ 4.86 for § 4.85) was rejected on the same principle and has since
+   been closed by the ranking round in PR #105; the rest are recorded in
+   the ROADMAP (`ROADMAP.md` §M3). So "top-1 is 76%" **cannot be read as
+   "24% of the time the tool misleads the practitioner."** This study is
    the instrument that separates the two readings: it observes whether a
    practitioner, shown the heading and the snippet, lands on the right
    provision anyway.
@@ -159,51 +169,54 @@ CFR_INDEX_PATH=/tmp/eval-index.sqlite npx tsx test/fixtures/retrieval/run.ts dev
 CFR_INDEX_PATH=/tmp/eval-index.sqlite npx tsx test/fixtures/retrieval/run.ts holdout
 ```
 
-| Metric (frozen 50: 30 dev + 20 holdout) | Measured 2026-10-21                    |
-| --------------------------------------- | -------------------------------------- |
-| Queries / answerable                    | 50 / 46                                |
-| Expected provision in the **top five**  | **42 of 46**                           |
-| Expected provision **first**            | **29 of 46** (top hit right ≈ **63%**) |
-| In-window-but-not-first                 | **13**                                 |
-| Mean reciprocal rank                    | dev 0.7529 · holdout 0.7549            |
+| Metric (frozen 50: 30 dev + 20 holdout) | Measured 2026-10-21, adjudicated expectations |
+| --------------------------------------- | --------------------------------------------- |
+| Queries / answerable                    | 50 / 46                                       |
+| Expected provision in the **top five**  | **43 of 46**                                  |
+| Expected provision **first**            | **35 of 46** (top hit right ≈ **76%**)        |
+| In-window-but-not-first                 | **8**                                         |
+| Mean reciprocal rank                    | dev 0.8448 · holdout 0.8137                   |
 
 The runner's own definitions are at `test/fixtures/retrieval/run.ts:110-113`
 and its aggregation at `test/fixtures/retrieval/run.ts:151-162`. The
-"29 / 42 / 13" figures match the ROADMAP's recorded numbers
-(`ROADMAP.md` §M3) and the M3-e row in the same section.
+"35 / 43 / 8" figures are the run at `496d24f` — the ranking round's merge —
+against the committee's adjudicated expectations. The pre-adjudication
+figures they replace were 29 / 42 / 13; both sets of numbers are recorded
+in the ROADMAP (`ROADMAP.md` §M3).
 
 Two things the tasks are built on, and one thing they are not:
 
-- **The thirteen in-window-but-not-first cases** (re-measured; each row is
-  the runner's own output):
+- **The eight in-window-but-not-first cases** (re-measured at `496d24f`; each
+  row is the runner's own output):
 
-  | #   | Query                                              | Top hit  | Expected (rank)          |
-  | --- | -------------------------------------------------- | -------- | ------------------------ |
-  | 1   | `SMC`                                              | 17.151   | 3.350 (2)                |
-  | 2   | `schizophrenia`                                    | 3.384    | 4.130 (2)                |
-  | 3   | `how is hearing loss rated`                        | **4.86** | **4.85 (2)**             |
-  | 4   | `total disability rating based on unemployability` | **4.17** | **4.16 (2)**             |
-  | 5   | `traumatic brain injury compensation`              | 9.21     | 3.350 (3), 4.124a (4)    |
-  | 6   | `Persian Gulf veterans compensation`               | 3.320    | 3.317 (2)                |
-  | 7   | `"schedule of ratings"`                            | 4.87a    | 4.130 (3)                |
-  | 8   | `special monthly compensation`                     | 17.151   | 3.350 (2)                |
-  | 9   | `veterans dental benefits eligibility`             | 17.160   | 17.161 (4), 3.381 (3)    |
-  | 10  | `military burial allowance rate table`             | 3.1701   | 3.1704 (2), 3.1705 (4)   |
-  | 11  | `va loan underwriting guidelines`                  | 36.4225  | 36.4340 (3), 36.4206 (4) |
-  | 12  | `DIC`                                              | 3.455    | 3.10 (5), 3.25 (3)       |
-  | 13  | `"special monthly compensation"`                   | 17.151   | 3.350 (2)                |
+  | #   | Query                                  | Top hit | Expected (rank)          |
+  | --- | -------------------------------------- | ------- | ------------------------ |
+  | 1   | `SMC`                                  | 17.151  | 3.350 (2)                |
+  | 2   | `special monthly compensation`         | 17.151  | 3.350 (2)                |
+  | 3   | `"special monthly compensation"`       | 17.151  | 3.350 (2)                |
+  | 4   | `traumatic brain injury compensation`  | 9.21    | 3.350 (3), 4.124a (4)    |
+  | 5   | `veterans dental benefits eligibility` | 17.160  | 17.161 (4), 3.381 (3)    |
+  | 6   | `military burial allowance rate table` | 3.1701  | 3.1704 (2), 3.1705 (4)   |
+  | 7   | `va loan underwriting guidelines`      | 36.4225 | 36.4206 (4), 36.4340 (3) |
+  | 8   | `DIC`                                  | 3.455   | 3.10 (5), 3.25 (3)       |
 
-  Rows 3 and 4 are the canonical sibling cases the ROADMAP names
-  (`ROADMAP.md` §M3): § 4.86 "Exceptional patterns of hearing
-  impairment" for § 4.85 "Evaluation of hearing impairment", and § 4.17
-  "Total disability ratings for **pension**…" for § 4.16 "…for
-  **compensation**…". Row 2 is the definition-instead-of-the-schedule case
-  (§ 3.384 "Psychosis" above § 4.130).
-  **This protocol does not re-adjudicate the ROADMAP's "about ten of the
-  thirteen" characterisation.** That adjudication — including the _order_
-  of the expectations — is the operator's recorded open action
-  (`ROADMAP.md` §M3). What the protocol does is observe whether a
-  practitioner experiences these same cases as failures.
+  Every sibling the committee proposed for these eight was **rejected**
+  (`docs/research/expectation-adjudication-2026-10-21.md` §11.2), each on
+  the question-asked principle: § 17.151 furnishes **invalid lifts** — a
+  different benefit type from the rating schedule (rows 1–3); § 17.160 says
+  who may be **examined**, not who is **eligible** (row 5); § 3.1701 is
+  **eligibility**, not the **rate** (row 6); § 36.4225 is the lender's
+  authority to **close** a loan, not the **underwriting standards** (row 7);
+  and § 3.455 is **apportionment** — a mechanic that presupposes the
+  entitlement rather than stating it (row 8). Row 4 is the record's one
+  clear ranking failure: § 9.21, the Part 9 servicemembers'-insurance loss
+  schedule, which names "Traumatic Brain Injury" verbatim and pays $25,000.
+  The hearing case that stood here before the ranking round (§ 4.86 for
+  § 4.85 — the exception, not the general rule) is **closed**: PR #105
+  demotes a heading that announces an exception, and the general evaluation
+  § 4.85 now leads. **This protocol does not re-adjudicate the committee's
+  rulings.** What it does is observe whether a practitioner experiences
+  these same cases as failures.
 
 - **The vocabulary gap is real and measurable.** The corpus says "hearing
   impairment" (14 provisions) where clients say "hearing loss" (3), and a
@@ -769,15 +782,15 @@ precondition before recruitment** — the committee's review is not
 acceptance, and the **accept / revise / reject** cells are still the
 operator's to tick.
 
-| #        | Proposed criterion                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Evidence that settles it                                                                          | Operator decision          |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------- |
-| **SC-1** | **≥ 3 of N participants complete ≥ 4 of the 5 core tasks with no `E1`/`E2`/`E4` outcome, and request another session.** This is the ROADMAP's suggested continue signal (`ROADMAP.md` §M6). "Citation error" is read as `E1` + `E2` and "version error" as `E4` (§7.2). **The two components are reported separately with their denominators — "core tasks completed clean: x/N" and "requested another session: y/N" — because the conjunction otherwise hides which half failed.** **It is an initial decision threshold, not statistical proof and not a revenue forecast.**                                               | The per-participant core-task table (§10.2) and the return measure (§7.6).                        | ☐ accept ☐ revise ☐ reject |
-| **SC-2** | **Descriptive, not a gate.** The paired timing — median seconds, existing tool vs cfr-free (§7.4) — and each participant's "usable without a second lookup" yes/no are **reported descriptively**. A timing difference counts only if it clears the larger of **2 minutes** and **25 % of the existing-tool time**; a smaller difference is scored a **tie**. This evidence supports SC-4 and SC-6 and is **not** a CONTINUE trigger: stated preference plus unblinded timing at n = 5 will not carry a decision.                                                                                                             | The paired run (§6.1), the time measures (§7.4), the debrief question 2 (§6.9).                   | ☐ accept ☐ revise ☐ reject |
-| **SC-3** | **≥ 4 of N participants reach their first successful query within 30 minutes of starting**, and **every** installation obstacle is listed, with minutes lost, not averaged away. The clock is **elapsed time from session start, installation included**, to the first successful query (§7.4, §7.5). `U`-class (network/environment) exclusions are reported next to the rate they affect, never silently dropped.                                                                                                                                                                                                           | `seconds_to_first_successful_query` (§7.4), the obstacle list and `install_minutes_total` (§7.5). | ☐ accept ☐ revise ☐ reject |
-| **SC-4** | **≥ 3 of N participants return for a second session within 30 days** — or by their next real task, whichever comes first — **of their own initiative.** The operator records **"invited to return: y/N"** per participant, so that the return count is interpretable at n = 5.                                                                                                                                                                                                                                                                                                                                                | `returned_within_30_days` (§7.6).                                                                 | ☐ accept ☐ revise ☐ reject |
-| **SC-5** | **Zero `E4` (wrong-version) outcomes in families F1, F4 and F5.** Dated, verifiable text is the product's core promise; one wrong-version citation is a trust failure, not a learning curve. The **all-families** `E4` rate is reported alongside for visibility; only F1, F4 and F5 count for the pass/fail, per the `class_legend` mapping (§7.2).                                                                                                                                                                                                                                                                          | The per-task outcome table (§10.2), the `E4` column.                                              | ☐ accept ☐ revise ☐ reject |
-| **SC-6** | **Supporting evidence — not a pass/fail criterion, and not a CONTINUE trigger.** Debrief question 3 is recorded **verbatim** (where consent was given, §9.5), with a count of distinct demand themes. Stated preference is weak evidence (§13). M7 and M8 are decided from SC-4 behaviour together with these themes.                                                                                                                                                                                                                                                                                                         | Debrief question 3, verbatim (§6.9).                                                              | ☐ accept ☐ revise ☐ reject |
-| **SC-7** | **Not a pass/fail criterion — a recorded count, over a stated denominator.** The denominator is the **N** F2-B attempts: a **count, not a rate**, with `U` exclusions reported. Each `E3` entry is attributed to one of two recorded sub-reasons: **(a) vocabulary mismatch** — the provision exists, but the participant's own words do not reach it; **(b) concept not indexed** — no section covers the concept at all. A **second observer re-classifies a sample** of the `E3` entries before the count is used as demand evidence. The count informs the subject-index brief; it does not decide it (`ROADMAP.md` §M3). | The `E3` count and the F2-B failure entries (§10.3).                                              | ☐ accept ☐ revise ☐ reject |
+| #        | Proposed criterion                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Evidence that settles it                                                                          | Operator decision          |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------- |
+| **SC-1** | **≥ 3 of N participants complete ≥ 4 of the 5 core tasks with no `E1`/`E2`/`E4` outcome, and request another session.** This is the ROADMAP's suggested continue signal (`ROADMAP.md` §M6). "Citation error" is read as `E1` + `E2` and "version error" as `E4` (§7.2). **The two components are reported separately with their denominators — "core tasks completed clean: x/N" and "requested another session: y/N" — because the conjunction otherwise hides which half failed.** **It is an initial decision threshold, not statistical proof and not a revenue forecast.**                                                                                                                                                                                                                                | The per-participant core-task table (§10.2) and the return measure (§7.6).                        | ☐ accept ☐ revise ☐ reject |
+| **SC-2** | **Descriptive, not a gate.** The paired timing — median seconds, existing tool vs cfr-free (§7.4) — and each participant's "usable without a second lookup" yes/no are **reported descriptively**. A timing difference counts only if it clears the larger of **2 minutes** and **25 % of the existing-tool time** — the saving must be **at least** that bar, not merely above one of the two; a smaller saving, and a saving exactly equal to the bar, is scored a **tie**. Worked example: existing tool 600 s, cfr-free 480 s is a 120 s (20 %) saving — the bar is the larger of 120 s and 150 s, i.e. 150 s, so that run is a **tie**, not "faster". This evidence supports SC-4 and SC-6 and is **not** a CONTINUE trigger: stated preference plus unblinded timing at n = 5 will not carry a decision. | The paired run (§6.1), the time measures (§7.4), the debrief question 2 (§6.9).                   | ☐ accept ☐ revise ☐ reject |
+| **SC-3** | **≥ 4 of N participants reach their first successful query within 30 minutes of starting**, and **every** installation obstacle is listed, with minutes lost, not averaged away. The clock is **elapsed time from session start, installation included**, to the first successful query (§7.4, §7.5). `U`-class (network/environment) exclusions are reported next to the rate they affect, never silently dropped.                                                                                                                                                                                                                                                                                                                                                                                            | `seconds_to_first_successful_query` (§7.4), the obstacle list and `install_minutes_total` (§7.5). | ☐ accept ☐ revise ☐ reject |
+| **SC-4** | **≥ 3 of N participants return for a second session within 30 days** — or by their next real task, whichever comes first — **of their own initiative.** The operator records **"invited to return: y/N"** per participant, so that the return count is interpretable at n = 5.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `returned_within_30_days` (§7.6).                                                                 | ☐ accept ☐ revise ☐ reject |
+| **SC-5** | **Zero `E4` (wrong-version) outcomes in families F1, F4 and F5.** Dated, verifiable text is the product's core promise; one wrong-version citation is a trust failure, not a learning curve. The **all-families** `E4` rate is reported alongside for visibility; only F1, F4 and F5 count for the pass/fail, per the `class_legend` mapping (§7.2).                                                                                                                                                                                                                                                                                                                                                                                                                                                           | The per-task outcome table (§10.2), the `E4` column.                                              | ☐ accept ☐ revise ☐ reject |
+| **SC-6** | **Supporting evidence — not a pass/fail criterion, and not a CONTINUE trigger.** Debrief question 3 is recorded **verbatim** (where consent was given, §9.5), with a count of distinct demand themes. Stated preference is weak evidence (§13). M7 and M8 are decided from SC-4 behaviour together with these themes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Debrief question 3, verbatim (§6.9).                                                              | ☐ accept ☐ revise ☐ reject |
+| **SC-7** | **Not a pass/fail criterion — a recorded count, over a stated denominator.** The denominator is the **N** F2-B attempts: a **count, not a rate**, with `U` exclusions reported. Each `E3` entry is attributed to one of two recorded sub-reasons: **(a) vocabulary mismatch** — the provision exists, but the participant's own words do not reach it; **(b) concept not indexed** — no section covers the concept at all. A **second observer re-classifies a sample** of the `E3` entries before the count is used as demand evidence. The count informs the subject-index brief; it does not decide it (`ROADMAP.md` §M3).                                                                                                                                                                                  | The `E3` count and the F2-B failure entries (§10.3).                                              | ☐ accept ☐ revise ☐ reject |
 
 **What happens if the operator rejects SC-1?** The protocol still runs and
 the rest of the table still applies; SC-1 is replaced by whatever
@@ -942,8 +955,8 @@ metric                                    | value   | denominator     | exclusio
 core tasks completed clean ≥4 of 5 (P#)   |    /    |        N        |                |
 requested another session (P#)            |    /    |        N        |                |
 SC-1 participants                         |    /    |        N        |                |
-paired run: faster (≥2 min or ≥25 %)      |    /    |    paired N     |                |
-paired run: tied (below that bar)         |    /    |    paired N     |                |
+paired run: faster (clears the larger of 2 min / 25 %) |    /    |    paired N     |                |
+paired run: tied (does not clear that bar)   |    /    |    paired N     |                |
 paired run: median seconds, existing      |    s    |        N        |                |
 paired run: median seconds, cfr-free      |    s    |        N        |                |
 E1+E2 rate (all families)                 |    /    |        N        |                |
@@ -1017,14 +1030,14 @@ date | item | options considered | decision | evidence (table + row) | decided b
 **Pre-seeded rows** — the decisions this study exists to inform, each with
 its current state, so the log starts populated rather than empty:
 
-| Item                                                            | Current state                                                                                     | This study settles                                                                   |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| **M7 — integrations**                                           | Gated on M6 evidence (`ROADMAP.md` §M7)                                                           | Whether a destination is demonstrated; feeds `docs/research/integration-decision.md` |
-| **M8 — corpus/platform expansion**                              | Gated on M6 evidence + operator scope approval (`ROADMAP.md` §M8)                                 | Whether expansion has a demonstrated need, not a speculative one                     |
-| **The subject index** (curated benefit/topic → sections map)    | **DEFERRED** pending this study (`ROADMAP.md` §M3)                                                | The `E3` count (SC-7): do practitioners actually need subject-level reach?           |
-| **The ranking investment** (top-1 accuracy)                     | Scoped, not built; ~10 of 13 in-window-not-first cases are defensible siblings (`ROADMAP.md` §M3) | The sibling rate from §10.2: does the top-1 gap reach the practitioner as a failure? |
-| **The M5 workflow** (find → read → follow → change view → copy) | 4 of 4 slices shipped (`ROADMAP.md` §M5)                                                          | Whether the five steps are usable end to end by someone who did not build them       |
-| **The M6 study itself**                                         | Design proposed in this document                                                                  | Continue / change / stop, below                                                      |
+| Item                                                            | Current state                                                                                                                                         | This study settles                                                                   |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| **M7 — integrations**                                           | Gated on M6 evidence (`ROADMAP.md` §M7)                                                                                                               | Whether a destination is demonstrated; feeds `docs/research/integration-decision.md` |
+| **M8 — corpus/platform expansion**                              | Gated on M6 evidence + operator scope approval (`ROADMAP.md` §M8)                                                                                     | Whether expansion has a demonstrated need, not a speculative one                     |
+| **The subject index** (curated benefit/topic → sections map)    | **DEFERRED** pending this study (`ROADMAP.md` §M3)                                                                                                    | The `E3` count (SC-7): do practitioners actually need subject-level reach?           |
+| **The ranking investment** (top-1 accuracy)                     | Partly built: the exception case shipped in PR #105, leaving 8 in-window-but-not-first cases whose siblings the committee REJECTED (`ROADMAP.md` §M3) | The sibling rate from §10.2: does the top-1 gap reach the practitioner as a failure? |
+| **The M5 workflow** (find → read → follow → change view → copy) | 4 of 4 slices shipped (`ROADMAP.md` §M5)                                                                                                              | Whether the five steps are usable end to end by someone who did not build them       |
+| **The M6 study itself**                                         | Design proposed in this document                                                                                                                      | Continue / change / stop, below                                                      |
 
 ### 11.2 The continue / change / stop decision
 
