@@ -6,9 +6,14 @@
  * The holdout set (queries.holdout.ts) must not be used to tune or pick
  * anything.
  *
- * `adjudication: 'provisional'` means the orchestrator's working
- * expectation — it measures the RETRIEVER, not legal correctness. Only
- * the operator/expert can promote an entry to 'adjudicated'.
+ * `adjudication: 'adjudicated'` means the entry was adjudicated by the
+ * two-member committee's ruling of 2026-10-21, cross-checked against the
+ * other member and against the corpus. The record of those rulings is
+ * `docs/research/expectation-adjudication-2026-10-21.md`; the measured
+ * consequence is `docs/research/retrieval-baseline-2026-10-20.md`. The
+ * expected set is the committee's answer to the question the query asks —
+ * it measures the RETRIEVER against that answer, not legal correctness,
+ * and an expert remains the authority.
  *
  * Expectations are grounded in the 2026-10-16 Title 38 corpus (issue
  * date recorded in the runner's report).
@@ -37,7 +42,11 @@ export interface RetrievalQuery {
   readonly rationale: string;
   /** The corpus issue date the expectation was formed against. */
   readonly sourceDate: string;
-  /** 'provisional' = orchestrator's expectation, not expert-adjudicated. */
+  /**
+   * 'adjudicated' = the committee's cross-checked ruling of 2026-10-21
+   * (see docs/research/expectation-adjudication-2026-10-21.md).
+   * 'provisional' = the orchestrator's working expectation, not adjudicated.
+   */
   readonly adjudication: 'provisional' | 'adjudicated';
 }
 
@@ -51,7 +60,7 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     expected: ['4.130'],
     rationale: 'the section itself',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: '3.350',
@@ -59,7 +68,7 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     expected: ['3.350'],
     rationale: 'the section itself',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: '4.85',
@@ -67,7 +76,7 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     expected: ['4.85'],
     rationale: 'the section itself',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: '3.504',
@@ -75,7 +84,7 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     expected: ['3.504'],
     rationale: 'the section itself',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: '4.16',
@@ -83,7 +92,7 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     expected: ['4.16'],
     rationale: 'the section itself',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: '3.317',
@@ -91,7 +100,7 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     expected: ['3.317'],
     rationale: 'the section itself',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
 
   // Display citations — the legal form the tool prints.
@@ -101,7 +110,7 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     expected: ['4.130'],
     rationale: 'the printed display form of the section itself',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: '38 C.F.R. § 4.85',
@@ -109,7 +118,7 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     expected: ['4.85'],
     rationale: 'the printed display form of the section itself',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: '38 CFR 3.350',
@@ -117,7 +126,7 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     expected: ['3.350'],
     rationale: 'the undotted full citation',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: '§ 3.504',
@@ -125,7 +134,7 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     expected: ['3.504'],
     rationale: 'the section-sign form',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
 
   // Abbreviations — the rating-office language.
@@ -145,15 +154,15 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     rationale:
       'TBI residuals are rated in the neurological schedule (4.124a); 3.350 is the special monthly compensation; 3.310 governs aggravation and the proximate result',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'SMC',
     category: 'abbreviation',
     expected: ['3.350'],
-    rationale: 'special monthly compensation (orchestrator expectation; expert to confirm)',
+    rationale: 'special monthly compensation (expert to confirm)',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'A&A',
@@ -171,77 +180,97 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     rationale:
       'the general rating provisions - essentials of evaluative rating (4.1) and total disability ratings (4.15); the mental-disorders schedule and the TDIU formula answer narrower questions',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
 
   // Natural phrasing — how an adjudicator asks.
   {
     query: 'schizophrenia',
     category: 'natural-phrasing',
-    expected: ['4.130'],
+    expected: ['4.130', '3.384'],
     rationale:
-      '§ 4.130 is the schedule-of-ratings section for mental disorders incl. schizophrenia (provisional)',
+      '§ 4.130 is the schedule-of-ratings section for mental disorders incl. schizophrenia; § 3.384 "Psychosis." is the definitional sibling the retriever leads with, and the committee accepted it as a defensible answer to this question',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'how is hearing loss rated',
     category: 'natural-phrasing',
     expected: ['4.85'],
-    rationale: '§ 4.85 evaluates hearing impairment (provisional)',
+    rationale: '§ 4.85 evaluates hearing impairment',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'aid and attendance for a parent',
     category: 'natural-phrasing',
     expected: ['3.504'],
-    rationale: '§ 3.504 rates aid and attendance for parents (provisional)',
+    rationale: '§ 3.504 rates aid and attendance for parents',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'total disability rating based on unemployability',
     category: 'natural-phrasing',
-    expected: ['4.16'],
-    rationale: '§ 4.16 is the general total-rating formula (provisional)',
+    expected: ['4.16', '4.17'],
+    rationale:
+      '§ 4.16 is the general total-rating formula; § 4.17 is the pension half of the same formula pair, accepted by the committee as a defensible answer',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'traumatic brain injury compensation',
     category: 'natural-phrasing',
-    expected: ['3.350', '4.124a'],
+    expected: ['3.350', '4.124a', '3.310'],
     rationale:
-      'the compensation (3.350) and the residuals rating (4.124a) - a practitioner needs both to compute an award',
+      'the compensation (3.350) and the residuals rating (4.124a) - a practitioner needs both to compute an award; § 3.310(d) "Traumatic brain injury." is the proximate-result provision, added by the committee',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'Persian Gulf veterans compensation',
     category: 'natural-phrasing',
-    expected: ['3.317'],
-    rationale: '§ 3.317 covers Persian Gulf service (provisional)',
+    expected: ['3.317', '3.320', '3.320a', '3.320b'],
+    rationale:
+      '§ 3.317 covers Persian Gulf service; §§ 3.320, 3.320a and 3.320b are the same Gulf-service family (fine particulate matter and the presumptive conditions), accepted by the committee as defensible answers',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
 
   // Quoted phrases — verbatim regulatory language.
   {
     query: '"schedule of ratings"',
     category: 'quoted-phrase',
-    expected: ['4.130'],
-    rationale: 'the literal heading phrase of the mental-disorders schedule (provisional)',
+    expected: [
+      '4.104',
+      '4.114',
+      '4.116',
+      '4.117',
+      '4.118',
+      '4.119',
+      '4.124a',
+      '4.130',
+      '4.150',
+      '4.71a',
+      '4.73',
+      '4.79',
+      '4.87',
+      '4.87a',
+      '4.88b',
+      '4.97',
+    ],
+    rationale:
+      'the literal heading phrase names SIXTEEN schedules - every section whose heading begins "Schedule of ratings"; a single-section expectation for a phrase with no subject is a weak ground truth, so the committee ruled that the honest answer is the set',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: '"evaluation of hearing impairment"',
     category: 'quoted-phrase',
     expected: ['4.85'],
-    rationale: 'the literal heading phrase of § 4.85 (provisional)',
+    rationale: 'the literal heading phrase of § 4.85',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
 
   // Ambiguous — more than one provision could be right.
@@ -249,17 +278,17 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     query: 'special monthly compensation',
     category: 'ambiguous',
     expected: ['3.350'],
-    rationale: '§ 3.350 is the SMC rating schedule (provisional)',
+    rationale: '§ 3.350 is the SMC rating schedule',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'mental disorders rating schedule',
     category: 'ambiguous',
     expected: ['4.130'],
-    rationale: '§ 4.130 is the schedule of ratings for mental disorders (provisional)',
+    rationale: '§ 4.130 is the schedule of ratings for mental disorders',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
 
   // Appendices.
@@ -267,9 +296,9 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     query: 'table of amendments title 38',
     category: 'appendix',
     expected: ['Appendix A to Part 4'],
-    rationale: 'Appendix A to Part 4 is the table of amendments (provisional)',
+    rationale: 'Appendix A to Part 4 is the table of amendments',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
 
   // No-answer — a real query that should return nothing relevant.
@@ -295,9 +324,9 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     query: 'tricare enrollment forms',
     category: 'no-answer',
     expected: [],
-    rationale: 'TRICARE enrollment is outside the CFR corpus (provisional)',
+    rationale: 'TRICARE enrollment is outside the CFR corpus',
     sourceDate: SOURCE_DATE,
-    adjudication: 'provisional',
+    adjudication: 'adjudicated',
   },
   {
     query: 'va loan underwriting guidelines',

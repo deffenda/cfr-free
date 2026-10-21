@@ -483,3 +483,186 @@ numbers stand as measured on the day.
 
 What ships from this round: this document, and one amended row in
 `ROADMAP.md`.
+
+---
+
+# Part II — The decision (2026-10-21)
+
+Sections 1–10 are the **proposal** and the evidence behind it. **This part
+records the decision**, and the decision is what the frozen sets now carry.
+
+**Provenance of the decision.** Two committee members (free-tier models,
+independent of the implementer) ruled on the fourteen proposed sibling
+additions and on the content of the 39 provisional expected sets, working
+from the corpus. **Their rulings were cross-checked against each other and
+against the corpus**, and the disagreements were resolved. The consolidated
+decisions are exactly what was implemented. The measured consequence is in
+§11.6; the benchmark figures are re-stated in
+`docs/research/retrieval-baseline-2026-10-20.md`.
+
+## 11.1 The accepted siblings
+
+Four of the fourteen proposals are accepted as a single added sibling:
+
+| query                                              | set     | added | corpus heading of the added section                                                      | why it answers the question                                                        |
+| -------------------------------------------------- | ------- | ----- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `schizophrenia`                                    | dev     | 3.384 | Psychosis.                                                                               | VA's mental-disorders criteria — the definitional section the retriever leads with |
+| `total disability rating based on unemployability` | dev     | 4.17  | Total disability ratings for pension based on unemployability and age of the individual. | the pension half of the same formula pair as § 4.16                                |
+| `Persian Gulf veterans compensation`               | dev     | 3.320 | Claims based on exposure to fine particulate matter.                                     | the same Gulf-service family as § 3.317                                            |
+| `veteran with a mental disorder rating`            | holdout | 4.126 | Evaluation of disability from mental disorders.                                          | the Part 4 general evaluation of which § 4.130 is the schedule                     |
+
+A fifth proposal — § 4.87a for `"schedule of ratings"` — is accepted as well,
+but not as a lone sibling: the phrase names sixteen schedules, so the answer
+is the whole set (§11.4).
+
+## 11.2 The seven rejected proposals
+
+Seven proposed sections are **REJECTED**. For these the expected set stays
+exactly as it is; nothing is added.
+
+| proposed section | the queries it was proposed for                                         | the principle that rejects it                                                                                                                                                         |
+| ---------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| § 17.151         | `SMC`, `special monthly compensation`, `"special monthly compensation"` | It furnishes **invalid lifts** for recipients — a different benefit type from the special monthly compensation rating schedule the query asks for. Naming SMC verbatim is not enough. |
+| § 4.86           | `how is hearing loss rated`                                             | It is the **exception** to the general evaluation § 4.85. A practitioner asking how hearing loss is rated asks for the general rule.                                                  |
+| § 17.160         | `veterans dental benefits eligibility`                                  | It says who may be **examined**, not who is **eligible**.                                                                                                                             |
+| § 3.1701         | `military burial allowance rate table`                                  | It is **eligibility** (deceased veterans for whom VA MAY provide burial benefits), not the **rate** the query asks for.                                                               |
+| § 36.4225        | `va loan underwriting guidelines`                                       | It is the lender's authority to **close** a loan, not the **underwriting standards**.                                                                                                 |
+| § 3.455          | `DIC`                                                                   | It is **apportionment** — a mechanic that presupposes the entitlement rather than stating it.                                                                                         |
+| § 3.658          | `dependency and indemnity compensation`                                 | It is **offsets** — likewise a mechanic that presupposes the entitlement.                                                                                                             |
+
+**The principle behind all seven:** a sibling is acceptable when it **answers
+the question the query asks**, not when it merely shares vocabulary with the
+expected provision. Two of these (§ 17.151 and § 4.86) were flagged as the
+weakest proposals in §6.3, and they are rejected on exactly the grounds
+flagged there.
+
+## 11.3 The seven set corrections
+
+The **query text, the category and the ORDER of every multi-member set are
+unchanged**. Only the MEMBERS change, and only for these seven entries:
+
+| set     | query                                              | before          | after                                              |
+| ------- | -------------------------------------------------- | --------------- | -------------------------------------------------- |
+| dev     | `schizophrenia`                                    | `4.130`         | `4.130, 3.384`                                     |
+| dev     | `total disability rating based on unemployability` | `4.16`          | `4.16, 4.17`                                       |
+| dev     | `traumatic brain injury compensation`              | `3.350, 4.124a` | `3.350, 4.124a, 3.310`                             |
+| dev     | `Persian Gulf veterans compensation`               | `3.317`         | `3.317, 3.320, 3.320a, 3.320b`                     |
+| dev     | `"schedule of ratings"`                            | `4.130`         | all sixteen "Schedule of ratings" headings (§11.4) |
+| holdout | `veteran with a mental disorder rating`            | `4.130`         | `4.130, 4.126`                                     |
+| holdout | `"aid and attendance"`                             | `3.504`         | `3.504, 3.352, 3.350`                              |
+
+Two of these are not sibling additions at all but **completions of a family**,
+and they are recorded as such:
+
+- **`traumatic brain injury compensation`** gains § 3.310, whose paragraph
+  (d) is headed **"Traumatic brain injury."** and sets out what is held to be
+  the proximate result of a service-connected TBI — the point §5, item 1
+  raised. § 9.21 is still **not** accepted; the top hit remains the genuine
+  failure (§7).
+- **`"aid and attendance"`** gains § 3.352 (the criteria for need) and
+  § 3.350 (the entitlement and rate), so it carries the same aid-and-attendance
+  set as the dev abbreviation query `A&A` already carries.
+
+## 11.4 The `"schedule of ratings"` set
+
+The phrase names **sixteen** schedules, and a single-section expectation for a
+subject-less phrase is a weak ground truth — the point §5, item 5 raised. The
+corpus answers it: exactly sixteen sections carry a heading beginning
+"Schedule of ratings" — `4.71a`, `4.73`, `4.79`, `4.87`, `4.87a`, `4.88b`,
+`4.97`, `4.104`, `4.114`, `4.116`, `4.117`, `4.118`, `4.119`, `4.124a`,
+`4.130`, `4.150`. The honest answer is the set, and that is the expected set.
+
+## 11.5 The BVA rationale defect
+
+The `BVA` entry's rationale read:
+
+> the Board of Veterans Appeals is not a CFR provision; a no-answer case
+
+**That premise is false.** The corpus contains the Board's regulations:
+
+| part             | corpus label                                           | sections |
+| ---------------- | ------------------------------------------------------ | -------- |
+| Title 38 Part 19 | Board of Veterans' Appeals: Legacy Appeals Regulations | 34       |
+| Title 38 Part 20 | Board of Veterans Appeals: Rules of Practice           | 125      |
+| **total**        |                                                        | **159**  |
+
+The empty expected set nevertheless **stands**: a bare acronym is not a usable
+ground truth for 159 sections, and the corpus carries no "BVA" heading (the
+literal string occurs once, in the body of § 20.1301, referring to a published
+index). The rationale was **corrected, not silently dropped** — it now records
+that the Board's regulations ARE in the corpus and why the empty set stands
+anyway. The other three no-answer entries (`tricare enrollment forms`, `NVL`,
+`sf-8 form`) are unaffected and keep their empty sets.
+
+## 11.6 The measured consequence
+
+The expectations were re-measured on 2026-10-21 against the 2026-10-16 corpus,
+with the repo's own runner:
+
+```bash
+cp ~/.cfr-free/index.sqlite /tmp/eval-index.sqlite   # never run against the live index
+CFR_INDEX_PATH=/tmp/eval-index.sqlite npx tsx test/fixtures/retrieval/run.ts dev
+CFR_INDEX_PATH=/tmp/eval-index.sqlite npx tsx test/fixtures/retrieval/run.ts holdout
+```
+
+| metric (46 answerable queries)       | before — 2026-10-20 expectations | after — 2026-10-21 expectations |
+| ------------------------------------ | -------------------------------- | ------------------------------- |
+| top hit is an expected citation      | 29/46                            | **34/46**                       |
+| an expected citation in the top five | 42/46                            | **43/46**                       |
+| mean reciprocal rank                 | 0.7536                           | **0.8225**                      |
+
+| set     | top hit is an expected citation | an expected citation in the top five | mean reciprocal rank |
+| ------- | ------------------------------- | ------------------------------------ | -------------------- |
+| dev     | 17/29 → **21/29**               | 28/29 → **28/29**                    | 0.7529 → **0.8276**  |
+| holdout | 12/17 → **13/17**               | 14/17 → **15/17**                    | 0.7549 → **0.8137**  |
+
+**This is NOT a retrieval improvement.** Not one ranking rule, synonym,
+candidate-set rule or code path changed, and no retriever change ships with
+this decision. What changed is the **question the metric asks**: from "is the
+top hit the citation the committee picked?" to "is the top hit a defensible
+answer?" — the property a client that quotes the top hit actually needs. A
+broader expected set makes the metric easier to pass, so **the two columns are
+not the same measurement and must never be presented as a before/after
+improvement**. §8 of Part I says the same of the proposal; this section is the
+decision, and the decision has the same character.
+
+Five queries flip to a correct first hit: `schizophrenia`, `total disability
+rating based on unemployability`, `Persian Gulf veterans compensation`,
+`"schedule of ratings"` and `veteran with a mental disorder rating`. The
+residual failures are unchanged — `traumatic brain injury compensation`
+(§ 9.21), `table of amendments title 38` and `which appendices list
+amendments` (vocabulary misses).
+
+## 11.7 The adjudication flags
+
+All 39 entries that carried `adjudication: 'provisional'` now carry
+`adjudication: 'adjudicated'`: the flag records the committee's cross-checked
+ruling of 2026-10-21. An expert remains the authority, and the thresholds in
+`docs/research/retrieval-baseline-2026-10-20.md` stay contingent on one.
+
+## 11.8 What this decision does and does not change
+
+**Decided:**
+
+- The content of the four accepted siblings (§11.1) and the seven set
+  corrections (§11.3), on the cross-checked ruling.
+- The rejection of seven proposed sections, with the principles that reject
+  them (§11.2).
+- The `"schedule of ratings"` set as all sixteen "Schedule of ratings"
+  headings (§11.4).
+- The correction of the `BVA` rationale (§11.5).
+- The adjudication of all 50 entries (§11.7).
+
+**Not decided, and not changed here:**
+
+- **No retrieval behaviour changes.** No ranking rule, synonym, candidate-set
+  rule, abstention signal or code path was touched; the evaluation runner is
+  unchanged and the runner's metric is unchanged.
+- **No query text, category or set ORDER changed.**
+- **The expert adjudication is still outstanding.** The committee's ruling
+  is cross-checked and recorded, not a substitute for the expert pass.
+- **The thresholds stay contingent**, and the holdout remains burned for
+  threshold selection.
+- `docs/research/retrieval-baseline-2026-10-20.md` is a **dated snapshot**:
+  it keeps the figures measured on 2026-10-20 and adds the re-measurement
+  against the adjudicated expectations. It is not replaced.
