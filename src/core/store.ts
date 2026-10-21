@@ -43,6 +43,8 @@ export interface SearchHit {
   readonly part: string | null;
   readonly path: string;
   readonly snippet: string;
+  /** The index issue date the row was read at; used to build the dated eCFR URL. */
+  readonly issueDate: string;
   /** bm25 score — lower is better (more negative = stronger match). */
   readonly score: number;
   /** Query terms visible in this hit's citation, heading, or snippet. */
@@ -244,7 +246,7 @@ const AND_TIER_KEY = '(CASE WHEN a.citation IS NOT NULL THEN 1 ELSE 0 END) DESC'
  */
 const SELECT_MATCHES_SQL = (where: string, orderBy: string): string => `
 ${AND_TIER_CTE}
-SELECT s.citation, s.heading, s.part, s.path, ${SNIPPET_EXPR} AS snippet,
+SELECT s.citation, s.heading, s.part, s.path, s.issue_date AS issue_date, ${SNIPPET_EXPR} AS snippet,
        ${SCORE_EXPR}
 FROM sections_fts
 JOIN sections s ON s.id = sections_fts.rowid
@@ -1130,6 +1132,7 @@ export class Store {
         part: nullableString(record['part']),
         path: String(record['path']),
         snippet: tidySnippet(String(record['snippet'] ?? '')),
+        issueDate: String(record['issue_date']),
         score: Number(record['score'] ?? 0),
       };
       return { ...hit, matches: visibleMatches(terms, hit) };
