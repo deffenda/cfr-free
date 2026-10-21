@@ -41,6 +41,7 @@ export const UI_HTML = `<!doctype html>
       <nav class="site-tabs" aria-label="Views">
         <a href="#/search">Search</a>
         <a href="#/browse">Browse</a>
+        <a href="#/redline">Redline</a>
       </nav>
     </header>
     <noscript>
@@ -91,6 +92,21 @@ export const UI_HTML = `<!doctype html>
         <nav id="browse-crumbs" class="breadcrumb" aria-label="Breadcrumb"></nav>
         <h2 id="browse-heading"></h2>
         <ul id="browse-list"></ul>
+      </section>
+      <section id="redline-view" hidden>
+        <form id="redline-form">
+          <label for="redline-from">From date</label>
+          <input id="redline-from" name="from" type="text" inputmode="numeric" autocomplete="off" placeholder="2026-01-01" />
+          <label for="redline-to">To date</label>
+          <input id="redline-to" name="to" type="text" inputmode="numeric" autocomplete="off" placeholder="2026-06-01" />
+          <label for="redline-citation">Citation</label>
+          <input id="redline-citation" name="citation" type="text" autocomplete="off" placeholder="4.130" />
+          <button type="submit">Show redline</button>
+        </form>
+        <p id="redline-error" role="status"></p>
+        <h2 id="redline-heading"></h2>
+        <p id="redline-meta" class="breadcrumb"></p>
+        <pre id="redline-output" aria-label="Line-level redline"></pre>
       </section>
     </main>
     <script src="/ui.js"></script>
@@ -152,6 +168,15 @@ export const UI_JS = String.raw`(function () {
   var browseCrumbs = byId('browse-crumbs');
   var browseHeading = byId('browse-heading');
   var browseList = byId('browse-list');
+  var redlineView = byId('redline-view');
+  var redlineForm = byId('redline-form');
+  var redlineFrom = byId('redline-from');
+  var redlineTo = byId('redline-to');
+  var redlineCitation = byId('redline-citation');
+  var redlineError = byId('redline-error');
+  var redlineHeading = byId('redline-heading');
+  var redlineMeta = byId('redline-meta');
+  var redlineOutput = byId('redline-output');
   // Tree navigation state: one entry per level, deepest last. It lives HERE,
   // never in the hash — #/browse is a single route and the stack is
   // depth-limited (root → chapter → part → subpart).
@@ -169,6 +194,9 @@ export const UI_JS = String.raw`(function () {
     // Single browse route: no query params — the tree state stays in the click
     // handlers below. Any other unknown hash falls through to the search view.
     if (hash === '#/browse') return { view: 'browse' };
+    // The redline form keeps its own state in the DOM (the fields are
+    // the state), so the route carries no query — one route, like browse.
+    if (hash === '#/redline') return { view: 'redline' };
     var sectionPrefix = '#/section/';
     if (hash.indexOf(sectionPrefix) === 0) {
       var raw = hash.slice(sectionPrefix.length);
@@ -356,10 +384,123 @@ export const UI_JS = String.raw`(function () {
     renderPager(state, total);
   }
 
+  /**
+   * The redline view (M5 slice 2): the line-level diff of ONE provision
+   * between two eCFR dates, rendered in the same shape the CLI prints, so
+   * a reader sees the same diff in the browser as on the terminal.
+   *
+   * The wire serves the core's contract verbatim (fromIssueDate,
+   * toIssueDate, citation, status, hunks, coarse). The coarse flag is
+   * shown explicitly: above the line cap the diff is a whole-block
+   * comparison, not a line-by-line one, and the reader must not mistake
+   * it for one.
+   */
+  function renderRedline(generation) {
+    searchView.hidden = true;
+    sectionView.hidden = true;
+    browseView.hidden = true;
+    redlineView.hidden = false;
+    clear(redlineError);
+    clear(redlineHeading);
+    clear(redlineMeta);
+    redlineOutput.textContent = '';
+  }
+
+  /** Leaving the redline route clears it, so a hidden view holds no stale diff. */
+  function clearRedline() {
+    redlineView.hidden = true;
+    clear(redlineError);
+    clear(redlineHeading);
+    clear(redlineMeta);
+    redlineOutput.textContent = '';
+  }
+
+  function redlineHunkLine(hunk) {
+    var from = hunk.fromLine === null || hunk.fromLine === undefined ? '-' : String(hunk.fromLine);
+    var to = hunk.toLine === null || hunk.toLine === undefined ? '-' : String(hunk.toLine);
+    var prefix = ' ';
+    if (hunk.type === 'del') prefix = '-';
+    else if (hunk.type === 'add') prefix = '+';
+    return 'L' + from + ' | L' + to + ' | ' + prefix + ' ' + String(hunk.text);
+  }
+
+  function showRedlineError(message) {
+    redlineError.textContent = message;
+    redlineHeading.textContent = '';
+    redlineMeta.textContent = '';
+    redlineOutput.textContent = '';
+  }
+
+  function fillRedline(body) {
+    var status = String(body.status);
+    redlineHeading.textContent = 'Section ' + String(body.citation) + ': ' + status;
+    var meta = 'from ' + String(body.fromIssueDate) + ' to ' + String(body.toIssueDate);
+    if (body.coarse === true) {
+      meta += ' — coarse diff: the provision is too large for a line-by-line comparison';
+    }
+    redlineMeta.textContent = meta;
+    var lines = [];
+    if (status === 'unchanged') {
+      lines.push('No text difference between the two dates.');
+    } else {
+      lines.push('        | ' + String(body.fromIssueDate) + ' | ' + String(body.toIssueDate) + ' | text');
+      var hunks = Array.isArray(body.hunks) ? body.hunks : [];
+      for (var i = 0; i < hunks.length; i += 1) lines.push(redlineHunkLine(hunks[i]));
+    }
+    redlineOutput.textContent = lines.join('\n');
+  }
+
+  function loadRedline(from, to, citation, generation) {
+    clear(redlineError);
+    redlineOutput.textContent = 'Loading…';
+    var params = new URLSearchParams();
+    params.set('from', from);
+    params.set('to', to);
+    params.set('citation', citation);
+    fetch('/api/v1/redline?' + params.toString())
+      .then(function (response) {
+        return response.json().then(function (body) {
+          return { ok: response.ok, body: body };
+        });
+      })
+      .then(function (result) {
+        if (generation !== routeGeneration) return;
+        if (!result.ok || typeof result.body.error === 'string') {
+          showRedlineError(
+            'Redline failed (' +
+              String(result.body.error) +
+              '): ' +
+              String(result.body.message),
+          );
+          return;
+        }
+        fillRedline(result.body);
+      })
+      .catch(function (error) {
+        if (generation !== routeGeneration) return;
+        showRedlineError(
+          'Request failed: ' + String(error && error.message ? error.message : error),
+        );
+      });
+  }
+
+  redlineForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    var from = redlineFrom.value.trim();
+    var to = redlineTo.value.trim();
+    var citation = redlineCitation.value.trim();
+    if (from === '' || to === '' || citation === '') {
+      showRedlineError('A from date, a to date and a citation are all required.');
+      return;
+    }
+    loadRedline(from, to, citation, routeGeneration);
+  });
+
   function renderSearch(state, generation) {
     searchView.hidden = false;
     sectionView.hidden = true;
     browseView.hidden = true;
+    clearRedline();
     qInput.value = state.q;
     kindSelect.value = state.kind === 'section' || state.kind === 'appendix' ? state.kind : '';
     chapterInput.value = state.chapter;
@@ -488,6 +629,7 @@ export const UI_JS = String.raw`(function () {
     searchView.hidden = true;
     sectionView.hidden = false;
     browseView.hidden = true;
+    clearRedline();
     clear(sectionReferences);
     clear(sectionCitedBy);
     clear(sectionText);
@@ -685,6 +827,7 @@ export const UI_JS = String.raw`(function () {
     searchView.hidden = true;
     sectionView.hidden = true;
     browseView.hidden = false;
+    clearRedline();
     if (browseLevels.length > 0) {
       renderBrowseLevel();
       return;
@@ -716,6 +859,7 @@ export const UI_JS = String.raw`(function () {
     var state = parseHash();
     if (state.view === 'section') renderSection(state.citation, generation);
     else if (state.view === 'browse') renderBrowse(generation);
+    else if (state.view === 'redline') renderRedline(generation);
     else renderSearch(state, generation);
   }
 
