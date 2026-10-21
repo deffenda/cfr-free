@@ -46,5 +46,6 @@ export function formatSearchResults(result: SearchResponse): string {
         ? `; terms not answered by these hits: ${result.unmatchedTerms.join(', ')}`
         : ''),
   );
+  if (result.notice !== null) lines.push(`warning: ${result.notice}`);
   return `${lines.join('\n')}\n`;
 }

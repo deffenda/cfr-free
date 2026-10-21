@@ -143,24 +143,9 @@ function parseRedlineArgs(rest: readonly string[]): ParsedCommand {
 }
 
 /**
- * Commands that carry positional arguments, mapped to their parser. A Map
- * (not a plain object): `parseArgs(['toString'])` must still fall through to
- * "unknown command" — object literals inherit prototype keys, Maps don't.
- */
-/**
  * `historical <at> <citation>` — exactly two positionals; a dash-prefixed
  * or wrong-arity invocation is a usage error.
  */
-/** `search <query…>` — the words are the query; a dash-prefixed word is refused. */
-function parseSearchArgs(rest: readonly string[]): ParsedCommand {
-  const dashed = rest.find((arg) => arg.startsWith('-'));
-  if (dashed !== undefined) throw new CliError(`unknown option for search: ${dashed}`);
-  const query = rest.join(' ').trim();
-  if (query.length === 0)
-    throw new CliError('search requires a query (e.g. `cfr-free search PTSD`)');
-  return { command: 'search', query };
-}
-
 function parseHistoricalArgs(rest: readonly string[]): ParsedCommand {
   const [atDate, citation] = rest;
   if (
@@ -177,6 +162,21 @@ function parseHistoricalArgs(rest: readonly string[]): ParsedCommand {
   return { command: 'historical', atDate, citation };
 }
 
+/** `search <query…>` — the words are the query; a dash-prefixed word is refused. */
+function parseSearchArgs(rest: readonly string[]): ParsedCommand {
+  const dashed = rest.find((arg) => arg.startsWith('-'));
+  if (dashed !== undefined) throw new CliError(`unknown option for search: ${dashed}`);
+  const query = rest.join(' ').trim();
+  if (query.length === 0)
+    throw new CliError('search requires a query (e.g. `cfr-free search PTSD`)');
+  return { command: 'search', query };
+}
+
+/**
+ * Commands that carry positional arguments, mapped to their parser. A Map
+ * (not a plain object): `parseArgs(['toString'])` must still fall through to
+ * "unknown command" — object literals inherit prototype keys, Maps don't.
+ */
 const ARG_PARSERS = new Map<string, (rest: readonly string[]) => ParsedCommand>([
   ['export', parseExportTarget],
   ['diff', parseDiffArgs],

@@ -523,6 +523,23 @@ describe('cfr-free search', () => {
     expect(() => parseArgs(['search', '--limit', '5'])).toThrow(/unknown option for search/);
   });
 
+  it('prints the stale-index notice when the index is past its freshness limit', () => {
+    const out = formatSearchResults({
+      query: 'PTSD',
+      page: 1,
+      perPage: 10,
+      total: 0,
+      tier: 'or',
+      indexIssueDate: '2026-08-22',
+      indexStale: true,
+      notice: 'local index is stale (issue date 2026-08-22) — verify against the current eCFR',
+      matchedTerms: [],
+      unmatchedTerms: [],
+      hits: [],
+    } as unknown as Parameters<typeof formatSearchResults>[0]);
+    expect(out).toContain('warning: local index is stale');
+  });
+
   it('says so when nothing matches, and states the issue date', () => {
     const out = formatSearchResults({
       query: 'zzz',
