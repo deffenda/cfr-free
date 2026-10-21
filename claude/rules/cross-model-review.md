@@ -145,9 +145,10 @@ concretely:
    defective — is re-sent to a **different eligible free-tier reviewer
    model** (see the model roster above): never the orchestrator's model,
    never the coder's model, and never the FIRST reviewer's model. A
-   Nemotron mirror is used while the Nemotron family's quota allows.
+   Nemotron mirror OTHER THAN the first reviewer's model is used while
+   the Nemotron family's quota allows.
 2. The mirror reviewer has NEVER seen the first verdict (packet rules
-   apply in full; providing the first verdict to the mirror reviewer is
+   apply in full; providing the first verdict to the cross-check reviewer is
    itself an anchoring violation). It returns the standard mandate
    format verbatim.
 3. **Disagreement rule (mechanical):** compare the verdict class
@@ -162,7 +163,7 @@ concretely:
    pick between two verdicts the instrument cannot read. Any P1
    discrepancy adjudicated rather than escalated is disclosed in the
    PR body.
-4. **Verdict capture:** the mirror reviewer returns its verdict as its
+4. **Verdict capture:** the cross-check reviewer returns its verdict as its
    final message; the orchestrator captures that message verbatim into
    the journal round record and the packet directory
    (`~/.orchestrator/packets/`) — the same capture path as every other
@@ -201,7 +202,8 @@ verdict is the paper trail the operator audits. Gate rounding:
   quota allows. When it does not (as on 2026-10-21, when both **Nemotron**
   mirrors were provider-rate-limited for a whole session and the Nemotron
   primary carried every **Nemotron-family** review alone — operator
-  roster decision, learning journal 2026-10-21), the ladder falls, **with
+  roster decision, `~/.orchestrator/JOURNAL.md`, 2026-10-21, that
+  session), the ladder falls, **with
   the IDENTICAL packet**, to any other free-tier model the operator has
   enabled (the working set is the `-free` tier) — for example
   `opencode/longcat-2.5-preview-free`, and only a model that is neither
