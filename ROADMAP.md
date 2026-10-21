@@ -289,13 +289,14 @@ none is ticketed anywhere else.**
 **Completion records for the items above** (the roadmap asks for the
 implementation PR, the reviewed SHA and verdict, and the verified merge SHA):
 
-| Item                                  | PR       | Reviewed SHA → verdict                             | Merge SHA       | Local gate evidence                                                                                 |
-| ------------------------------------- | -------- | -------------------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------- |
-| M3-b (abbreviation coverage)          | #87      | `a5ad606` → APPROVE_WITH_NITS 0/0/3                | `45cfef5`       | `npm run ci` exit 0 (97.28% stmts / 91.21% branches), `scripts/validate.sh` GATE: PASS, 48/48 store |
-| M3-c (query-set adjudication)         | #86      | `b2426aa` → APPROVE 0/0/0 (re-AFFIRM at `51c7d2d`) | `65c8b3c`       | `npm run ci` exit 0 (97.25% / 91.21%), 8/8 retrieval-eval                                           |
-| M3-a (the narrower grounding form)    | #89, #90 | `f4790dc` → APPROVE 0/0/2; `#90` pending           | `2256ad8` (#89) | `npm run ci` exit 0, `scripts/validate.sh` GATE: PASS, 609 tests                                    |
-| M3-d (the heading-phrase ranking key) | #92      | pending                                            | —               | `npm run ci` exit 0, `scripts/validate.sh` GATE: PASS, 610 tests                                    |
-| M5 slice 4 (browse descent)           | #88      | `d6fadff` → APPROVE_WITH_NITS 0/0/2                | `b0b2bf2`       | `npm run ci` exit 0 (97.28% / 91.21%), `scripts/validate.sh` GATE: PASS, 44/44 openapi-conformance  |
+| Item                                  | PR       | Reviewed SHA → verdict                                                                 | Merge SHA       | Local gate evidence                                                                                 |
+| ------------------------------------- | -------- | -------------------------------------------------------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------- |
+| M3-b (abbreviation coverage)          | #87      | `a5ad606` → APPROVE_WITH_NITS 0/0/3                                                    | `45cfef5`       | `npm run ci` exit 0 (97.28% stmts / 91.21% branches), `scripts/validate.sh` GATE: PASS, 48/48 store |
+| M3-c (query-set adjudication)         | #86      | `b2426aa` → APPROVE 0/0/0 (re-AFFIRM at `51c7d2d`)                                     | `65c8b3c`       | `npm run ci` exit 0 (97.25% / 91.21%), 8/8 retrieval-eval                                           |
+| M3-a (the narrower grounding form)    | #89, #90 | `f4790dc` → APPROVE 0/0/2; `#90` pending                                               | `2256ad8` (#89) | `npm run ci` exit 0, `scripts/validate.sh` GATE: PASS, 609 tests                                    |
+| M3-d (the heading-phrase ranking key) | #92      | `e0ca4ed` → APPROVE (no P0/P1; both sets re-measured by the reviewer against the base) | `69ea296`       | `npm run ci` exit 0 (97.27% stmts / 91.27% branches), `scripts/validate.sh` GATE: PASS, 610 tests   |
+| M3-e (the hearing vocabulary bridge)  | #93      | `6e14e00` → APPROVE 0/0/0                                                              | pending         | `npm run ci` exit 0 (97.29% stmts / 91.21% branches), `scripts/validate.sh` GATE: PASS, 610 tests   |
+| M5 slice 4 (browse descent)           | #88      | `d6fadff` → APPROVE_WITH_NITS 0/0/2                                                    | `b0b2bf2`       | `npm run ci` exit 0 (97.28% / 91.21%), `scripts/validate.sh` GATE: PASS, 44/44 openapi-conformance  |
 
 **Also carried from M1's inventory (a genuine product defect, not a
 measurement one):** four provisions LOSE their footnote text entirely —
