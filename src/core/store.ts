@@ -307,6 +307,125 @@ const RAW_PHRASE_EXPANSIONS: Readonly<Record<string, string>> = {
   'c&c': 'care and attendance',
 };
 
+/** How a query term was read. */
+export type QueryTermKind = 'token' | 'phrase' | 'substitution';
+
+/**
+ * One interpreted term of a query: what the client wrote, and what the
+ * corpus calls it.
+ *
+ * The interpretation lives in ONE place because two consumers must agree on
+ * it: the FTS query builder and the response's term diagnostics. If they
+ * read a query differently, the service can report a term as "not found"
+ * that the search actually searched for.
+ */
+export interface QueryTerm {
+  /** The term as the client wrote it, lowercased. */
+  readonly term: string;
+  /** The words the term contributes to the FTS query. */
+  readonly words: readonly string[];
+  /** The corpus phrases the term stands for (empty when it stands for itself). */
+  readonly expansions: readonly string[];
+  /** How the term was read: a bare token, a quoted span, a punctuated abbreviation. */
+  readonly kind: QueryTermKind;
+}
+
+/** True for a letter or a digit — the characters that make up a word. */
+function isWordChar(char: string | undefined): boolean {
+  return char !== undefined && /[\p{L}\p{N}]/u.test(char);
+}
+
+/** The words of a corpus phrase ("special monthly compensation" → 3 words). */
+function phraseWords(phrase: string): string[] {
+  return phrase.split(/[^\p{L}\p{N}]+/u).filter((word) => word.length > 0);
+}
+
+/** Replace punctuated abbreviations inside a quoted span with their phrases. */
+function expandAbbreviationsIn(text: string): string {
+  let out = text;
+  for (const [abbreviation, phrase] of Object.entries(RAW_PHRASE_EXPANSIONS)) {
+    out = out.split(abbreviation).join(phrase);
+  }
+  return out;
+}
+
+/**
+ * Read a query into terms, once.
+ *
+ * - A quoted span is one term, verbatim: `"special monthly compensation"`.
+ * - A punctuated abbreviation ("A&A") is one term standing for its corpus
+ *   phrase — the tokenizer would drop "A&A" to two single letters. Only a
+ *   STANDALONE abbreviation counts: "VA&A" is a different word.
+ * - Every other word is a token, expanded through the curated synonym map
+ *   when the corpus spells the concept differently.
+ *
+ * Spans (quoted or substituted) come first, then the bare tokens — the
+ * order the FTS builder has always emitted them in.
+ */
+export function queryTerms(raw: string): readonly QueryTerm[] {
+  const text = raw.toLowerCase();
+  const spanTerms: QueryTerm[] = [];
+  let residual = '';
+  let last = 0;
+
+  /** Pull the standalone abbreviations out of a plain chunk. */
+  const takePlain = (chunk: string): void => {
+    const found: Array<{ at: number; length: number; term: QueryTerm }> = [];
+    for (const [abbreviation, phrase] of Object.entries(RAW_PHRASE_EXPANSIONS)) {
+      let at = chunk.indexOf(abbreviation);
+      while (at !== -1) {
+        const before = at === 0 ? undefined : chunk[at - 1];
+        const after = chunk[at + abbreviation.length];
+        if (!isWordChar(before) && !isWordChar(after)) {
+          found.push({
+            at,
+            length: abbreviation.length,
+            term: {
+              term: abbreviation,
+              words: phraseWords(phrase),
+              expansions: [phrase],
+              kind: 'substitution',
+            },
+          });
+        }
+        at = chunk.indexOf(abbreviation, at + abbreviation.length);
+      }
+    }
+    found.sort((a, b) => a.at - b.at);
+    let cursor = 0;
+    for (const hit of found) {
+      residual += chunk.slice(cursor, hit.at);
+      residual += ' ';
+      cursor = hit.at + hit.length;
+      spanTerms.push(hit.term);
+    }
+    residual += chunk.slice(cursor);
+  };
+
+  const spanPattern = /"([^"]{3,200})"/g;
+  let match = spanPattern.exec(text);
+  while (match !== null) {
+    takePlain(text.slice(last, match.index));
+    const span = match[1] ?? '';
+    const words = phraseWords(expandAbbreviationsIn(span));
+    if (words.length > 0) {
+      spanTerms.push({ term: span, words, expansions: [], kind: 'phrase' });
+    }
+    residual += ' ';
+    last = match.index + match[0].length;
+    match = spanPattern.exec(text);
+  }
+  takePlain(text.slice(last));
+
+  const tokenTerms: QueryTerm[] = [];
+  for (const token of residual.split(/[^\p{L}\p{N}]+/u).filter((token) => token.length > 0)) {
+    const entry = SYNONYM_PHRASES[token];
+    const expansions = entry === undefined ? [] : typeof entry === 'string' ? [entry] : [...entry];
+    tokenTerms.push({ term: token, words: [token], expansions, kind: 'token' });
+  }
+  return [...spanTerms, ...tokenTerms];
+}
+
 /**
  * Translate free text into a safe FTS5 match string.
  *
@@ -322,37 +441,23 @@ export function toFtsQuery(raw: string, mode: MatchMode): string | null {
   const parts: string[] = [];
   let budget = MAX_TERMS;
 
-  // Punctuated abbreviations first: they are replaced with their phrase so
-  // the tokenizer sees real words (without this, "A&A" yields nothing). The
-  // replacement is a QUOTED span, so it becomes a phrase query ("aid and
-  // attendance"*) rather than three words that must merely co-occur.
-  let expanded = raw.toLowerCase();
-  for (const [abbreviation, phrase] of Object.entries(RAW_PHRASE_EXPANSIONS)) {
-    expanded = expanded.split(abbreviation).join(`"${phrase}"`);
-  }
-
-  const remaining = expanded.replace(/"([^"]{3,200})"/g, (_match, span: string) => {
-    const words = span.split(/[^\p{L}\p{N}]+/u).filter((word) => word.length > 0);
-    if (words.length > 0 && budget > 0) {
-      parts.push(`"${words.join(' ')}"*`);
-      budget = Math.max(0, budget - words.length);
-    }
-    return ' ';
-  });
-
-  const tokens = remaining
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((token) => token.length > 0)
-    .slice(0, budget);
-  for (const token of tokens) {
-    const entry = SYNONYM_PHRASES[token];
-    if (entry === undefined) {
-      parts.push(`"${token}"*`);
+  for (const term of queryTerms(raw)) {
+    if (term.kind === 'token') {
+      if (budget <= 0) continue;
+      budget -= 1;
+      if (term.expansions.length === 0) {
+        parts.push(`"${term.term}"*`);
+        continue;
+      }
+      const alternatives = term.expansions.map((phrase) => `"${phrase}"*`).join(' OR ');
+      parts.push(`("${term.term}"* OR ${alternatives})`);
       continue;
     }
-    const phrases = typeof entry === 'string' ? [entry] : entry;
-    const alternatives = phrases.map((phrase) => `"${phrase}"*`).join(' OR ');
-    parts.push(`("${token}"* OR ${alternatives})`);
+    // A quoted span or a substituted abbreviation: a phrase query, whose
+    // words are charged against the term budget.
+    if (budget <= 0) continue;
+    budget = Math.max(0, budget - term.words.length);
+    parts.push(`"${term.words.join(' ')}"*`);
   }
   if (parts.length === 0) return null;
   return parts.join(mode === 'and' ? ' AND ' : ' OR ');
@@ -420,27 +525,41 @@ function isBusyError(error: unknown): boolean {
 
 /** Query tokens that actually appear in a hit (citation/heading/snippet). */
 export function visibleMatches(
-  tokens: readonly string[],
+  terms: readonly QueryTerm[],
   hit: {
     citation: string;
     heading: string;
     snippet: string;
   },
 ): string[] {
-  const words = `${hit.citation}\n${hit.heading}\n${hit.snippet}`
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u);
+  const words = hitWords(hit);
   const seen = new Set<string>();
   const matches: string[] = [];
-  for (const token of tokens) {
+  for (const term of terms) {
     if (matches.length >= 8) break;
-    if (seen.has(token)) continue;
-    seen.add(token);
-    // Word-start match mirrors the FTS prefix semantics ("term"*) and avoids
-    // false positives like token "in" matching inside "brain".
-    if (words.some((word) => word.startsWith(token))) matches.push(token);
+    if (seen.has(term.term)) continue;
+    seen.add(term.term);
+    if (termResponded(term, words)) matches.push(term.term);
   }
   return matches;
+}
+
+/** The words of a hit, lowercased and split. */
+export function hitWords(hit: { citation: string; heading: string; snippet: string }): string[] {
+  return `${hit.citation}\n${hit.heading}\n${hit.snippet}`.toLowerCase().split(/[^\p{L}\p{N}]+/u);
+}
+
+/**
+ * True when the hit's text answers the term: the term's own words are
+ * visible, or every word of one of its corpus phrases is.
+ *
+ * The word-start match mirrors the FTS prefix semantics ("term"*) and avoids
+ * false positives like the token "in" matching inside "brain".
+ */
+export function termResponded(term: QueryTerm, words: readonly string[]): boolean {
+  const visible = (word: string): boolean => words.some((candidate) => candidate.startsWith(word));
+  if (term.words.every(visible)) return true;
+  return term.expansions.some((phrase) => phraseWords(phrase).every(visible));
 }
 
 function nullableString(value: unknown): string | null {
@@ -787,10 +906,7 @@ export class Store {
       offset,
     );
 
-    const queryTokens = query.query
-      .toLowerCase()
-      .split(/[^\p{L}\p{N}]+/u)
-      .filter((token) => token.length > 0);
+    const terms = queryTerms(query.query);
 
     const hits = rows.map((row) => {
       const record = row as Record<string, unknown>;
@@ -802,7 +918,7 @@ export class Store {
         snippet: tidySnippet(String(record['snippet'] ?? '')),
         score: Number(record['score'] ?? 0),
       };
-      return { ...hit, matches: visibleMatches(queryTokens, hit) };
+      return { ...hit, matches: visibleMatches(terms, hit) };
     });
     return { hits, total, page: query.page, perPage, matchMode: mode };
   }

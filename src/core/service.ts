@@ -12,7 +12,7 @@ import {
   type BrowseResult,
   type StructureNode,
 } from './structure.js';
-import { Store, visibleMatches, type SearchHit, type MatchMode } from './store.js';
+import { Store, queryTerms, visibleMatches, type MatchMode, type SearchHit } from './store.js';
 
 /**
  * Application facade shared by the MCP server and the HTTP API. All input
@@ -365,17 +365,11 @@ export class CFRService {
         // Fabricated bm25, strictly better than any real score, so array order
         // and score order agree; `direct: true` is the reliable client signal.
         score: -1_000_000,
-        matches: visibleMatches(
-          query
-            .toLowerCase()
-            .split(/[^\p{L}\p{N}]+/u)
-            .filter(Boolean),
-          {
-            citation: row.citation,
-            heading: row.heading,
-            snippet,
-          },
-        ),
+        matches: visibleMatches(queryTerms(query), {
+          citation: row.citation,
+          heading: row.heading,
+          snippet,
+        }),
       },
       true,
       inResults,
