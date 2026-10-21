@@ -694,3 +694,61 @@ describe('UI redline view (M5 slice 2)', () => {
     expect(harness.element('redline-output').textContent).toBe('');
   });
 });
+
+describe('UI search part title', () => {
+  it('shows the part title in the meta line when present', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/search?q=alpha');
+    harness.calls[0]?.respond(true, {
+      total: 1,
+      page: 1,
+      matchMode: 'or',
+      matchedTerms: [],
+      unmatchedTerms: [],
+      hits: [
+        {
+          citation: '4.16',
+          citationDisplay: '38 C.F.R. § 4.16',
+          heading: 'Heading 4.16',
+          snippet: 'Snippet for 4.16.',
+          matches: [],
+          direct: false,
+          part: '4',
+          partTitle: 'Schedule for Rating Disabilities',
+        },
+      ],
+    });
+    await harness.flush();
+
+    const hits = harness.element('search-hits');
+    expect(hits.allText).toContain(' — part 4: Schedule for Rating Disabilities');
+  });
+
+  it('keeps the bare part number when partTitle is absent', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/search?q=alpha');
+    harness.calls[0]?.respond(true, {
+      total: 1,
+      page: 1,
+      matchMode: 'or',
+      matchedTerms: [],
+      unmatchedTerms: [],
+      hits: [
+        {
+          citation: '4.16',
+          citationDisplay: '38 C.F.R. § 4.16',
+          heading: 'Heading 4.16',
+          snippet: 'Snippet for 4.16.',
+          matches: [],
+          direct: false,
+          part: '4',
+        },
+      ],
+    });
+    await harness.flush();
+
+    const hits = harness.element('search-hits');
+    expect(hits.allText).toContain(' — part 4');
+    expect(hits.allText).not.toContain(' — part 4:');
+  });
+});

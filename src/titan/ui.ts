@@ -331,7 +331,13 @@ export const UI_JS = String.raw`(function () {
     heading.appendChild(link);
     if (hit.direct === true) heading.appendChild(el('span', 'badge', 'direct hit'));
     item.appendChild(heading);
-    var part = hit.part === null || hit.part === undefined ? '' : ' — part ' + String(hit.part);
+    var part = '';
+    if (hit.part !== null && hit.part !== undefined) {
+      part = ' — part ' + String(hit.part);
+      if (hit.partTitle !== null && hit.partTitle !== undefined && String(hit.partTitle) !== '') {
+        part = part + ': ' + String(hit.partTitle);
+      }
+    }
     item.appendChild(el('p', 'hit-meta', String(hit.heading) + part));
     var snippet = el('p', 'hit-snippet', '');
     markMatches(snippet, String(hit.snippet), Array.isArray(hit.matches) ? hit.matches : []);

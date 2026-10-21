@@ -50,6 +50,7 @@ const searchOutputSchema = z.object({
       direct: z.boolean(),
       heading: z.string(),
       part: z.string().nullable(),
+      partTitle: z.string().nullable(),
       path: z.string(),
       snippet: z.string(),
       score: z.number(),
