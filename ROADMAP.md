@@ -64,8 +64,9 @@ establish the privacy properties of a separately chosen AI client.
    pointers, not proof of shipment; inspect their live status and reuse work.
 2. The four 2026-10-20 P1 packets are **CLOSED** (see above); the open
    item is **P1-20261021-07** (the browse view's request identity), which is
-   not yet dispatched. Each has its own evidence,
-   candidate manifest, acceptance criteria, and test commands. Keep each
+   not yet dispatched. Each of the four closed packets has its own
+   evidence, candidate manifest, acceptance criteria, and test commands;
+   P1-20261021-07 has its evidence and an implementation reference so far. Keep each
    finding open until its fixing SHA has the required reviewer verdict.
 3. The M-items below are packet families. Split each into small PRs, normally
    within ~300 net lines, with evidence pointers, exact authorized files,
