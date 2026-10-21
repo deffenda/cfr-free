@@ -78,6 +78,34 @@ describe('CFRService.search', () => {
     }
   });
 
+  it('orders a heading-phrase match ahead of a body-heavy match', () => {
+    // bm25 weighs term frequency WITHIN a column, so the section whose body
+    // repeats the phrase ranks first on its own. SPEC §13 row 4 promises
+    // that a heading match outranks a body-only match, so the heading-phrase
+    // key puts § 3.350 ahead.
+    const temp = openTempStore({
+      sections: [
+        makeSection({
+          citation: '17.151',
+          heading: 'Special monthly compensation benefits.',
+          text: 'Special monthly compensation special monthly compensation special monthly compensation is payable.',
+        }),
+        makeSection({
+          citation: '3.350',
+          heading: 'Special monthly compensation ratings.',
+          text: 'Ratings for special monthly compensation.',
+        }),
+      ],
+    });
+    try {
+      const service = new CFRService(temp.store, 7);
+      const result = service.search({ query: 'special monthly compensation' });
+      expect(result.hits[0]?.citation).toBe('3.350');
+    } finally {
+      temp.cleanup();
+    }
+  });
+
   it('rejects short queries', () => {
     withService((service) => {
       expect(() => service.search({ query: 'ab' })).toThrow(ServiceError);

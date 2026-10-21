@@ -200,13 +200,13 @@ export interface StoreOpenOptions {
 // heading matches must outrank body-only matches (SPEC §13).
 const SCORE_EXPR = 'bm25(sections_fts, 10.0, 5.0, 1.0) AS score';
 
-const SELECT_MATCHES_SQL = `
+const SELECT_MATCHES_SQL = (orderBy: string) => `
 SELECT s.citation, s.heading, s.part, s.path, ${SNIPPET_EXPR} AS snippet,
        ${SCORE_EXPR}
 FROM sections_fts
 JOIN sections s ON s.id = sections_fts.rowid
 WHERE sections_fts MATCH ?
-ORDER BY score
+ORDER BY ${orderBy}score
 LIMIT ? OFFSET ?`;
 
 /**
@@ -241,13 +241,13 @@ function filterClause(filters: readonly SearchFilter[]): string {
   return filters.map(([name]) => ` AND ${SEARCH_FILTER_COLUMNS[name]} = ?`).join('');
 }
 
-const SELECT_MATCHES_FILTERED_SQL = (where: string): string => `
+const SELECT_MATCHES_FILTERED_SQL = (where: string, orderBy: string): string => `
 SELECT s.citation, s.heading, s.part, s.path, ${SNIPPET_EXPR} AS snippet,
        ${SCORE_EXPR}
 FROM sections_fts
 JOIN sections s ON s.id = sections_fts.rowid
 WHERE sections_fts MATCH ?${where}
-ORDER BY score
+ORDER BY ${orderBy}score
 LIMIT ? OFFSET ?`;
 
 const COUNT_MATCHES_SQL = `
@@ -510,6 +510,67 @@ function ensureSchemaVersion(db: DatabaseSync, allowSchemaUpgrade: boolean): voi
   // empty section_references table — reads stay servable (citedBy answers
   // []) and the next successful sync completes the edge population.
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+
+/**
+ * Words that carry no question: function words, and the "38 CFR" of a
+ * citation. Published and fixed — a presentation constant, never tuned.
+ * The list mirrors the function words SQLite's tokenizer drops, so the
+ * ranking key counts the same words the FTS query actually matched.
+ */
+export const STOPWORDS: ReadonlySet<string> = new Set(
+  (
+    'a an and are as at be by cfr cfrs for from had has have how in is it its many much no not of on ' +
+    'or that the their there these this to too was were what when where which who whom why will with ' +
+    'you your'
+  ).split(' '),
+);
+
+/**
+ * The query's terms that carry a question: not a stopword, not a bare
+ * numeral, not a single letter. A quoted span or a punctuated abbreviation
+ * is deliberate — never noise.
+ */
+export function contentTerms(terms: readonly QueryTerm[]): readonly QueryTerm[] {
+  return terms.filter((term) => {
+    if (term.kind !== 'token') return true;
+    return term.term.length > 1 && !/^\p{N}+$/u.test(term.term) && !STOPWORDS.has(term.term);
+  });
+}
+
+/**
+ * The sort key that puts a HEADING match ahead of a body-only match.
+ *
+ * bm25 weighs term frequency WITHIN a column, so a section whose body
+ * repeats the phrase ten times outranks a section whose heading IS the
+ * phrase — which is not what SPEC §13 row 4 promises ("citation/heading
+ * matches outrank body-only hits"). The key counts how many of the
+ * query's content terms the heading carries (the term itself, or the
+ * corpus phrase a synonym stands for) and sorts on it before the score.
+ *
+ * The SQL text is assembled from a fixed shape; every value binds as a
+ * parameter, so no user input reaches the statement.
+ */
+function headingMatchKey(terms: readonly QueryTerm[]): { clause: string; params: string[] } {
+  const content = contentTerms(terms);
+  // The heading must carry the query's terms as a PHRASE, not merely one of
+  // them: counting the terms that appear promotes any heading that happens
+  // to contain a generic word ("rating", "service", "recipients") above the
+  // provision that actually answers the question — measured, that cost the
+  // holdout three of its exact-citation hits.
+  const alternatives: string[] = [];
+  const phrase = content.map((term) => term.term).join(' ');
+  if (phrase !== '') alternatives.push(phrase);
+  for (const term of content) {
+    for (const expansion of term.expansions) alternatives.push(expansion);
+  }
+  const params: string[] = [];
+  const tests = alternatives.map((alternative) => {
+    params.push(alternative.toLowerCase());
+    return 'instr(lower(s.heading), ?) > 0';
+  });
+  if (tests.length === 0) return { clause: '', params: [] };
+  return { clause: `(CASE WHEN ${tests.join(' OR ')} THEN 1 ELSE 0 END) DESC, `, params };
 }
 
 /** True for SQLITE_BUSY/SQLITE_LOCKED failures (concurrent writer). */
@@ -895,18 +956,19 @@ export class Store {
     if (ftsQuery === null)
       return { hits: [], total: 0, page: query.page, perPage, matchMode: mode };
 
+    const terms = queryTerms(query.query);
+    const key = headingMatchKey(terms);
     const sql =
       filters.length === 0
-        ? SELECT_MATCHES_SQL
-        : SELECT_MATCHES_FILTERED_SQL(filterClause(filters));
+        ? SELECT_MATCHES_SQL(key.clause)
+        : SELECT_MATCHES_FILTERED_SQL(filterClause(filters), key.clause);
     const rows = this.stmt(sql).all(
       ftsQuery,
       ...filters.map(([, value]) => value),
+      ...key.params,
       perPage,
       offset,
     );
-
-    const terms = queryTerms(query.query);
 
     const hits = rows.map((row) => {
       const record = row as Record<string, unknown>;

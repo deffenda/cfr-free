@@ -14,13 +14,14 @@ import {
 } from './structure.js';
 import {
   Store,
+  contentTerms,
   hitWords,
   queryTerms,
   termResponded,
-  visibleMatches,
   type MatchMode,
   type QueryTerm,
   type SearchHit,
+  visibleMatches,
 } from './store.js';
 
 /**
@@ -112,27 +113,6 @@ export interface SearchResponse {
    * the corpus does not discuss it at all.
    */
   readonly unmatchedTerms: readonly string[];
-}
-
-/**
- * Words that carry no question: function words, and the "38 CFR" of a
- * citation. Published and fixed — a presentation constant, never tuned.
- */
-const STOPWORDS: ReadonlySet<string> = new Set(
-  (
-    'a an and are as at be by cfr cfrs for from had has have how in is it its many much no not of on ' +
-    'or that the their there these this to too was were what when where which who whom why will with ' +
-    'you your'
-  ).split(' '),
-);
-
-/** The query's terms that carry a question: not a stopword, not a bare numeral, not a single letter. */
-function contentTerms(terms: readonly QueryTerm[]): readonly QueryTerm[] {
-  return terms.filter((term) => {
-    // A quoted span or a punctuated abbreviation is deliberate — never noise.
-    if (term.kind !== 'token') return true;
-    return term.term.length > 1 && !/^\p{N}+$/u.test(term.term) && !STOPWORDS.has(term.term);
-  });
 }
 
 /**
