@@ -6,7 +6,7 @@ The six P1 findings from the 2026-10-21 implementation audit were **OPEN**
 at the time of this grooming; **all six are now CLOSED** — the fixing PR,
 the reviewed SHA and its verdict, the verified merge SHA and what each fix
 does are in [the 2026-10-21 review handoff](docs/research/review-2026-10-21.md)
-(issue #106), and the completion records are in the table below.
+(issue #106), and the roadmap's own completion records are in the table below.
 **P1-20261021-07 — the browse view's request identity, the sibling of the
 redline race — is OPEN** and not yet dispatched; it is recorded in the same
 handoff. This is a review handoff, not an implementation or a closure
@@ -62,8 +62,9 @@ establish the privacy properties of a separately chosen AI client.
    wire access, historical section reads, route metrics, UI redlines,
    ETag/304, and deeper browse navigation. Those entries are coordination
    pointers, not proof of shipment; inspect their live status and reuse work.
-2. Dispatch the four OPEN P1 packets from
-   `docs/research/review-2026-10-20.md` first. Each has its own evidence,
+2. The four 2026-10-20 P1 packets are **CLOSED** (see above); the open
+   item is **P1-20261021-07** (the browse view's request identity), which is
+   not yet dispatched. Each has its own evidence,
    candidate manifest, acceptance criteria, and test commands. Keep each
    finding open until its fixing SHA has the required reviewer verdict.
 3. The M-items below are packet families. Split each into small PRs, normally
