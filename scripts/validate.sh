@@ -302,6 +302,21 @@ else
   finish tests skip "$((SECONDS - start))" 'no source or test files changed'
 fi
 
+section 'markers (no unresolved conflict markers — test/no-conflict-markers.test.ts)'
+start=$SECONDS
+# The TEST is the single source of truth for the rule (it skips fenced code
+# blocks, which documentation may legitimately show a marker in); this section
+# runs it rather than re-implementing the rule, so the two cannot drift.
+if ! tool_ok npx; then
+  finish markers UNAVAILABLE "$((SECONDS - start))" 'npx not found'
+elif [ ! -f test/no-conflict-markers.test.ts ]; then
+  finish markers UNAVAILABLE "$((SECONDS - start))" 'test/no-conflict-markers.test.ts not found'
+elif npx vitest run test/no-conflict-markers.test.ts >"$tmp/markers.log" 2>&1; then
+  finish markers pass "$((SECONDS - start))"
+else
+  finish markers FAIL "$((SECONDS - start))" "$(fail_reason "$tmp/markers.log")"
+fi
+
 section 'scan (tools/security-scan.sh — npm audit, osv-scanner, gitleaks, trivy, semgrep)'
 start=$SECONDS
 if [ ! -f tools/security-scan.sh ]; then
