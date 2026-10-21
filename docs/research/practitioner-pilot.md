@@ -52,6 +52,36 @@ output.
 
 ## 2. What this study is, and what it is not
 
+### 2.1 The dependency M6 records, and where it stands
+
+M6 opens with its own dependency line: _"study design can start now;
+usable pilot requires A and C"_ (`ROADMAP.md:498`). Read against the
+delivery-order table (`ROADMAP.md:77-80`), that means:
+
+| Stage | Work                               | Exit evidence                                                                                    | Where it stands for this study                                                                                                                                                                                                                                                                                                                                      |
+| ----- | ---------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A** | trustworthy baseline (P1-01…P1-04) | four fixing PRs, reviewed SHAs, gate tails; no silent loss of graphics or stale-route repaint    | **Shipped** — the corpus fidelity work and the route-ownership fix are in `origin/main`; the corpus this study uses is the post-A corpus (2 970 provisions, 9 image-marked provisions, measured 2026-10-21)                                                                                                                                                         |
+| **C** | usable distribution (M4, M5)       | verified onboarding and one end-to-end research/export workflow                                  | **Shipped** — the M5 section header records 4 of 4 slices done (`ROADMAP.md:469`); the copy block (`src/titan/ui.ts:629-649`), the redline view (`src/titan/ui.ts:44`, `:97-110`, `:429-484`, shipped as `ae61dbf`), the subject-group descent (`src/core/service.ts:519-540`) and the ETag reads (`docs/SPEC.md:244`) are what families F1, F3, F4 and F5 exercise |
+| **D** | validate demand (M6)               | operator-arranged practitioner study, task-level results, explicit continue/change/stop decision | **This document** — the protocol; the study itself is operator-arranged and has not been run                                                                                                                                                                                                                                                                        |
+
+> **One stale row in the ROADMAP, flagged rather than absorbed.** The M5
+> header says 4 of 4 slices are done (`ROADMAP.md:469`), but the **slice-2
+> row of the table below it still reads "OPEN"** — while the UI redline
+> view it describes is implemented (`src/titan/ui.ts:44` links the route,
+> `:97-110` is the form, `:429-484` renders it, `:501` calls
+> `/api/v1/redline`, shipped as commit `ae61dbf` with 109 lines of
+> behavioural test). The header was corrected by `736b355`; the row was
+> missed. This document cites the **implementation**, which is what
+> families F1, F4 and F5 actually exercise. The ROADMAP row is the
+> operator's to correct — this packet does not touch the ROADMAP.
+
+So the design may start now **and** the two stages it depends on are
+already delivered. What is still outstanding is entirely on the
+operator's side: recruitment, consent, and the agreement of the success
+criteria in §8 before anyone is contacted.
+
+### 2.2 What the study is, and what it is not
+
 | This study **is**                                                                     | This study **is not**                                                                            |
 | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | A structured observation of **5 participants** doing **7 synthetic tasks each**       | A statistical validation — n = 5 is a planning target, not a sample                              |
