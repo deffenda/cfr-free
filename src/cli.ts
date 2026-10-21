@@ -9,8 +9,9 @@ import { runExportCommand } from './commands/export.js';
 import { formatIssueDiff, runDiffCommand } from './commands/diff.js';
 import { formatSectionRedline, runRedlineCommand } from './commands/redline.js';
 import { formatHistoricalSection, runHistoricalCommand } from './commands/historical.js';
+import { formatSearchResults, runSearchCommand } from './commands/search.js';
 import { CommandError, EXIT } from './exit-codes.js';
-import { createLogger } from './logger.js';
+import { createLogger, type Logger } from './logger.js';
 import { VERSION } from './version.js';
 
 /** CLI usage text. */
@@ -25,6 +26,7 @@ Usage:
                                            two eCFR issue dates
   cfr-free historical <at> <citation>  One provision as it stood at a date (eCFR's
                                      point-in-time archive, 2017 onward)
+  cfr-free search <query>  Ranked provisions from the local index (top 10)
   cfr-free serve          Start the Titan HTTP API (default http://127.0.0.1:8787)
   cfr-free export <path> [jsonl|md]  Snapshot the index (sqlite default;
                                      jsonl/md for pipeline ingestion)
@@ -53,7 +55,16 @@ export class CliError extends CommandError {
 }
 
 export type Command =
-  'mcp' | 'sync' | 'diff' | 'redline' | 'historical' | 'serve' | 'export' | 'help' | 'version';
+  | 'mcp'
+  | 'sync'
+  | 'diff'
+  | 'redline'
+  | 'historical'
+  | 'search'
+  | 'serve'
+  | 'export'
+  | 'help'
+  | 'version';
 
 /** Parsed argv: `export`, `diff` and `redline` carry their positional arguments. */
 export type ParsedCommand =
@@ -70,7 +81,8 @@ export type ParsedCommand =
       readonly toDate: string;
       readonly citation: string;
     }
-  | { readonly command: Exclude<Command, 'export' | 'diff' | 'redline' | 'historical'> };
+  | { readonly command: 'search'; readonly query: string }
+  | { readonly command: Exclude<Command, 'export' | 'diff' | 'redline' | 'historical' | 'search'> };
 
 /** Validate `export`'s required target path and optional output format. */
 function parseExportTarget(rest: readonly string[]): ParsedCommand {
@@ -131,11 +143,6 @@ function parseRedlineArgs(rest: readonly string[]): ParsedCommand {
 }
 
 /**
- * Commands that carry positional arguments, mapped to their parser. A Map
- * (not a plain object): `parseArgs(['toString'])` must still fall through to
- * "unknown command" — object literals inherit prototype keys, Maps don't.
- */
-/**
  * `historical <at> <citation>` — exactly two positionals; a dash-prefixed
  * or wrong-arity invocation is a usage error.
  */
@@ -155,11 +162,27 @@ function parseHistoricalArgs(rest: readonly string[]): ParsedCommand {
   return { command: 'historical', atDate, citation };
 }
 
+/** `search <query…>` — the words are the query; a dash-prefixed word is refused. */
+function parseSearchArgs(rest: readonly string[]): ParsedCommand {
+  const dashed = rest.find((arg) => arg.startsWith('-'));
+  if (dashed !== undefined) throw new CliError(`unknown option for search: ${dashed}`);
+  const query = rest.join(' ').trim();
+  if (query.length === 0)
+    throw new CliError('search requires a query (e.g. `cfr-free search PTSD`)');
+  return { command: 'search', query };
+}
+
+/**
+ * Commands that carry positional arguments, mapped to their parser. A Map
+ * (not a plain object): `parseArgs(['toString'])` must still fall through to
+ * "unknown command" — object literals inherit prototype keys, Maps don't.
+ */
 const ARG_PARSERS = new Map<string, (rest: readonly string[]) => ParsedCommand>([
   ['export', parseExportTarget],
   ['diff', parseDiffArgs],
   ['redline', parseRedlineArgs],
   ['historical', parseHistoricalArgs],
+  ['search', parseSearchArgs],
 ]);
 
 /** Parse argv (without node/script) into a command. Default: `mcp`. */
@@ -183,6 +206,32 @@ export interface MainIO {
   out(chunk: string): void;
   err(chunk: string): void;
   env: NodeJS.ProcessEnv;
+}
+
+/** Commands that read one provision across eCFR revisions (`historical`, `redline`). */
+const PROVISION_READ_COMMANDS: ReadonlySet<Command> = new Set<Command>(['historical', 'redline']);
+
+async function runProvisionRead(
+  parsed: ParsedCommand,
+  logger: Logger,
+  io: MainIO,
+): Promise<number> {
+  if (parsed.command === 'historical') {
+    // A historical read that succeeds is a success (exit 0) whatever the
+    // text says; a bad date, an unknown citation or a date outside
+    // eCFR's archive surfaces as a throw.
+    const section = await runHistoricalCommand(logger, parsed.atDate, parsed.citation);
+    io.out(formatHistoricalSection(section));
+    return 0;
+  }
+  if (parsed.command === 'redline') {
+    // A redline WITH changes is a success: exit 0 regardless of content
+    // (same policy as `diff`). Validation/lookup errors surface as throws.
+    const report = await runRedlineCommand(logger, parsed.fromDate, parsed.toDate, parsed.citation);
+    io.out(formatSectionRedline(report));
+    return 0;
+  }
+  return EXIT.ERROR;
 }
 
 /** CLI entry point. Returns the process exit code. */
@@ -237,25 +286,13 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
       io.out(formatIssueDiff(report));
       return 0;
     }
-    if (command === 'historical') {
-      // A historical read that succeeds is a success (exit 0) whatever the
-      // text says; a bad date, an unknown citation or a date outside
-      // eCFR's archive surfaces as a throw.
-      const section = await runHistoricalCommand(logger, parsed.atDate, parsed.citation);
-      io.out(formatHistoricalSection(section));
+    if (command === 'search') {
+      const result = await runSearchCommand(config, logger, parsed.query);
+      io.out(formatSearchResults(result));
       return 0;
     }
-    if (command === 'redline') {
-      // A redline WITH changes is a success: exit 0 regardless of content
-      // (same policy as `diff`). Validation/lookup errors surface as throws.
-      const report = await runRedlineCommand(
-        logger,
-        parsed.fromDate,
-        parsed.toDate,
-        parsed.citation,
-      );
-      io.out(formatSectionRedline(report));
-      return 0;
+    if (PROVISION_READ_COMMANDS.has(command)) {
+      return await runProvisionRead(parsed, logger, io);
     }
     if (command === 'serve') return await runServeCommand(config, logger);
     await runMcpCommand(config, logger);

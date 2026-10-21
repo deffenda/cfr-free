@@ -665,6 +665,7 @@ components:
         - matches
         - citationDisplay
         - sourceUrl
+        - sourceUrlAtIndexDate
         - direct
         - inResults
         - partTitle
@@ -681,6 +682,12 @@ components:
           description: 'Query terms this hit answered — the term itself, or the corpus phrase a synonym stands for (a hit that matched "special monthly compensation" answers the term "smc").'
         citationDisplay: { type: string, description: 'Paste-ready form, e.g. 38 C.F.R. § 4.130.' }
         sourceUrl: { type: string, format: uri }
+        sourceUrlAtIndexDate:
+          {
+            type: string,
+            format: uri,
+            description: 'The same provision at the index issue date: the URL that proves which revision the text was read at. `sourceUrl` is the CURRENT text.',
+          }
         direct: { type: boolean, description: Pinned hit (query was this citation). }
         inResults:
           {

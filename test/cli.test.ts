@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { CliError, main, parseArgs } from '../src/cli.js';
 import { formatIssueDiff } from '../src/commands/diff.js';
+import { formatSearchResults } from '../src/commands/search.js';
 import { Store } from '../src/core/store.js';
 import type { FetchLike } from '../src/core/http-client.js';
 import { VERSION } from '../src/version.js';
@@ -506,5 +507,55 @@ describe('main: redline output', () => {
       vi.unstubAllGlobals();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('cfr-free search', () => {
+  it('parses the words after the command as one query', () => {
+    expect(parseArgs(['search', 'PTSD', 'diagnosis'])).toEqual({
+      command: 'search',
+      query: 'PTSD diagnosis',
+    });
+  });
+
+  it('refuses a search with no query, and a dash-prefixed option', () => {
+    expect(() => parseArgs(['search'])).toThrow(CliError);
+    expect(() => parseArgs(['search', '--limit', '5'])).toThrow(/unknown option for search/);
+  });
+
+  it('prints the stale-index notice when the index is past its freshness limit', () => {
+    const out = formatSearchResults({
+      query: 'PTSD',
+      page: 1,
+      perPage: 10,
+      total: 0,
+      tier: 'or',
+      indexIssueDate: '2026-08-22',
+      indexStale: true,
+      notice: 'local index is stale (issue date 2026-08-22) — verify against the current eCFR',
+      matchedTerms: [],
+      unmatchedTerms: [],
+      hits: [],
+    } as unknown as Parameters<typeof formatSearchResults>[0]);
+    expect(out).toContain('warning: local index is stale');
+  });
+
+  it('says so when nothing matches, and states the issue date', () => {
+    const out = formatSearchResults({
+      query: 'zzz',
+      page: 1,
+      perPage: 10,
+      total: 0,
+      tier: 'or',
+      indexIssueDate: '2026-10-16',
+      indexStale: false,
+      notice: null,
+      matchedTerms: [],
+      unmatchedTerms: ['zzz'],
+      hits: [],
+    } as unknown as Parameters<typeof formatSearchResults>[0]);
+    expect(out).toContain('No provisions match "zzz".');
+    expect(out).toContain('index issue date 2026-10-16');
+    expect(out).toContain('terms not answered by these hits: zzz');
   });
 });

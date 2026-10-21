@@ -66,6 +66,8 @@ node dist/cli.js mcp            # MCP server on stdio (default command)
 
 node dist/cli.js export ./backup.sqlite   # consistent snapshot of the local index
 
+node dist/cli.js search PTSD               # ranked provisions from the local index (top 10)
+
 node dist/cli.js diff 2026-01-01 2026-06-01   # provision changes between two issue dates
 node dist/cli.js redline 2026-01-01 2026-06-01 4.125   # line-level redline of one provision
 ```

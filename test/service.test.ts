@@ -297,6 +297,21 @@ describe('CFRService.browse', () => {
     });
   });
 
+  it('says a part needs its chapter when asked for directly under the title', () => {
+    withService((service) => {
+      try {
+        service.browse({ part: '17' });
+        expect.unreachable('should have thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructureError);
+        if (error instanceof StructureError) {
+          expect(error.message).toContain('parts sit under a chapter');
+          expect(error.message).toContain('chapters: I');
+        }
+      }
+    });
+  });
+
   it('descends into a subject group', () => {
     withService((service) => {
       const result = service.browse({
@@ -557,6 +572,20 @@ describe('CFRService.listParts', () => {
 });
 
 describe('CFRService citation-direct search', () => {
+  it('carries the dated verification URL on every hit, not only the current one', () => {
+    withService((service) => {
+      const result = service.search({ query: '38 CFR 4.130' });
+      const hit = result.hits[0];
+      expect(hit).toBeDefined();
+      expect(hit?.sourceUrl).toMatch(/^https:\/\/www\.ecfr\.gov\/current\//);
+      expect(hit?.sourceUrlAtIndexDate).toMatch(
+        /^https:\/\/www\.ecfr\.gov\/on\/\d{4}-\d{2}-\d{2}\//,
+      );
+      expect(hit?.sourceUrlAtIndexDate).toContain(result.indexIssueDate ?? '');
+      expect(hit).not.toHaveProperty('issueDate');
+    });
+  });
+
   it('pins the exact section when the query is a citation', () => {
     withService((service) => {
       const result = service.search({ query: '38 CFR 4.130' });
