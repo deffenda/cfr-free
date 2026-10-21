@@ -66,7 +66,17 @@ function findChild(node: StructureNode, type: string, identifier: string): Struc
   const matches = node.children.filter((child) => child.type === type);
   if (matches.length === 0) {
     const available = node.children.map((child) => child.identifier);
-    throw new StructureError(`no '${type}' level under ${node.type} ${node.identifier}`, available);
+    // A part sits under a chapter, so asking for it directly under a title is
+    // a request that needs the chapter first; say so instead of implying the
+    // part does not exist.
+    const hint =
+      type === 'part' && node.type === 'title'
+        ? `; parts sit under a chapter — pass chapter first (chapters: ${available.join(', ')})`
+        : '';
+    throw new StructureError(
+      `no '${type}' level under ${node.type} ${node.identifier}${hint}`,
+      available,
+    );
   }
   const found = matches.find((child) => child.identifier === identifier);
   if (!found) {

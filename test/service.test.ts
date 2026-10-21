@@ -297,6 +297,21 @@ describe('CFRService.browse', () => {
     });
   });
 
+  it('says a part needs its chapter when asked for directly under the title', () => {
+    withService((service) => {
+      try {
+        service.browse({ part: '17' });
+        expect.unreachable('should have thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(StructureError);
+        if (error instanceof StructureError) {
+          expect(error.message).toContain('parts sit under a chapter');
+          expect(error.message).toContain('chapters: I');
+        }
+      }
+    });
+  });
+
   it('descends into a subject group', () => {
     withService((service) => {
       const result = service.browse({
