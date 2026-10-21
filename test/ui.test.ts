@@ -903,3 +903,68 @@ describe('UI search part title', () => {
     expect(hits.allText).not.toContain(' — part 4:');
   });
 });
+
+describe('browse race reachability (P1-20261021-07 — the race is NOT reachable)', () => {
+  it('empties the tree while a browse fetch is pending', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/browse');
+    harness.calls[0]?.respond(true, {
+      node: { type: 'title', identifier: '38', label: 'Title 38' },
+      path: [],
+      children: [
+        { type: 'part', identifier: '3', label: 'Part 3' },
+        { type: 'part', identifier: '4', label: 'Part 4' },
+      ],
+    });
+    await harness.flush();
+    const rows = harness.element('browse-list').childNodes;
+    expect(rows.length).toBe(2);
+
+    // Click the first part row: a fetch starts and the tree is cleared.
+    rows[0]?.childNodes[0]?.dispatch('click');
+    await harness.flush();
+    expect(harness.calls).toHaveLength(2);
+    const during = harness.element('browse-list').childNodes;
+
+    expect(during.length).toBe(0);
+
+    // So a SECOND click cannot start a second fetch: the tree is empty, so
+    // there is nothing left to click. (The dispatch below is deliberately a
+    // no-op -- `during[0]` is undefined -- and the assertion that carries
+    // the claim is the emptiness check above.)
+  });
+
+  it('discards a pending browse fetch when the route is re-rendered', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/browse');
+    harness.calls[0]?.respond(true, {
+      node: { type: 'title', identifier: '38', label: 'Title 38' },
+      path: [],
+      children: [{ type: 'part', identifier: '3', label: 'Part 3' }],
+    });
+    await harness.flush();
+    harness.element('browse-list').childNodes[0]?.childNodes[0]?.dispatch('click');
+    await harness.flush();
+    expect(harness.calls).toHaveLength(2);
+
+    // Re-render the SAME route while that fetch is pending.
+    await harness.navigate('#/browse');
+    // Re-rendering the same route issues NO new request: the tree is
+    // served from the cached stack. NOTE: the harness fires `hashchange`
+    // even for an unchanged hash, which a real browser does not -- this
+    // test exercises the ROUTE GUARD on purpose, not a user-reachable
+    // path.
+    expect(harness.calls.length).toBe(2);
+    // The pending response arrives late: does it push a level?
+    harness.calls[1]?.respond(true, {
+      node: { type: 'part', identifier: '3', label: 'Part 3' },
+      path: [{ type: 'part', identifier: '3', label: 'Part 3' }],
+      children: [{ type: 'section', identifier: '3.1', label: '§ 3.1' }],
+    });
+    await harness.flush();
+    // The route guard must discard the late response: no level pushed, no
+    // section painted. If this assertion FAILS, the late response DID land.
+    expect(harness.element('browse-list').allText).not.toContain('3.1');
+    expect(harness.element('browse-crumbs').allText).not.toContain('Part 3');
+  });
+});
