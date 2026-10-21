@@ -94,12 +94,16 @@ const browseInputSchema = z.object({
   chapter: z.string().trim().min(1).max(20).optional(),
   part: z.string().trim().min(1).max(20).optional(),
   subpart: z.string().trim().min(1).max(20).optional(),
+  // A subject group's identifier is the eCFR's own node id (e.g.
+  // "ECFRd158704dcab040e") — 18 chars in the 2026-10-16 corpus.
+  subjgrp: z.string().trim().min(1).max(40).optional(),
 });
 
 export interface BrowseInput {
   readonly chapter?: string | undefined;
   readonly part?: string | undefined;
   readonly subpart?: string | undefined;
+  readonly subjgrp?: string | undefined;
 }
 
 export interface SectionDetail {
@@ -454,6 +458,11 @@ export class CFRService {
     if (!parsed.success) toServiceError(parsed.error);
     if (parsed.data.subpart !== undefined && parsed.data.part === undefined) {
       throw new ServiceError("subpart navigation requires 'part'", 'invalid_input');
+    }
+    // A subject group hangs off a part (directly) or off a subpart, so the
+    // part is the one level it always needs.
+    if (parsed.data.subjgrp !== undefined && parsed.data.part === undefined) {
+      throw new ServiceError("subject-group navigation requires 'part'", 'invalid_input');
     }
     const structureJson = this.store.getMeta('structure_json');
     if (structureJson === null) {

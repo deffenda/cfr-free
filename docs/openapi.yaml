@@ -31,7 +31,7 @@ servers:
     description: Default loopback bind (CFR_HOST/CFR_PORT may override deliberately).
 paths:
   /:
-    # source: src/titan/http-server.ts:413
+    # source: src/titan/http-server.ts:414
     get:
       summary: Read-only web UI (HTML shell)
       responses:
@@ -56,7 +56,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /ui.js:
-    # source: src/titan/http-server.ts:417
+    # source: src/titan/http-server.ts:418
     get:
       summary: Web UI script (embedded string, no external assets)
       responses:
@@ -81,7 +81,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /ui.css:
-    # source: src/titan/http-server.ts:421
+    # source: src/titan/http-server.ts:422
     get:
       summary: Web UI stylesheet (embedded string, no external assets)
       responses:
@@ -106,7 +106,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /health:
-    # source: src/titan/http-server.ts:370
+    # source: src/titan/http-server.ts:371
     get:
       summary: Index freshness report
       responses:
@@ -131,7 +131,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /metrics:
-    # source: src/titan/http-server.ts:389
+    # source: src/titan/http-server.ts:390
     get:
       summary: Prometheus exposition
       responses:
@@ -156,7 +156,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/search:
-    # source: src/titan/http-server.ts:393
+    # source: src/titan/http-server.ts:394
     get:
       summary: Full-text search over the local index
       responses:
@@ -227,7 +227,7 @@ paths:
           description: 'Restrict to one chapter by Roman-numeral identifier — exact and case-sensitive (e.g. "I").'
           schema: { type: string, minLength: 1, maxLength: 8, pattern: '^[IVXLCDM]+$' }
   /api/v1/sections/{citation}:
-    # source: src/titan/http-server.ts:397
+    # source: src/titan/http-server.ts:398
     get:
       summary: Full text of one section or appendix
       responses:
@@ -266,7 +266,7 @@ paths:
           description: 'Citation or appendix name — 4.125, § 4.125, or 38 CFR 4.125 — URL-encoded (≤ 120 chars).'
           schema: { type: string, maxLength: 120 }
   /api/v1/browse:
-    # source: src/titan/http-server.ts:401
+    # source: src/titan/http-server.ts:402
     get:
       summary: Structure-tree navigation
       responses:
@@ -294,6 +294,10 @@ paths:
           in: query
           description: Subpart identifier (1–20 chars); requires `part`.
           schema: { type: string, minLength: 1, maxLength: 20 }
+        - name: subjgrp
+          in: query
+          description: "Subject-group identifier (1–40 chars; the eCFR node id, e.g. `ECFRd158704dcab040e`); requires `part`. Subject groups hang off a part or a subpart, and hold the sections the flat tree could not reach (1,910 of the corpus's 2,953 sections)."
+          schema: { type: string, minLength: 1, maxLength: 40 }
     head:
       summary: Headers-only browse probe
       responses:
@@ -318,8 +322,12 @@ paths:
           in: query
           description: Subpart identifier (1–20 chars); requires `part`.
           schema: { type: string, minLength: 1, maxLength: 20 }
+        - name: subjgrp
+          in: query
+          description: "Subject-group identifier (1–40 chars; the eCFR node id, e.g. `ECFRd158704dcab040e`); requires `part`. Subject groups hang off a part or a subpart, and hold the sections the flat tree could not reach (1,910 of the corpus's 2,953 sections)."
+          schema: { type: string, minLength: 1, maxLength: 40 }
   /api/v1/diff:
-    # source: src/titan/http-server.ts:405
+    # source: src/titan/http-server.ts:406
     get:
       summary: Point-in-time provision diff between two eCFR issue dates
       responses:
@@ -366,7 +374,7 @@ paths:
           description: 'End issue date (YYYY-MM-DD), later than `from`.'
           schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
   /api/v1/redline:
-    # source: src/titan/http-server.ts:409
+    # source: src/titan/http-server.ts:410
     get:
       summary: Line redline of one provision between two eCFR issue dates
       responses:
@@ -427,19 +435,19 @@ paths:
 components:
   responses:
     BadRequest:
-      # source: src/titan/http-server.ts:164,488,493 (encoding, URL parse, byte caps) + :297 (service input) + :216 (diff params) + :278 (redline params)
+      # source: src/titan/http-server.ts:164,489,494 (encoding, URL parse, byte caps) + :298 (service input) + :217 (diff params) + :279 (redline params)
       description: '{ error: "invalid_input", message } — malformed URL or citation encoding, oversized q (800 bytes) or part (10 bytes), a service-level input rejection (incl. missing/empty `from`/`to` on /api/v1/diff, missing/empty `from`/`to`/`citation` on /api/v1/redline, and impossible dates like month 13).'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     NotFound:
-      # source: src/titan/http-server.ts:425 (no route), :294 (structure/service miss)
+      # source: src/titan/http-server.ts:426 (no route), :295 (structure/service miss)
       description: '{ error: "not_found", message } — any path not listed here, a citation absent from the index, a citation missing from BOTH dates on /api/v1/redline, or a nonexistent browse node (browse adds `available`: the identifiers that do exist).'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     MethodNotAllowed:
-      # source: src/titan/http-server.ts:464
+      # source: src/titan/http-server.ts:465
       description: '{ error: "method_not_allowed", message } — any method other than GET/HEAD, on any path.'
       headers:
         allow: { description: 'Always GET, HEAD.', schema: { type: string } }
@@ -447,13 +455,13 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     UriTooLong:
-      # source: src/titan/http-server.ts:480
+      # source: src/titan/http-server.ts:481
       description: '{ error: "uri_too_long", message } — request URL over 2048 bytes.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     RateLimited:
-      # source: src/titan/http-server.ts:471
+      # source: src/titan/http-server.ts:472
       description: '{ error: "rate_limited", message } — per-peer token bucket exhausted (armed only when CFR_ALLOW_REMOTE=1; loopback never throttles).'
       headers:
         retry-after: { description: Seconds to wait., schema: { type: integer } }
@@ -461,7 +469,7 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     InternalError:
-      # source: src/titan/http-server.ts:537
+      # source: src/titan/http-server.ts:538
       description: '{ error: "internal_error", message } — unexpected failure; details are logged server-side only.'
       content:
         application/json:

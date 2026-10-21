@@ -371,6 +371,64 @@ describe('UI route ownership (P1-02)', () => {
     expect(harness.element('section-citedby').allText).toBe('');
   });
 
+  it('descends into a subject group from the browse tree', async () => {
+    const harness = makeHarness();
+    await harness.navigate('#/browse');
+    expect(harness.calls[0]?.url).toBe('/api/v1/browse');
+    harness.calls[0]?.respond(true, {
+      node: { type: 'title', identifier: '38', label: 'Title 38' },
+      path: [],
+      children: [{ type: 'part', identifier: '17', label: 'Part 17—Medical Care' }],
+    });
+    await harness.flush();
+
+    // The part row is a button; clicking it fetches the next level.
+    harness.element('browse-list').childNodes[0]?.childNodes[0]?.dispatch('click');
+    await harness.flush();
+    expect(harness.calls[1]?.url).toBe('/api/v1/browse?part=17');
+
+    harness.calls[1]?.respond(true, {
+      node: { type: 'part', identifier: '17', label: 'Part 17—Medical Care' },
+      path: [
+        { type: 'chapter', identifier: 'I', label: 'Chapter I' },
+        { type: 'part', identifier: '17', label: 'Part 17—Medical Care' },
+      ],
+      children: [
+        {
+          type: 'subject_group',
+          identifier: 'ECFRfixturegroup0001',
+          label: 'Subgroup—Hospitalization and Emergency Care',
+        },
+      ],
+    });
+    await harness.flush();
+
+    // A subject group is a descendable level: its sections were unreachable.
+    harness.element('browse-list').childNodes[0]?.childNodes[0]?.dispatch('click');
+    await harness.flush();
+    expect(harness.calls[2]?.url).toBe('/api/v1/browse?part=17&subjgrp=ECFRfixturegroup0001');
+
+    harness.calls[2]?.respond(true, {
+      node: {
+        type: 'subject_group',
+        identifier: 'ECFRfixturegroup0001',
+        label: 'Subgroup—Hospitalization and Emergency Care',
+      },
+      path: [
+        { type: 'chapter', identifier: 'I', label: 'Chapter I' },
+        { type: 'part', identifier: '17', label: 'Part 17—Medical Care' },
+        {
+          type: 'subject_group',
+          identifier: 'ECFRfixturegroup0001',
+          label: 'Subgroup—Hospitalization and Emergency Care',
+        },
+      ],
+      children: [{ type: 'section', identifier: '17.15', label: '§ 17.15' }],
+    });
+    await harness.flush();
+    expect(harness.element('browse-list').allText).toContain('17.15');
+  });
+
   it('does not let a late browse response push a level into the tree', async () => {
     const harness = makeHarness();
     await harness.navigate('#/browse');

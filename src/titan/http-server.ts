@@ -178,6 +178,7 @@ function handleBrowse(
     chapter: url.searchParams.get('chapter') ?? undefined,
     part: url.searchParams.get('part') ?? undefined,
     subpart: url.searchParams.get('subpart') ?? undefined,
+    subjgrp: url.searchParams.get('subjgrp') ?? undefined,
   });
   sendJson(
     req,

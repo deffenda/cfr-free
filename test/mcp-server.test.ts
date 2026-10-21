@@ -231,6 +231,18 @@ describe('MCP server (in-memory transport)', () => {
     expect(part.structuredContent?.['path']).toHaveLength(2);
   });
 
+  it('browse_title38 descends into a subject group', async () => {
+    const result = (await client.callTool({
+      name: 'browse_title38',
+      arguments: { chapter: 'I', part: '17', subject_group: 'ECFRfixturegroup0001' },
+    })) as ToolCallResult;
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent?.['node']).toMatchObject({ type: 'subject_group' });
+    expect(
+      (result.structuredContent?.['children'] as Array<{ identifier: string }>)[0]?.identifier,
+    ).toBe('17.15');
+  });
+
   it('index_status reports freshness', async () => {
     const result = (await client.callTool({
       name: 'index_status',

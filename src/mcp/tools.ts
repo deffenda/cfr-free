@@ -349,12 +349,19 @@ export function registerTools(
     {
       title: 'Browse the CFR structure',
       description:
-        'Navigate the Title 38 hierarchy (title → chapter → part → subpart) and list what exists at a level. ' +
-        'With no arguments, returns the chapters. Use this to discover valid parts/subparts before searching.',
+        'Navigate the Title 38 hierarchy (title → chapter → part → subpart → subject group) and list what exists at a level. ' +
+        'With no arguments, returns the chapters. Use this to discover valid parts/subparts before searching. ' +
+        'Most sections live inside a subject group: pass the subject_group identifier you saw in a ' +
+        'previous response to list the sections it holds.',
       inputSchema: {
         chapter: z.string().max(20).optional().describe('chapter identifier, e.g. "I"'),
         part: z.string().max(20).optional().describe('part number, e.g. "4"'),
         subpart: z.string().max(20).optional().describe('subpart letter, e.g. "B" (requires part)'),
+        subject_group: z
+          .string()
+          .max(40)
+          .optional()
+          .describe('subject-group identifier, e.g. "ECFRd158704dcab040e" (requires part)'),
       },
       outputSchema: browseOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,
@@ -365,6 +372,7 @@ export function registerTools(
           chapter: args.chapter,
           part: args.part,
           subpart: args.subpart,
+          subjgrp: args.subject_group,
         });
         const structuredContent: BrowseOutput = {
           node: response.node,
