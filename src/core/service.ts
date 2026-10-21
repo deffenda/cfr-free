@@ -69,11 +69,16 @@ export interface SearchInput {
 }
 
 /** A search hit dressed for human/legal consumption. */
-export interface PresentedHit extends SearchHit {
+export interface PresentedHit extends Omit<SearchHit, 'issueDate'> {
   /** Paste-ready legal citation, e.g. `38 C.F.R. § 4.130`. */
   readonly citationDisplay: string;
   /** Permalink to the provision on ecfr.gov. */
   readonly sourceUrl: string;
+  /**
+   * The same provision at the index's issue date — the URL that proves which
+   * revision the text was read at. `sourceUrl` is the CURRENT text.
+   */
+  readonly sourceUrlAtIndexDate: string;
   /** True when this row was pinned because the query *is* this citation. */
   readonly direct: boolean;
   /** True when the section matched the ranked search. For non-pin hits
@@ -430,6 +435,7 @@ export class CFRService {
         part: row.part,
         path: row.path,
         snippet,
+        issueDate: row.issueDate,
         // Fabricated bm25, strictly better than any real score, so array order
         // and score order agree; `direct: true` is the reliable client signal.
         score: -1_000_000,
@@ -447,15 +453,17 @@ export class CFRService {
 
   /** Attach display citation, source URL, direct flag, and inResults to a raw hit. */
   private presentHit(hit: SearchHit, direct: boolean, inResults = true): PresentedHit {
+    const { issueDate, ...rest } = hit;
     const kind = kindForCitation(hit.citation);
     const partTitleValue =
       hit.part === null || hit.part === undefined
         ? null
         : (this.partTitleMap().get(hit.part) ?? null);
     return {
-      ...hit,
+      ...rest,
       citationDisplay: displayCitation(kind, hit.citation),
       sourceUrl: sourceUrlFor(kind, hit.citation),
+      sourceUrlAtIndexDate: datedSourceUrlFor(kind, hit.citation, issueDate),
       direct,
       inResults,
       partTitle: partTitleValue,
