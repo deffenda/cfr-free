@@ -416,9 +416,9 @@ part).
 **Completion records for the items above** (the roadmap asks for the
 implementation PR, the reviewed SHA and verdict, and the verified merge SHA),
 plus the M1 inventory correction recorded below. **The gate-evidence column
-records the tail at that round's OWN reviewed head** — a row written in a
-later round reports the later round's numbers for the earlier work, and the
-row about the round that wrote it reports its own.
+records the tail at the WORK's reviewed head** — each row reports the
+numbers from the SHA listed in its own "Reviewed SHA" column, whatever
+round wrote the row.
 
 | Item                                                                                    | PR                                           | Reviewed SHA → verdict                                                                                  | Merge SHA                                        | Local gate evidence                                                                                                                                     |
 | --------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
