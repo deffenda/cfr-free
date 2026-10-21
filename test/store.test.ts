@@ -193,6 +193,44 @@ describe('visibleMatches', () => {
   it('reports nothing for a term the hit does not answer', () => {
     expect(visibleMatches(queryTerms('tinnitus'), hit)).toEqual([]);
   });
+
+  it('does not report a scattered quoted phrase as responded', () => {
+    const scattered = {
+      citation: '1.1',
+      heading: 'Compensation.',
+      snippet: 'Compensation includes attendance records and emergency aid.',
+    };
+    expect(visibleMatches(queryTerms('"aid and attendance"'), scattered)).toEqual([]);
+  });
+
+  it('reports a contiguous in-order quoted phrase as responded', () => {
+    const contiguous = {
+      citation: '1.1',
+      heading: 'Compensation.',
+      snippet: 'Compensation includes aid and attendance benefits.',
+    };
+    expect(visibleMatches(queryTerms('"aid and attendance"'), contiguous)).toEqual([
+      'aid and attendance',
+    ]);
+  });
+
+  it('does not report a reversed-order quoted phrase as responded', () => {
+    const reversed = {
+      citation: '1.1',
+      heading: 'Compensation.',
+      snippet: 'Compensation includes attendance and aid benefits.',
+    };
+    expect(visibleMatches(queryTerms('"aid and attendance"'), reversed)).toEqual([]);
+  });
+
+  it('does not satisfy a phrase from a longer token (token boundary)', () => {
+    const longer = {
+      citation: '1.1',
+      heading: 'Compensation.',
+      snippet: 'Compensation includes aidance and attendance benefits.',
+    };
+    expect(visibleMatches(queryTerms('"aid and attendance"'), longer)).toEqual([]);
+  });
 });
 
 describe('tidySnippet', () => {

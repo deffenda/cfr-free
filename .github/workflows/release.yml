@@ -100,6 +100,12 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
+  # Preserved invariants for publish-npm (HIGH-risk release infra; do not remove):
+  # - activation gate: `if: vars.NPM_TRUSTED_PUBLISHING == 'true'` (publishing stays disabled until operator sets it)
+  # - dependency: `needs: [ci]`
+  # - permissions block: contents: read, id-token: write
+  # - tag/package version match step
+  # - `--provenance` on both the dry-run and the real publish
   # Activation gate (operator-only): set repo variable NPM_TRUSTED_PUBLISHING=true
   # AND register the trusted publisher on npmjs.com for this package: GitHub Actions
   # -> deffenda/cfr-free -> release.yml (one-time; first publish must land within 2 days).
@@ -119,11 +125,35 @@ jobs:
           registry-url: https://registry.npmjs.org/
           cache: npm
       - run: npm ci
+      - run: npm run build
       - name: tag/package version match
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           PKG="$(node -p "require('./package.json').version")"
           test "$TAG" = "$PKG" || { echo "tag v$TAG != package.json $PKG — bump package.json before tagging"; exit 1; }
+      - name: verify packed executable and imports
+        run: |
+          node <<'NODE'
+          const { execSync } = require('node:child_process');
+          const fs = require('node:fs');
+          const src = fs.readFileSync('src/cli.ts', 'utf8');
+          const imports = [...src.matchAll(/from\s+['"](\.\/[^'"]+\.js)['"]/g)].map(m => m[1]);
+          const expected = new Set(['dist/cli.js']);
+          for (const imp of imports) expected.add('dist/' + imp.replace(/^\.\//, ''));
+          const out = execSync('npm pack --dry-run --ignore-scripts --json', { encoding: 'utf8' });
+          const parsed = JSON.parse(out);
+          const files = new Set((parsed[0]?.files || []).map(f => f.path));
+          const missing = [...expected].filter(f => !files.has(f));
+          if (missing.length) {
+            console.error('Missing from packed package:');
+            for (const f of missing) console.error('  ' + f);
+            process.exit(1);
+          }
+          console.log('Packed package contains executable and all imports:');
+          for (const f of expected) console.log('  ' + f);
+          NODE
+      - name: executable smoke
+        run: node dist/cli.js --help
       - name: publish (dry-run first)
         run: npm publish --dry-run --provenance
       - name: publish
