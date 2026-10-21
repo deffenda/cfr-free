@@ -898,6 +898,122 @@ describe('Store ranking: exception demotion and citation tie-break', () => {
     }
   });
 
+  // The audit of 2026-10-21 (P1-20261021-06) reproduced the defect with
+  // THESE sections: the general provision mentions the exceptions in
+  // passing, while the exception provision repeats the phrase, so the body
+  // repetition — and not the demotion — is what separates the two.
+  //
+  // Note the fixture's property: "the hearing impairment" is a phrase
+  // NEITHER heading contains, so a query quoting it leaves the heading
+  // column out of the bm25 comparison and the body repetition decides. That
+  // is what makes the demotion DECISIVE for those queries — without it the
+  // general provision's shorter heading would win on bm25 anyway and the
+  // assertions could not tell the demotion on from the demotion off.
+  const AUDIT_HEARING_SECTIONS = [
+    makeSection({
+      citation: '4.85',
+      heading: 'Evaluation of hearing impairment.',
+      text: 'The hearing impairment exceptions are elsewhere.',
+      markdown: '## Evaluation of hearing impairment.',
+    }),
+    makeSection({
+      citation: '4.86',
+      heading: 'Exceptional patterns of hearing impairment.',
+      text:
+        'The hearing impairment exceptions apply here. The hearing impairment exceptions govern this evaluation. ' +
+        'Hearing impairment exceptions apply here.',
+      markdown: '## Exceptional patterns of hearing impairment.',
+    }),
+  ];
+
+  it('keeps the demotion off when a QUOTED span asks about exceptions', () => {
+    const temp = openTempStore({ sections: AUDIT_HEARING_SECTIONS });
+    try {
+      // A quoted span is ONE term, so the exception word does not START the
+      // term and a startsWith gate missed it: the demotion stayed on and
+      // the GENERAL provision led, the opposite of what the user asked for.
+      const result = temp.store.search({
+        query: '"hearing impairment exceptions"',
+        page: 1,
+        perPage: 10,
+      });
+      expect(result.total).toBe(2);
+      expect(result.hits.map((hit) => hit.citation)).toEqual(['4.86', '4.85']);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('keeps the demotion off for the unquoted form of the same question', () => {
+    const temp = openTempStore({ sections: AUDIT_HEARING_SECTIONS });
+    try {
+      // The unquoted form was never broken: the gate saw the bare
+      // "exceptions" token. It must stay that way after the fix.
+      const result = temp.store.search({
+        query: 'hearing impairment exceptions',
+        page: 1,
+        perPage: 10,
+      });
+      expect(result.total).toBe(2);
+      expect(result.hits.map((hit) => hit.citation)).toEqual(['4.86', '4.85']);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('still demotes the announcing heading for a query that asks about nothing exceptional', () => {
+    const temp = openTempStore({ sections: AUDIT_HEARING_SECTIONS });
+    try {
+      // No term names an exception, so the demotion must fire: the general
+      // provision leads even though the exception's body repeats the phrase
+      // three times and would win on bm25 alone.
+      const plain = temp.store.search({
+        query: 'hearing impairment',
+        page: 1,
+        perPage: 10,
+      });
+      expect(plain.total).toBe(2);
+      expect(plain.hits.map((hit) => hit.citation)).toEqual(['4.85', '4.86']);
+
+      // The QUOTED span is the decisive form of the same control: it is a
+      // phrase NEITHER heading contains, so no heading column separates the
+      // rows and the body repetition decides on bm25 — with the demotion
+      // wrongly switched off, § 4.86 would lead here.
+      const quoted = temp.store.search({
+        query: '"the hearing impairment"',
+        page: 1,
+        perPage: 10,
+      });
+      expect(quoted.total).toBe(2);
+      expect(quoted.hits.map((hit) => hit.citation)).toEqual(['4.85', '4.86']);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('does not switch the demotion off for a non-boundary relative of the word', () => {
+    const temp = openTempStore({ sections: AUDIT_HEARING_SECTIONS });
+    try {
+      // "unexceptional", "antiexception" and "exceptionally" CONTAIN the
+      // letters of the word but are not the word: a substring test would
+      // switch the demotion off and hand the answer to the exception. The
+      // quoted span is the decisive control — a phrase neither heading
+      // contains, so the body repetition decides on bm25 and the demotion
+      // is the only thing that keeps § 4.85 first.
+      for (const word of ['unexceptional', 'antiexception', 'exceptionally']) {
+        const result = temp.store.search({
+          query: `"the hearing impairment" ${word}`,
+          page: 1,
+          perPage: 10,
+        });
+        expect(result.total).toBe(2);
+        expect(result.hits.map((hit) => hit.citation)).toEqual(['4.85', '4.86']);
+      }
+    } finally {
+      temp.cleanup();
+    }
+  });
+
   it('orders a genuine score tie by citation so one query returns one stable order', () => {
     // Identical heading and body: every ranking key ties through bm25.
     // Inserted LATER citation first, so only the s.citation tie-break can
