@@ -292,6 +292,11 @@ const SYNONYM_PHRASES: Readonly<Record<string, string | readonly string[]>> = {
   // the apostrophe and matched SEVEN.
   bva: "board of veterans' appeals",
   nsc: 'non service connected',
+  // The corpus says "hearing impairment" (14 sections, including § 4.85
+  // "Evaluation of hearing impairment"); clients say "hearing loss" (3
+  // sections use that form). Both forms stay searchable: the expansion
+  // adds the corpus's phrasing beside the client's.
+  hearing: 'hearing impairment',
 };
 
 /**

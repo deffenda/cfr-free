@@ -72,6 +72,17 @@ describe('toFtsQuery', () => {
     expect(toFtsQuery('evaluation', 'and')).toBe('"evaluation"*'); // no false expansion
   });
 
+  it("expands a client word to the corpus's phrasing", () => {
+    // The corpus says "hearing impairment" (14 sections, including § 4.85
+    // "Evaluation of hearing impairment"); clients say "hearing loss".
+    // Before the expansion, "hearing loss" led with § 20.715 and § 21.422
+    // — provisions that are not about hearing at all.
+    expect(toFtsQuery('hearing', 'and')).toBe('("hearing"* OR "hearing impairment"*)');
+    expect(toFtsQuery('hearing loss', 'and')).toBe(
+      '("hearing"* OR "hearing impairment"*) AND "loss"*',
+    );
+  });
+
   it('expands the acronyms whose corpus spelling differs from the old form', () => {
     // "dependency and indemnity compensation" (98 sections) — the old
     // expansion omitted the "and" and matched ONE section.
