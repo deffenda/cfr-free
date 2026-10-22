@@ -682,14 +682,20 @@ lands". That check was a human reading a document, so it happened once.
 It is now automated: `test/fixtures/pilot/run.ts` runs the seven task
 families (F1, F2-A, F2-B, F3-A, F4-A, F5-A, F5-B) against a seeded
 index and asserts, per task, that the surface the task NAMES can still
-produce the answer the task asks for — 32 checks, all passing, run in CI
+produce the answer the task asks for — 33 checks, all passing, run in CI
 by `test/pilot-rehearsal.test.ts`. It is offline and hermetic (it never
 touches the operator's index and never the network), it says on its face
 that it is a regression check and NOT study evidence, and it does not
 touch the subject-index reopen condition, which is fixed on the PILOT's
-`E3` count. Two product regressions that the seed once hid — the
-heading-phrase key (SPEC §4.1) and the citation pin — are now caught by
-it, each verified by mutation.
+`E3` count. Three product regressions are now caught by it, each verified
+by mutation: the heading-phrase key (SPEC §4.1), which a seed without a
+body-heavy distractor hid; the citation pin, which a check asserting only
+"first hit" hid when the citation happened to rank first anyway; and the
+core's attachment of the point-in-time notice to the diff and redline
+payloads, which a check that built those payloads by hand could not see
+at all — F4 now runs the product's own `diffIssues`/`redlineSection`
+against a STUB eCFR, so the payloads under test are the ones the core
+produced.
 
 **The three tool behaviours the rehearsal found are closed (2026-10-22).**
 The rehearsal recorded that the CLI search printed the CURRENT eCFR url

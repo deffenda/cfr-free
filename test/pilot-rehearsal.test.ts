@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { renderRehearsal, runRehearsal, type RehearsalReport } from './fixtures/pilot/run.js';
 import { makeSection, openTempStore } from './helpers.js';
 
@@ -138,12 +138,12 @@ const ISSUE_DATE = '2026-10-16';
  * restored afterwards so a test run cannot leak the fixture into the
  * developer's shell.
  */
-function withRehearsal(): RehearsalReport {
+async function withRehearsal(): Promise<RehearsalReport> {
   const temp = openTempStore({ sections: CORPUS, issueDate: ISSUE_DATE });
   const previous = process.env['CFR_INDEX_PATH'];
   try {
     process.env['CFR_INDEX_PATH'] = temp.indexPath;
-    return runRehearsal();
+    return await runRehearsal();
   } finally {
     if (previous === undefined) delete process.env['CFR_INDEX_PATH'];
     else process.env['CFR_INDEX_PATH'] = previous;
@@ -152,7 +152,13 @@ function withRehearsal(): RehearsalReport {
 }
 
 describe('the M6 rehearsal — every task still answerable', () => {
-  const report = withRehearsal();
+  // The suite is ASYNC: the F4 family runs the product's own diff, redline
+  // and historical cores against a STUB eCFR, so the payloads under test are
+  // what the core produced rather than what this test wrote.
+  let report: RehearsalReport;
+  beforeAll(async () => {
+    report = await withRehearsal();
+  });
 
   it('passes every check, so no task has become unanswerable', () => {
     const failures = report.tasks.flatMap((task) =>
