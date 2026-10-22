@@ -397,8 +397,8 @@ function f3aCrossReference(service: CFRService): RehearsalTask {
  * was only answerable by running `historical` or reading the SPEC. The
  * change view now carries a `notice`, and `historical` prints the limit.
  *
- * The point-in-time comparison itself needs eCFR, so that half is SKIPPED
- * offline. What IS checked offline is the half the protocol calls out as
+ * The point-in-time comparison itself needs eCFR, so that half is not
+ * checked offline. What IS checked offline is the half the protocol calls out as
  * the real content of the task: that the surfaces STATE the limit, so a
  * participant running the change view can answer the third requirement
  * without leaving it.
