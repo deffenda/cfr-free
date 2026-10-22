@@ -1,7 +1,7 @@
 # cfr-free
 
 [![CI](https://github.com/deffenda/cfr-free/actions/workflows/ci.yml/badge.svg)](https://github.com/deffenda/cfr-free/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/deffenda/cfr-free/blob/main/LICENSE)
 
 Self-hosted **Title 38 CFR data service**: it builds a local, full-text
 searchable index of Title 38 of the Code of Federal Regulations (the VA
@@ -358,7 +358,7 @@ curl 'http://127.0.0.1:8787/metrics'
 ```
 
 The full request/response contract (schemas, error envelopes) is documented in
-[`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1).
+[`docs/openapi.yaml`](https://github.com/deffenda/cfr-free/blob/main/docs/openapi.yaml) (OpenAPI 3.1).
 
 The API is intentionally minimal: **GET-only, no request bodies, no
 templating**, bound to `127.0.0.1` by default. The deliberate non-JSON
@@ -456,7 +456,7 @@ not legal advice; verify citations against the official eCFR.
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for reporting vulnerabilities and the security
+See [SECURITY.md](https://github.com/deffenda/cfr-free/blob/main/SECURITY.md) for reporting vulnerabilities and the security
 posture summary. Reported by default: lint/strict-TS/typecheck/coverage/Audit
 gates (plus local trivy/semgrep/osv-scanner/gitleaks scans), zero runtime
 dependencies beyond the MCP SDK, XML parser hardening (no
@@ -465,4 +465,4 @@ surface), and loopback-only networking by default.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/deffenda/cfr-free/blob/main/LICENSE)
