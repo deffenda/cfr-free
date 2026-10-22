@@ -351,6 +351,33 @@ least 40 queries written without looking at the retriever's output, at least
 8–10 genuinely out-of-corpus cases each carrying a corpus-grep receipt, full
 expert adjudication before it gates anything, and read exactly once.
 
+**The fresh holdout is WRITTEN and ADJUDICATED (2026-10-22), but it is
+still not a gate.** `test/fixtures/retrieval/queries.fresh.ts` carries 43
+queries (35 answerable, 8 no-answer), written on 2026-10-21 before any
+retriever run. Two committee members adjudicated every entry against the
+corpus, blind to the retriever's output, and the rulings were cross-checked
+against each other and against the corpus
+(`docs/research/fresh-holdout-adjudication-2026-10-22.md`). The
+cross-check found six wrong-or-incomplete expectations and one quoted-phrase
+query whose string occurs nowhere in the corpus; it also **overrode a
+member** on one point (the corpus showed the disputed phrase IS exact), and
+both members were wrong on another (there is no "Purple Heart benefits"
+provision in Title 38 — all four Purple Heart mentions are eligibility
+carve-outs). All eight no-answer candidates were confirmed out of corpus
+with per-token receipts and positive controls.
+
+**NINE entries stay `provisional`, deliberately**: four content questions
+the corpus cannot settle (burial-allowance wording, MST scope, NSC scope,
+the Purple Heart wording) and all five quoted-phrase entries, because the
+quoted-phrase POLICY is unsettled **and the repo's own two frozen sets
+already disagree on it** — the dev set expects the FULL set for a phrase
+with no subject (16 provisions, on the committee ruling that a single
+section is weak ground truth) while the holdout expects a curated three
+for the same phrase family. The set becomes a gate when the operator
+ratifies those decisions; it must not gate a threshold-bearing round
+before that. It changes no metric: the dev set and the burned holdout are
+byte-for-byte as committed.
+
 **The operator's irreducible action (the one input no tooling replaces):**
 adjudicate the 39 provisional expectations — INCLUDING their ORDER. **DONE
 2026-10-21 by committee** (the content and the order were both adjudicated and
@@ -645,6 +672,35 @@ for another session is a CHANGE, not an unhandled case.
 **The criteria were agreed on 2026-10-21** (the §8 table's decision column
 records it), so the M6 acceptance condition is met; what remains is
 operator-arranged: recruitment and consent, and the sessions themselves.
+
+**The instrument is now continuously checked (2026-10-22).** The protocol's
+own rehearsal record ended with a standing instruction — "a rehearsal of
+this shape should be repeated as a regression check on the instrument
+itself — not as evidence about practitioners, but as a check that every
+task is still answerable and every sheet still fillable after a change
+lands". That check was a human reading a document, so it happened once.
+It is now automated: `test/fixtures/pilot/run.ts` runs the seven task
+families (F1, F2-A, F2-B, F3-A, F4-A, F5-A, F5-B) against a seeded
+index and asserts, per task, that the surface the task NAMES can still
+produce the answer the task asks for — 32 checks, all passing, run in CI
+by `test/pilot-rehearsal.test.ts`. It is offline and hermetic (it never
+touches the operator's index and never the network), it says on its face
+that it is a regression check and NOT study evidence, and it does not
+touch the subject-index reopen condition, which is fixed on the PILOT's
+`E3` count. Two product regressions that the seed once hid — the
+heading-phrase key (SPEC §4.1) and the citation pin — are now caught by
+it, each verified by mutation.
+
+**The three tool behaviours the rehearsal found are closed (2026-10-22).**
+The rehearsal recorded that the CLI search printed the CURRENT eCFR url
+rather than the dated one (so a pasted citation could not show which
+revision it came from), that the web UI rendered an unavailable
+cross-cite as "(not indexed)" — a claim the provision does not exist,
+where the true claim is that it is not in THIS copy — and that neither
+change view stated the limit on what its two dates mean (the dates are
+selectors, not a stamp of the revision served). All three are fixed, and
+the limit now lives in one constant so the diff and the redline cannot
+drift apart in wording.
 
 ### M7 — Integrations and support, conditional on pilot demand
 

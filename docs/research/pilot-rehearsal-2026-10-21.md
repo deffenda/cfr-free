@@ -247,7 +247,7 @@ change lands.
 > **DONE (2026-10-22).** That check is now automated:
 > `test/fixtures/pilot/run.ts` runs the seven task families against a
 > seeded index and asserts, per task, that the surface the task NAMES can
-> still produce the answer the task asks for — 29 checks, all passing. It
+> still produce the answer the task asks for — 32 checks, all passing. It
 > runs in CI via `test/pilot-rehearsal.test.ts`, is offline and hermetic
 > (it never touches the operator's index and never the network), and says
 > on its face that it is a regression check on the instrument and NOT
