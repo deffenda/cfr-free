@@ -76,6 +76,30 @@ Paid models are an operator-approved escalation only, made in chat.
 6. **Merge gate** (below), then squash, push, PR, required checks, merge,
    verify on `origin/main`, and update the journal.
 
+### Push discipline (measured, 2026-10-22)
+
+CI runs on every push, and a run that a later push supersedes before the
+merge taught us nothing. In the week to 2026-10-22, 102 of 211
+`pull_request` runs (48%) tested a commit that was replaced before it
+could merge, and 111 runs re-tested trees a `pull_request` run had
+already validated (identical tree hashes on every case checked, and
+`main` carries no merge commits — only squash merges). Counting the
+overlap once, 254 of 329 runs were needless by at least one of those
+measures. So:
+
+- **Push once per review round, not once per commit.** Commit locally;
+  push when the branch is ready for the independent review. Amend or
+  stack commits in the worktree first.
+- **Do not run the full gate to answer a question one test file
+  answers.** During development run the file under change
+  (`npx vitest run test/<file>`); `npm run ci` is the one-shot at
+  readiness. CI pays for the gate on every push — that is the run that
+  returns nothing when a later push replaces it — so the cheap habit is
+  to ask the file, not the gate.
+- A docs-only change does not need the code gate run locally, but it
+  does need the four tests that read docs: `markdown-tables`,
+  `no-conflict-markers`, `openapi-conformance`, `install-paths`.
+
 ## Merge gate
 
 Merge authority is the operator's. **Standing delegation** (operator
