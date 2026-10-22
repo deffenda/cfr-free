@@ -73,12 +73,14 @@ import {
 import { USAGE } from '../../../src/cli.js';
 
 /**
- * The two dates the F4 task names (§6.6 asks about § 3.17 between
- * 2026-01-01 and 2026-10-16; the stub uses the pair the protocol's
- * rehearsal recorded).
+ * The two dates the F4 task names — § 3.17 between 2026-01-01 and
+ * 2026-10-16, the pair the protocol's rehearsal record used
+ * (`docs/research/pilot-rehearsal-2026-10-21.md`). The stub serves a
+ * document for each of them, so the comparison the task text describes is
+ * the comparison that runs.
  */
 const F4_FROM_DATE = '2026-01-01';
-const F4_TO_DATE = '2026-06-01';
+const F4_TO_DATE = '2026-10-16';
 
 /**
  * A two-document eCFR, tiny, with § 3.17 changed between the dates. This
@@ -491,7 +493,7 @@ async function f4aHistoricalComparison(): Promise<RehearsalTask> {
     check(
       'the CLI diff prints that limit',
       '§6.6 F4-A',
-      formatIssueDiff(diff).includes(diff.notice),
+      formatIssueDiff(diff).includes(POINT_IN_TIME_NOTICE),
       'the CLI diff output did not carry the notice',
     ),
   );
@@ -509,7 +511,7 @@ async function f4aHistoricalComparison(): Promise<RehearsalTask> {
     check(
       'the CLI redline prints that limit',
       '§6.6 F4-A',
-      formatSectionRedline(redline).includes(redline.notice),
+      formatSectionRedline(redline).includes(POINT_IN_TIME_NOTICE),
       'the CLI redline output did not carry the notice',
     ),
   );
