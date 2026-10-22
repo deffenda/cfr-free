@@ -3,14 +3,13 @@
   "version": "0.2.1",
   "description": "Self-hosted Title 38 CFR data service: SQLite FTS5 index built from the eCFR API, with an MCP server and HTTP API",
   "keywords": [
-    "mcp",
     "cfr",
-    "38-cfr",
-    "veterans",
     "ecfr",
-    "sqlite",
-    "fts5"
+    "va",
+    "veterans",
+    "mcp"
   ],
+  "homepage": "https://github.com/deffenda/cfr-free#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/deffenda/cfr-free.git"
