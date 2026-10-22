@@ -103,6 +103,76 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
+  # A GitHub Release with the packed tarball attached.
+  #
+  # Why this exists: the npm publish below is gated behind an operator-only
+  # trusted-publishing registration, so a tag publishes an image to GHCR and
+  # nothing else. The repository had TWO tags and NO GitHub releases, so the
+  # releases page was empty and there was no downloadable artifact at all —
+  # the one install route that needs neither a registry nor a compiler.
+  #
+  # The tarball is the same `npm pack` output the npm job publishes, so the
+  # two cannot drift. It is attached to the tag, and the release notes are
+  # generated from the commits since the previous tag.
+  github-release:
+    name: GitHub release with the tarball
+    needs: [ci, container-e2e]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release and upload its asset
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the previous tag is needed for the release notes
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: pack the tarball
+        run: |
+          PKG="$(node -p "require('./package.json').version")"
+          TAG="${GITHUB_REF_NAME#v}"
+          test "$TAG" = "$PKG" || { echo "tag v$TAG != package.json $PKG — bump package.json before tagging"; exit 1; }
+          npm pack --pack-destination ./
+      - name: publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PKG="$(node -p "require('./package.json').version")"
+          PREV="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          NOTES="$(git log --pretty='- %s (%h)' "${PREV:-$(git rev-list --max-parents=0 HEAD)}..${GITHUB_REF_NAME}" 2>/dev/null || git log -1 --pretty='- %s (%h)')"
+          {
+            echo "## Title 38 CFR (38 C.F.R.) as a local, offline, self-hosted service"
+            echo
+            echo "Install the packed tarball — no registry, no compiler, no build step:"
+            echo
+            echo '```bash'
+            echo "npm install -g https://github.com/deffenda/cfr-free/releases/download/${GITHUB_REF_NAME}/cfr-free-${PKG}.tgz"
+            echo '```'
+            echo
+            echo "Or run it without installing:"
+            echo
+            echo '```bash'
+            echo "npx -y github:deffenda/cfr-free serve"
+            echo '```'
+            echo
+            echo "Or use the container image, which needs neither:"
+            echo
+            echo '```bash'
+            echo "docker run -d --name cfr-free -p 8787:8787 -v cfr-data:/data ghcr.io/deffenda/cfr-free:${GITHUB_REF_NAME#v}"
+            echo '```'
+            echo
+            echo "### Changes"
+            echo
+            echo "$NOTES"
+          } > release-notes.md
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "cfr-free ${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md \
+            "cfr-free-${PKG}.tgz"
+
   # Preserved invariants for publish-npm (HIGH-risk release infra; do not remove):
   # - activation gate: `if: vars.NPM_TRUSTED_PUBLISHING == 'true'` (publishing stays disabled until operator sets it)
   # - dependency: `needs: [ci]`

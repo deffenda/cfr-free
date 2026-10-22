@@ -185,6 +185,35 @@ describe('the workflows', () => {
   });
 });
 
+describe('the release workflow', () => {
+  const workflow = readFileSync(path.join(ROOT, '.github', 'workflows', 'release.yml'), 'utf8');
+
+  it('publishes a GitHub Release with the tarball attached', () => {
+    // The repository had two tags and NO GitHub releases, so the releases
+    // page was empty: a tag published an image to GHCR and (behind an
+    // operator-only gate) a package to npm, but there was no downloadable
+    // artifact. This job puts the packed tarball on the tag's release, which
+    // is the one install route needing neither a registry nor a compiler.
+    expect(workflow).toContain('github-release:');
+    expect(workflow).toContain('gh release create');
+    expect(workflow).toContain('contents: write');
+  });
+
+  it('attaches the tarball the npm job would publish', () => {
+    // Both jobs must pack the SAME artifact, or the release and the
+    // registry could ship different bytes.
+    const packs = workflow.match(/npm pack --pack-destination/g) ?? [];
+    expect(packs.length).toBeGreaterThanOrEqual(1);
+    expect(workflow).toContain('cfr-free-${PKG}.tgz');
+  });
+
+  it('refuses to release a tag that disagrees with the manifest', () => {
+    // The same guard the npm job uses: the tag and package.json must agree,
+    // or the release would carry a version the manifest does not claim.
+    expect(workflow).toContain('bump package.json before tagging');
+  });
+});
+
 describe('the release guard', () => {
   it('declares a version that is not already taken by a tag', () => {
     // The release workflow refuses to publish when the tag and package.json
