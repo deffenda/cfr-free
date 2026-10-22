@@ -142,7 +142,14 @@ jobs:
         run: |
           PKG="$(node -p "require('./package.json').version")"
           PREV="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
-          NOTES="$(git log --pretty='- %s (%h)' "${PREV:-$(git rev-list --max-parents=0 HEAD)}..${GITHUB_REF_NAME}" 2>/dev/null || git log -1 --pretty='- %s (%h)')"
+          # The range can legitimately be EMPTY — a first release tagged on
+          # the root commit has no commits after it — and an empty range
+          # exits 0, so a `||` fallback never fires. The emptiness is
+          # therefore checked explicitly.
+          NOTES="$(git log --pretty='- %s (%h)' "${PREV:-$(git rev-list --max-parents=0 HEAD)}..${GITHUB_REF_NAME}" 2>/dev/null || true)"
+          if [ -z "$NOTES" ]; then
+            NOTES="$(git log -1 --pretty='- %s (%h)' "${GITHUB_REF_NAME}")"
+          fi
           {
             echo "## Title 38 CFR (38 C.F.R.) as a local, offline, self-hosted service"
             echo
@@ -168,7 +175,13 @@ jobs:
             echo
             echo "$NOTES"
           } > release-notes.md
+          # --verify-tag: without it, `gh release create` CREATES a tag from
+          # the default branch when the tag is missing, which would attach
+          # these bytes to the wrong commit. The tag is always present here
+          # (the workflow triggers on a tag push), so this only turns a
+          # silent wrong-artifact path into a loud failure.
           gh release create "${GITHUB_REF_NAME}" \
+            --verify-tag \
             --title "cfr-free ${GITHUB_REF_NAME}" \
             --notes-file release-notes.md \
             "cfr-free-${PKG}.tgz"

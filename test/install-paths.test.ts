@@ -202,9 +202,27 @@ describe('the release workflow', () => {
   it('attaches the tarball the npm job would publish', () => {
     // Both jobs must pack the SAME artifact, or the release and the
     // registry could ship different bytes.
-    const packs = workflow.match(/npm pack --pack-destination/g) ?? [];
-    expect(packs.length).toBeGreaterThanOrEqual(1);
-    expect(workflow).toContain('cfr-free-${PKG}.tgz');
+    //
+    // The assertion is scoped to the `gh release create` invocation, not to
+    // the file: the same filename also appears in the release notes, and a
+    // plain `toContain` would stay green if the UPLOAD argument were
+    // renamed while the documentation kept the name.
+    expect(workflow).toMatch(/\n\s+gh release create[\s\S]*?\n\s*"cfr-free-\$\{PKG\}\.tgz"/);
+  });
+
+  it('will not create a tag that is missing', () => {
+    // `gh release create` creates a tag from the default branch when the
+    // given tag does not exist, which would attach the built bytes to the
+    // wrong commit. The tag is always present here, so `--verify-tag` only
+    // turns a silent wrong-artifact path into a loud failure.
+    //
+    // The match is anchored to the COMMAND line: the explanatory comment
+    // above it names `gh release create` and `--verify-tag` too, so an
+    // unanchored match would be satisfied by the prose and would stay
+    // green if the flag were dropped from the command.
+    const invocation = workflow.match(/\n\s+gh release create[\s\S]*?cfr-free-\$\{PKG\}\.tgz"/);
+    expect(invocation).not.toBeNull();
+    expect(invocation?.[0]).toContain('--verify-tag');
   });
 
   it('refuses to release a tag that disagrees with the manifest', () => {
