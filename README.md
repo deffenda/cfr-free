@@ -50,8 +50,8 @@ keys, no telemetry — one Node process and one SQLite file.
 ## Quickstart
 
 Four ways in, depending on what you have. The first needs nothing but
-Docker; the second needs only Node; the third needs only npm; the fourth
-needs a checkout.
+Docker; the second needs only npm; the third needs npm and a compiler; the
+fourth needs a checkout.
 
 ### 1. Docker (nothing to install)
 
@@ -71,7 +71,9 @@ ghcr.io/deffenda/cfr-free:latest sync` to refresh, or `… export
 ### 2. From npm (no compiler, no Docker)
 
 ```bash
-npm install -g cfr-free          # or, with no install at all:
+npm install -g cfr-free
+
+# or, with no install at all:
 npx -y cfr-free version         # -> 0.2.1
 npx -y cfr-free sync            # build the local index (~2-3 MB, ~5 s)
 npx -y cfr-free serve           # HTTP API on http://127.0.0.1:8787
