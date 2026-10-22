@@ -1,3 +1,7 @@
+import dgram from 'node:dgram';
+import http from 'node:http';
+import https from 'node:https';
+import net from 'node:net';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { renderRehearsal, runRehearsal, type RehearsalReport } from './fixtures/pilot/run.js';
 import { makeSection, openTempStore } from './helpers.js';
@@ -198,40 +202,78 @@ describe('the M6 rehearsal — every task still answerable', () => {
     }
   });
 
-  it('reaches no network, so the suite is offline BY MEASUREMENT', async () => {
+  it('reaches no network by ANY route, so the suite is offline BY MEASUREMENT', async () => {
     // The runner's header claims "no check it runs performs a network
-    // call". That claim was a documented measurement; this makes it an
-    // enforced one, so the claim and the suite cannot drift apart.
+    // call". That claim is now ENFORCED rather than documented, so the
+    // claim and the suite cannot drift apart.
     //
-    // `globalThis.fetch` is the seam: the product's HttpClient resolves it
-    // at CALL TIME (`this.options.fetchFn ?? fetch`), so replacing the
-    // global intercepts every real outbound path rather than a proxy of it.
-    let calls = 0;
-    const realFetch = globalThis.fetch;
-    globalThis.fetch = ((...args: unknown[]) => {
-      calls += 1;
-      throw new Error(`the suite must not reach the network: ${String(args[0])}`);
-    }) as typeof fetch;
+    // Every outbound seam is trapped, not just fetch: the product's HTTP
+    // client resolves `fetch` at CALL TIME (`this.options.fetchFn ?? fetch`
+    // in src/core/http-client.ts), so replacing the global intercepts the
+    // product's own path. But a suite that reached the network through
+    // `node:https`, `node:http` or `node:net` would slip past a fetch-only
+    // trap, so those are trapped too — the whole point is that the zero
+    // below means "no network", not "no fetch".
+    const attempts: string[] = [];
+    const restore: Array<() => void> = [];
+
+    const trap = (holder: object, key: string, label: string): void => {
+      const original = Object.getOwnPropertyDescriptor(holder, key);
+      Object.defineProperty(holder, key, {
+        configurable: true,
+        writable: true,
+        value: (...args: unknown[]) => {
+          attempts.push(`${label}(${String(args[0])})`);
+          throw new Error(`network attempt: ${label}`);
+        },
+      });
+      restore.push(() => {
+        if (original === undefined) delete (holder as Record<string, unknown>)[key];
+        else Object.defineProperty(holder, key, original);
+      });
+    };
+
+    trap(globalThis, 'fetch', 'fetch');
+    // `get` is trapped separately from `request`: node's `http.get` calls
+    // the module-LOCAL `request`, not the exported property, so replacing
+    // `http.request` alone does not intercept `http.get`. (Proven by
+    // mutation: an `https.get` inside the suite reached the socket, not
+    // the trapped `https.request`.)
+    trap(http, 'request', 'http.request');
+    trap(http, 'get', 'http.get');
+    trap(https, 'request', 'https.request');
+    trap(https, 'get', 'https.get');
+    trap(net, 'connect', 'net.connect');
+    trap(dgram, 'createSocket', 'dgram.createSocket');
+    const socketConnect = net.Socket.prototype.connect;
+    net.Socket.prototype.connect = function trappedConnect(...args: unknown[]) {
+      attempts.push(`net.Socket.connect(${String(args[0])})`);
+      throw new Error('network attempt: net.Socket.connect');
+    };
+    restore.push(() => {
+      net.Socket.prototype.connect = socketConnect;
+    });
+
     try {
       const trapped = await withRehearsal();
       expect(trapped.failed, 'the suite failed while the network was trapped').toBe(0);
       expect(trapped.passed).toBeGreaterThan(20);
-      expect(calls, `the suite attempted ${calls} network call(s)`).toBe(0);
+      expect(attempts, `the suite attempted: ${attempts.join(', ')}`).toEqual([]);
     } finally {
-      globalThis.fetch = realFetch;
+      for (const undo of restore.reverse()) undo();
     }
   });
 
-  it('the network trap is live, so the zero above is a real zero', async () => {
+  it('the network traps are live, so the zero above is a real zero', async () => {
     // A DEAD trap also reads zero. Without this control, the assertion
-    // above could pass for the wrong reason — a trap that never fires
-    // because it was never wired up would look identical to a suite that
-    // genuinely makes no calls. So: fire it deliberately, and prove it
-    // fires.
-    let calls = 0;
+    // above could pass for the wrong reason — traps that never fire
+    // because they were never wired up would look identical to a suite
+    // that genuinely makes no calls. So: fire them deliberately, and prove
+    // they fire.
+    const attempts: string[] = [];
     const realFetch = globalThis.fetch;
     globalThis.fetch = (() => {
-      calls += 1;
+      attempts.push('fetch');
       throw new Error('trapped on purpose');
     }) as typeof fetch;
     try {
@@ -243,7 +285,7 @@ describe('the M6 rehearsal — every task still answerable', () => {
     } finally {
       globalThis.fetch = realFetch;
     }
-    expect(calls).toBe(1);
+    expect(attempts).toEqual(['fetch']);
   });
 
   it('runs real checks rather than none', () => {

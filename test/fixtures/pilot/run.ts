@@ -26,10 +26,12 @@
  * the CLI, and the suite drives the service directly. The one family that
  * needs a document from eCFR, F4, is given a STUB client that serves two
  * tiny in-memory documents. ENFORCED, not asserted:
- * `test/pilot-rehearsal.test.ts` runs the whole suite with
- * `globalThis.fetch` replaced by a counter that throws, and asserts both
- * that the counter read zero and that the trap is LIVE — a dead trap also
- * reads zero.)
+ * `test/pilot-rehearsal.test.ts` runs the whole suite with EVERY outbound
+ * seam trapped — `fetch`, `http.request`/`get`, `https.request`/`get`,
+ * `net.connect`, `net.Socket.prototype.connect` and `dgram.createSocket` —
+ * and asserts both that nothing was attempted and that the traps are LIVE,
+ * because a dead trap also reads zero. Each seam was proven to fire by
+ * mutating it into the suite.)
  *
  * F4's point-in-time COMPARISON is therefore checked against real core
  * code, over stub documents — what IS checked offline is the half the
