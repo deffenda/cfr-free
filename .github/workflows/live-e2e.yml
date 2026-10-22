@@ -26,6 +26,8 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      # --ignore-scripts: the package's `prepare` script builds; this job
+      # runs the tests against the source, so the build is not needed here.
+      - run: npm ci --ignore-scripts
       - name: Live sync and read-consistency smoke
         run: LIVE_TESTS=1 npx vitest run test/live.test.ts

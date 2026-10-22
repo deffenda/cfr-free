@@ -49,7 +49,51 @@ keys, no telemetry — one Node process and one SQLite file.
 
 ## Quickstart
 
-Run from a source checkout (Node **≥ 22.5**):
+Three ways in, depending on what you have. The first needs nothing but
+Docker; the second needs only Node; the third needs a checkout.
+
+### 1. Docker (nothing to install)
+
+```bash
+docker run -d --name cfr-free -p 8787:8787 -v cfr-data:/data \
+  ghcr.io/deffenda/cfr-free:latest
+```
+
+The image is public and pulls anonymously. It syncs the index on first
+start (~5 s, ~2–3 MB from eCFR) and serves the API on
+<http://127.0.0.1:8787>; the index persists in the `cfr-data` volume. Any
+CLI command works the same way, e.g. `docker run --rm -v cfr-data:/data
+ghcr.io/deffenda/cfr-free:latest sync` to refresh, or `… export
+/data/backup.sqlite` to snapshot into the volume. Details under
+[Docker](#docker) below.
+
+### 2. From GitHub (no publish step)
+
+```bash
+npx -y github:deffenda/cfr-free version    # -> 0.2.1
+npx -y github:deffenda/cfr-free serve      # HTTP API on http://127.0.0.1:8787
+```
+
+`npx` fetches and compiles the project on first use, so the first run takes
+a minute and needs a compiler (npm runs the project's `prepare` script when
+it installs from a git URL, and that script runs `tsc`). The Docker route
+above needs neither.
+
+To use it as a dependency of your own project:
+
+```bash
+npm install github:deffenda/cfr-free
+```
+
+> **A global install from a git URL (`npm install -g github:…`) does not
+> work**, and the failure is npm's rather than the project's: npm unpacks a
+> git dependency into the global tree in a way that drops the `node_modules`
+> of its dependencies, and the install ends with a broken package. This was
+> measured on npm 10.9.9 and npm 11.20.0, and it reproduces on the
+> unmodified repository too. Use `npx`, a project-local install, or the
+> Docker image instead.
+
+### 3. From a source checkout
 
 ```bash
 # requires Node >= 22.5
@@ -58,7 +102,7 @@ cd cfr-free
 npm ci                  # install the pinned dependencies
 npm run build           # compile to dist/ (the CLI entry point is dist/cli.js)
 
-node dist/cli.js version        # -> 0.2.0   (verifies the build)
+node dist/cli.js version        # -> 0.2.1   (verifies the build)
 node dist/cli.js sync           # build the local index (~2-3 MB download, ~5 s)
 node dist/cli.js serve          # HTTP API on http://127.0.0.1:8787
 # or
@@ -72,21 +116,23 @@ node dist/cli.js diff 2026-01-01 2026-06-01   # provision changes between two is
 node dist/cli.js redline 2026-01-01 2026-06-01 4.125   # line-level redline of one provision
 ```
 
-`sync` writes the index at `~/.cfr-free/index.sqlite`. To try it against a
-throwaway index instead of your own, point `CFR_INDEX_PATH` somewhere else:
+`npm link` in the checkout puts `cfr-free` on your PATH, after which the
+examples above work verbatim as `cfr-free …`.
+
+`cfr-free sync` writes the index at `~/.cfr-free/index.sqlite`. To try it
+against a throwaway index instead of your own, point `CFR_INDEX_PATH`
+somewhere else:
 
 ```bash
 CFR_INDEX_PATH=/tmp/cfr-smoke.sqlite node dist/cli.js sync   # ~5 s, then delete the file
 ```
 
-Prefer a shorter command? `npm link` in the checkout puts `cfr-free` on your
-PATH, after which the examples above work verbatim as `cfr-free …`.
-
-**npm install is not available yet.** The package is not published: the npm
-registry returns 404 for `cfr-free` (last checked 2026-10-20). Publication runs
+**`npm install -g cfr-free` does not work yet.** The package is not on the
+npm registry: the registry returns 404 for `cfr-free` (last checked
+2026-10-22). Publication runs
 from the `v*`-tag release workflow with OIDC provenance and is gated behind
-trusted-publishing registration, so until that gate opens, the source
-checkout above is the installation path. Re-check with
+trusted-publishing registration, so until that gate opens, the Docker and
+GitHub routes above are the installation paths. Re-check with
 `curl -sS -o /dev/null -w '%{http_code}\n' https://registry.npmjs.org/cfr-free`
 — a 200 means the package is installable and `npm install -g cfr-free`
 works.
@@ -136,7 +182,7 @@ dependencies.
 export CFR_INDEX_PATH=/tmp/smoke.sqlite   # never your real index
 
 # 1. the build is what you think it is
-node dist/cli.js version                  # -> 0.2.0
+node dist/cli.js version                  # -> 0.2.1
 
 # 2. network: build the index (~2-3 MB, ~5 s)
 node dist/cli.js sync
@@ -184,16 +230,29 @@ Add to your MCP client config (e.g. `claude_desktop_config.json`):
 {
   "mcpServers": {
     "cfr-free": {
+      "command": "npx",
+      "args": ["-y", "github:deffenda/cfr-free", "mcp"]
+    }
+  }
+}
+```
+
+That form needs nothing installed and no path to edit — `npx` fetches and
+compiles the project on first use (verified end to end: the `list_parts`
+tool answers over stdio). If you built it from a checkout, use the absolute
+path to the built CLI, because MCP clients do not inherit your shell's
+`PATH`:
+
+```json
+{
+  "mcpServers": {
+    "cfr-free": {
       "command": "/absolute/path/to/cfr-free/dist/cli.js",
       "args": ["mcp"]
     }
   }
 }
 ```
-
-Use the absolute path to the built CLI (MCP clients do not inherit your
-shell's `PATH` reliably, and the package is not on npm yet). If you ran
-`npm link` in the checkout, `"command": "cfr-free"` works too.
 
 Then ask things like _"What does 38 CFR 4.125 say about diagnosing mental
 disorders?"_ or _"Search Title 38 for traumatic brain injury compensation."_

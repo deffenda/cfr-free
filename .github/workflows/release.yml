@@ -25,7 +25,10 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      # --ignore-scripts: the package's `prepare` script runs the TypeScript
+      # build, and this job builds explicitly in `npm run ci` — running it
+      # during install would build twice.
+      - run: npm ci --ignore-scripts
       - run: npm run ci
 
   container-e2e:
@@ -124,7 +127,10 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org/
           cache: npm
-      - run: npm ci
+      # --ignore-scripts: the package's `prepare` script builds, and this
+      # job builds explicitly on the next line — running it during install
+      # would build twice.
+      - run: npm ci --ignore-scripts
       - run: npm run build
       - name: tag/package version match
         run: |
