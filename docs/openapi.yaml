@@ -643,7 +643,11 @@ components:
           items: { $ref: '#/components/schemas/SearchHit' }
         indexIssueDate: { type: [string, 'null'] }
         indexStale: { type: boolean }
-        notice: { type: [string, 'null'], description: Stale-index warning. }
+        notice:
+          {
+            type: [string, 'null'],
+            description: 'Stale-index warning. NOTE: `notice` is NOT one field with one meaning across the API — on the search and section responses it is the stale-index warning, while on the diff and redline responses it is the date-semantics disclaimer. A client that renders a generic `notice` must not generalise from one to the other.',
+          }
         matchedTerms:
           type: array
           items: { type: string }

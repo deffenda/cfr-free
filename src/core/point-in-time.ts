@@ -23,4 +23,4 @@ export const POINT_IN_TIME_NOTICE =
  * provision at a date) rather than a comparison.
  */
 export const POINT_IN_TIME_NOTICE_SECTION =
-  'eCFR serves the revision in force on the requested date; it does not report which issue date that is';
+  'eCFR serves the revision in force on that date; it does not report which issue date that is';
