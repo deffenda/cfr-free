@@ -25,9 +25,11 @@
  * the suite calls reaches the network: the client is constructed only by
  * the CLI, and the suite drives the service directly. The one family that
  * needs a document from eCFR, F4, is given a STUB client that serves two
- * tiny in-memory documents. Verified by running the whole suite with
- * `globalThis.fetch` replaced by a counter that throws: every check passed
- * and the counter read zero.)
+ * tiny in-memory documents. ENFORCED, not asserted:
+ * `test/pilot-rehearsal.test.ts` runs the whole suite with
+ * `globalThis.fetch` replaced by a counter that throws, and asserts both
+ * that the counter read zero and that the trap is LIVE — a dead trap also
+ * reads zero.)
  *
  * F4's point-in-time COMPARISON is therefore checked against real core
  * code, over stub documents — what IS checked offline is the half the
@@ -74,8 +76,9 @@ import { USAGE } from '../../../src/cli.js';
 
 /**
  * The two dates the F4 task names — § 3.17 between 2026-01-01 and
- * 2026-10-16, the pair the protocol's rehearsal record used
- * (`docs/research/pilot-rehearsal-2026-10-21.md`). The stub serves a
+ * 2026-10-16, the pair the protocol itself names
+ * (`docs/research/practitioner-pilot.md` §6.6 F4: "whether § 3.17 changed
+ * between 2026-01-01 and 2026-10-16, and exactly how"). The stub serves a
  * document for each of them, so the comparison the task text describes is
  * the comparison that runs.
  */

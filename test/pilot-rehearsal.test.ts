@@ -198,6 +198,54 @@ describe('the M6 rehearsal — every task still answerable', () => {
     }
   });
 
+  it('reaches no network, so the suite is offline BY MEASUREMENT', async () => {
+    // The runner's header claims "no check it runs performs a network
+    // call". That claim was a documented measurement; this makes it an
+    // enforced one, so the claim and the suite cannot drift apart.
+    //
+    // `globalThis.fetch` is the seam: the product's HttpClient resolves it
+    // at CALL TIME (`this.options.fetchFn ?? fetch`), so replacing the
+    // global intercepts every real outbound path rather than a proxy of it.
+    let calls = 0;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((...args: unknown[]) => {
+      calls += 1;
+      throw new Error(`the suite must not reach the network: ${String(args[0])}`);
+    }) as typeof fetch;
+    try {
+      const trapped = await withRehearsal();
+      expect(trapped.failed, 'the suite failed while the network was trapped').toBe(0);
+      expect(trapped.passed).toBeGreaterThan(20);
+      expect(calls, `the suite attempted ${calls} network call(s)`).toBe(0);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it('the network trap is live, so the zero above is a real zero', async () => {
+    // A DEAD trap also reads zero. Without this control, the assertion
+    // above could pass for the wrong reason — a trap that never fires
+    // because it was never wired up would look identical to a suite that
+    // genuinely makes no calls. So: fire it deliberately, and prove it
+    // fires.
+    let calls = 0;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (() => {
+      calls += 1;
+      throw new Error('trapped on purpose');
+    }) as typeof fetch;
+    try {
+      // The trap throws synchronously, so the call is wrapped in a
+      // microtask to turn that throw into the rejection being asserted.
+      await expect(Promise.resolve().then(() => fetch('http://127.0.0.1:1/never'))).rejects.toThrow(
+        'trapped on purpose',
+      );
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    expect(calls).toBe(1);
+  });
+
   it('runs real checks rather than none', () => {
     // The suite must not be able to pass by checking nothing.
     expect(report.passed).toBeGreaterThan(20);
