@@ -2,6 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EcfrApi } from '../src/core/ecfr.js';
+import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
 import { CFRService } from '../src/core/service.js';
 import { buildMcpServer } from '../src/mcp/server.js';
 import {
@@ -796,6 +797,7 @@ describe('MCP diff_issues tool (ecfr injected)', () => {
         added: [],
         removed: [],
         truncated: false,
+        notice: POINT_IN_TIME_NOTICE,
       });
       const parsed = JSON.parse(result.content[0]?.text ?? '{}') as Record<string, unknown>;
       expect(parsed).toEqual(result.structuredContent);
@@ -1005,6 +1007,7 @@ describe('MCP redline tool (ecfr injected)', () => {
           { fromLine: null, toLine: 1, type: 'add', text: 'Amended body.' },
         ],
         coarse: false,
+        notice: POINT_IN_TIME_NOTICE,
       });
       const parsed = JSON.parse(result.content[0]?.text ?? '{}') as Record<string, unknown>;
       expect(parsed).toEqual(result.structuredContent);

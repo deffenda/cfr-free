@@ -366,6 +366,7 @@ async function handleDiff(
         diff.changed.length > CHANGE_LIST_CAP ||
         diff.added.length > CHANGE_LIST_CAP ||
         diff.removed.length > CHANGE_LIST_CAP,
+      notice: diff.notice,
     },
     'public, max-age=3600',
   );

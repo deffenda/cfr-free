@@ -1,6 +1,7 @@
 import type { Logger } from '../logger.js';
 import { diffHashes, hashContent } from './changes.js';
 import { isIssueDateString, type EcfrApi } from './ecfr.js';
+import { POINT_IN_TIME_NOTICE } from './point-in-time.js';
 import { ServiceError } from './service.js';
 import { SyncError } from './sync.js';
 import { parseTitleXml } from './xml.js';
@@ -21,6 +22,15 @@ export interface IssueDiff {
   readonly changed: readonly string[];
   readonly added: readonly string[];
   readonly removed: readonly string[];
+  /**
+   * The limit on what these two dates MEAN, stated on the surface that
+   * shows the diff. eCFR serves the revision in force on a requested date
+   * and does not report which issue date that revision was, so the dates
+   * are SELECTORS and not a stamp of what was served. Without this on the
+   * diff, a reader of the change view has to find the sentence somewhere
+   * else to know what it does not claim.
+   */
+  readonly notice: string;
 }
 
 /**
@@ -124,5 +134,6 @@ export async function diffIssues(
     changed: diff.changed,
     added: diff.added,
     removed: diff.removed,
+    notice: POINT_IN_TIME_NOTICE,
   };
 }

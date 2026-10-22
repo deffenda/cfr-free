@@ -79,5 +79,7 @@ export function formatIssueDiff(diff: IssueDiff): string {
       lines.push(`  … ${citations.length - CHANGE_LIST_CAP} more not shown`);
     }
   }
+  lines.push('');
+  lines.push(`Note: ${diff.notice}`);
   return `${lines.join('\n')}\n`;
 }

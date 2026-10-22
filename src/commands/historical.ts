@@ -1,4 +1,5 @@
 import { historicalSection, type HistoricalSection } from '../core/historical.js';
+import { POINT_IN_TIME_NOTICE_SECTION } from '../core/point-in-time.js';
 import type { Logger } from '../logger.js';
 import { createEcfrApi } from './ensure-index.js';
 
@@ -31,7 +32,7 @@ export function formatHistoricalSection(section: HistoricalSection): string {
   const lines: string[] = [];
   lines.push(
     `Section ${section.citation} as of ${section.requestedDate} ` +
-      `(eCFR serves the revision in force on that date; it does not report which issue date that is)`,
+      `(${POINT_IN_TIME_NOTICE_SECTION})`,
   );
   lines.push(`Heading: ${section.heading}`);
   lines.push('');

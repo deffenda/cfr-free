@@ -3,6 +3,7 @@ import net from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type http from 'node:http';
 import type { EcfrApi } from '../src/core/ecfr.js';
+import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
 import { CFRService } from '../src/core/service.js';
 import { createHttpServer, type HttpServerOptions } from '../src/titan/http-server.js';
 import { createTestLogger, makeSection, openTempStore, type TempStore } from './helpers.js';
@@ -858,6 +859,7 @@ describe('Titan HTTP /api/v1/diff', () => {
       added: [],
       removed: [],
       truncated: false,
+      notice: POINT_IN_TIME_NOTICE,
     });
     expect(headers.get('content-type')).toContain('application/json');
     expect(headers.get('cache-control')).toBe('public, max-age=3600');
@@ -1034,6 +1036,7 @@ describe('Titan HTTP /api/v1/redline', () => {
         { fromLine: null, toLine: 1, type: 'add', text: 'Amended body.' },
       ],
       coarse: false,
+      notice: POINT_IN_TIME_NOTICE,
     });
     expect(headers.get('content-type')).toContain('application/json');
     expect(headers.get('cache-control')).toBe('public, max-age=300');

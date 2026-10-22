@@ -50,5 +50,7 @@ export function formatSectionRedline(report: SectionRedline): string {
       lines.push(`L${hunk.fromLine ?? '-'} | L${hunk.toLine ?? '-'} | ${prefix}${hunk.text}`);
     }
   }
+  lines.push('');
+  lines.push(`Note: ${report.notice}`);
   return `${lines.join('\n')}\n`;
 }

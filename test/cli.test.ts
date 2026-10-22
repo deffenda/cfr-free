@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { CliError, main, parseArgs } from '../src/cli.js';
 import { formatIssueDiff } from '../src/commands/diff.js';
+import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
 import { formatSearchResults } from '../src/commands/search.js';
 import { Store } from '../src/core/store.js';
 import type { FetchLike } from '../src/core/http-client.js';
@@ -262,8 +263,10 @@ describe('formatIssueDiff', () => {
       changed: [],
       added: [],
       removed: [],
+      notice: POINT_IN_TIME_NOTICE,
     });
-    expect(text).toBe(`no provision changes between ${DIFF_FROM} and ${DIFF_TO}\n`);
+    expect(text).toContain(`no provision changes between ${DIFF_FROM} and ${DIFF_TO}`);
+    expect(text).toContain(POINT_IN_TIME_NOTICE);
   });
 
   it('caps long lists at CHANGE_LIST_CAP with an ellipsis note', () => {
@@ -274,6 +277,7 @@ describe('formatIssueDiff', () => {
       changed: ['4.125'],
       added: [],
       removed: citations,
+      notice: POINT_IN_TIME_NOTICE,
     });
     expect(text).toContain(`0 added`);
     expect(text).toContain('changed (1):\n  4.125\n');
@@ -317,7 +321,11 @@ describe('main: diff output', () => {
     });
     try {
       expect(await main(['diff', DIFF_FROM, DIFF_TO], io)).toBe(0);
-      expect(out.join('')).toBe(`no provision changes between ${DIFF_FROM} and ${DIFF_TO}\n`);
+      const text = out.join('');
+      expect(text).toContain(`no provision changes between ${DIFF_FROM} and ${DIFF_TO}`);
+      // The change view states the limit on what the dates mean, on the
+      // surface that shows the comparison.
+      expect(text).toContain(POINT_IN_TIME_NOTICE);
     } finally {
       vi.unstubAllGlobals();
       rmSync(dir, { recursive: true, force: true });
@@ -456,6 +464,8 @@ describe('main: redline output', () => {
           'L3 | L- | -Line two.',
           'L- | L3 | +Line two amended.',
           '',
+          `Note: ${POINT_IN_TIME_NOTICE}`,
+          '',
         ].join('\n'),
       );
       expect(err.join('')).toBe('');
@@ -478,7 +488,14 @@ describe('main: redline output', () => {
     try {
       const code = await main(['redline', DIFF_FROM, DIFF_TO, '4.130'], io);
       expect(code).toBe(0);
-      expect(out.join('')).toBe(`Section 4.130: unchanged between ${DIFF_FROM} and ${DIFF_TO}\n`);
+      expect(out.join('')).toBe(
+        [
+          `Section 4.130: unchanged between ${DIFF_FROM} and ${DIFF_TO}`,
+          '',
+          `Note: ${POINT_IN_TIME_NOTICE}`,
+          '',
+        ].join('\n'),
+      );
       expect(err.join('')).toBe('');
     } finally {
       vi.unstubAllGlobals();
@@ -538,6 +555,41 @@ describe('cfr-free search', () => {
       hits: [],
     } as unknown as Parameters<typeof formatSearchResults>[0]);
     expect(out).toContain('warning: local index is stale');
+  });
+
+  it('prints the DATED verification URL for each hit, not the current one', () => {
+    // A reader who pastes the CURRENT url into a memo has cited text they
+    // cannot show they read: the /current/ form drops the revision. The
+    // dated form is the one that proves which revision the indexed text
+    // came from, and it is the same link the section read and the UI's copy
+    // block use.
+    const out = formatSearchResults({
+      query: '4.130',
+      page: 1,
+      perPage: 10,
+      total: 1,
+      tier: 'or',
+      indexIssueDate: '2026-10-16',
+      indexStale: false,
+      notice: null,
+      matchedTerms: ['4.130'],
+      unmatchedTerms: [],
+      hits: [
+        {
+          citation: '4.130',
+          citationDisplay: '38 C.F.R. § 4.130',
+          heading: 'Schedule of ratings—Mental disorders.',
+          snippet: '…',
+          sourceUrl: 'https://www.ecfr.gov/current/title-38/section-4.130',
+          sourceUrlAtIndexDate: 'https://www.ecfr.gov/on/2026-10-16/title-38/section-4.130',
+          direct: true,
+          inResults: true,
+          partTitle: 'Evaluation of General Rating Principles',
+        },
+      ],
+    } as unknown as Parameters<typeof formatSearchResults>[0]);
+    expect(out).toContain('https://www.ecfr.gov/on/2026-10-16/title-38/section-4.130');
+    expect(out).not.toContain('https://www.ecfr.gov/current/title-38/section-4.130');
   });
 
   it('says so when nothing matches, and states the issue date', () => {
