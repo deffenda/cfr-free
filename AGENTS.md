@@ -93,8 +93,9 @@ measures. So:
 - **Do not run the full gate to answer a question one test file
   answers.** During development run the file under change
   (`npx vitest run test/<file>`); `npm run ci` is the one-shot at
-  readiness. The full gate is fast (~9s locally) but CI pays for it on
-  every push, at ~2 minutes of latency each.
+  readiness. CI pays for the gate on every push — about two minutes of
+  latency per run, measured — so the cheap habit is to ask the file, not
+  the gate.
 - A docs-only change does not need the code gate run locally, but it
   does need the four tests that read docs: `markdown-tables`,
   `no-conflict-markers`, `openapi-conformance`, `install-paths`.
