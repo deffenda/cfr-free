@@ -85,7 +85,8 @@ neither a compiler nor a checkout — it is the fastest way in.
 > before that. Publication runs from the `v*`-tag release workflow with OIDC
 > provenance (no publish token) and is gated behind trusted-publishing
 > registration on npmjs.com, so this route goes live when that gate opens.
-> Until it does, the Docker route above works today with no gate at all.
+> Until it does, the Docker route above and the GitHub route below both
+> work today with no gate at all.
 
 ### 3. From GitHub (no publish step)
 
@@ -106,12 +107,16 @@ npm install github:deffenda/cfr-free
 ```
 
 > **A global install from a git URL (`npm install -g github:…`) does not
-> work**, and the failure is npm's rather than the project's: npm unpacks a
-> git dependency into the global tree in a way that drops the `node_modules`
-> of its dependencies, and the install ends with a broken package. This was
-> measured on npm 10.9.9 and npm 11.20.0, and it reproduces on the
+> work**, and the failure is npm's rather than the project's. On npm
+> 11.20.0 it aborts part-way through with
+> `ENOENT … chmod … node_modules/which/bin/node-which`, installs nothing,
+> and leaves a `cfr-free` command in your PATH that points at a file that
+> does not exist — so `cfr-free` then fails with "no such file or
+> directory". On npm 10.9.9 the same class of failure presents as a
+> dropped dependency tree. Both were measured, and both reproduce on the
 > unmodified repository too. Use `npx`, a project-local install, the npm
-> route above, or the Docker image instead.
+> route above, or the Docker image instead — all four were re-verified on
+> npm 11.20.0.
 
 ### 4. From a source checkout
 
@@ -146,17 +151,6 @@ somewhere else:
 ```bash
 CFR_INDEX_PATH=/tmp/cfr-smoke.sqlite node dist/cli.js sync   # ~5 s, then delete the file
 ```
-
-**Where the package is published.** `npm install -g cfr-free` works once
-the package is on the registry; until then it answers `404 Not Found`.
-Check which state you are in with one command —
-
-```bash
-npm view cfr-free version    # a version number = published; 404 = not yet
-```
-
-— and if it is not published yet, the Docker and GitHub routes above are
-the installation paths that work today.
 
 ### Docker
 
@@ -200,8 +194,11 @@ Every command below was run against an isolated throwaway index
 outputs are what you should see. Nothing outside `/tmp` is touched.
 **The install routes were measured, not assumed.** A clean global install of
 the packed tarball into a throwaway prefix was run and the installed binary
-was exercised (`--version`, and a search against a copy of the index); a
-GitHub Release asset was downloaded and installed the same way, end to end;
+was exercised (`--version`, and a search against a copy of the index); the
+GitHub Release asset route — the same tarball, fetched from a release URL —
+was created, downloaded and installed end to end **in a scratch
+repository**, since this repository has no release yet; a project-local
+`npm install github:deffenda/cfr-free` was run and its binary exercised;
 and `npx -y github:deffenda/cfr-free` was run, MCP over stdio included.
 The route that does **not** work — `npm install -g github:…` — was measured
 too, and the failure is npm's (see [Quickstart](#quickstart)). The sequence
