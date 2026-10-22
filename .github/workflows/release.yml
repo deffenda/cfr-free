@@ -146,7 +146,20 @@ jobs:
           # the root commit has no commits after it — and an empty range
           # exits 0, so a `||` fallback never fires. The emptiness is
           # therefore checked explicitly.
-          NOTES="$(git log --pretty='- %s (%h)' "${PREV:-$(git rev-list --max-parents=0 HEAD)}..${GITHUB_REF_NAME}" 2>/dev/null || true)"
+          #
+          # With no previous tag the range starts AT the root commit, which
+          # would EXCLUDE it (`root..tag` lists the commits after the
+          # root). `root^` is the commit before it, so the root is
+          # included. A root commit with no parent has no `root^`, so that
+          # case falls back to the single-commit listing.
+          ROOT="$(git rev-list --max-parents=0 HEAD)"
+          if [ -n "$PREV" ]; then
+            NOTES="$(git log --pretty='- %s (%h)' "${PREV}..${GITHUB_REF_NAME}" 2>/dev/null || true)"
+          elif git rev-parse --verify --quiet "${ROOT}^" >/dev/null; then
+            NOTES="$(git log --pretty='- %s (%h)' "${ROOT}^..${GITHUB_REF_NAME}" 2>/dev/null || true)"
+          else
+            NOTES="$(git log --pretty='- %s (%h)' "${GITHUB_REF_NAME}" 2>/dev/null || true)"
+          fi
           if [ -z "$NOTES" ]; then
             NOTES="$(git log -1 --pretty='- %s (%h)' "${GITHUB_REF_NAME}")"
           fi

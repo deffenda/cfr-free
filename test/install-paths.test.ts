@@ -228,7 +228,13 @@ describe('the release workflow', () => {
   it('refuses to release a tag that disagrees with the manifest', () => {
     // The same guard the npm job uses: the tag and package.json must agree,
     // or the release would carry a version the manifest does not claim.
-    expect(workflow).toContain('bump package.json before tagging');
+    //
+    // Scoped to THIS job: the npm job carries the identical message, so a
+    // whole-file `toContain` would stay green if this job's guard were
+    // deleted outright.
+    const job = workflow.match(/\n {2}github-release:[\s\S]*?(?=\n {2}[a-z-]+:|\n {2}# Preserved)/);
+    expect(job).not.toBeNull();
+    expect(job?.[0]).toContain('bump package.json before tagging');
   });
 });
 
