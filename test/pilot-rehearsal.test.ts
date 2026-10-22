@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { renderRehearsal, runRehearsal, type RehearsalReport } from './fixtures/pilot/run.js';
 import { makeSection, openTempStore } from './helpers.js';
 
@@ -138,12 +138,12 @@ const ISSUE_DATE = '2026-10-16';
  * restored afterwards so a test run cannot leak the fixture into the
  * developer's shell.
  */
-function withRehearsal(): RehearsalReport {
+async function withRehearsal(): Promise<RehearsalReport> {
   const temp = openTempStore({ sections: CORPUS, issueDate: ISSUE_DATE });
   const previous = process.env['CFR_INDEX_PATH'];
   try {
     process.env['CFR_INDEX_PATH'] = temp.indexPath;
-    return runRehearsal();
+    return await runRehearsal();
   } finally {
     if (previous === undefined) delete process.env['CFR_INDEX_PATH'];
     else process.env['CFR_INDEX_PATH'] = previous;
@@ -152,7 +152,13 @@ function withRehearsal(): RehearsalReport {
 }
 
 describe('the M6 rehearsal — every task still answerable', () => {
-  const report = withRehearsal();
+  // The suite is ASYNC: the F4 family runs the product's own diff, redline
+  // and historical cores against a STUB eCFR, so the payloads under test are
+  // what the core produced rather than what this test wrote.
+  let report: RehearsalReport;
+  beforeAll(async () => {
+    report = await withRehearsal();
+  });
 
   it('passes every check, so no task has become unanswerable', () => {
     const failures = report.tasks.flatMap((task) =>
@@ -178,6 +184,18 @@ describe('the M6 rehearsal — every task still answerable', () => {
       'F5-A',
       'F5-B',
     ]);
+  });
+
+  it('skips no task, so no task can quietly reach the network', () => {
+    // A task that cannot run offline sets `skipped: true`. Today none do:
+    // every family is answered from the local index. Pinning it means a
+    // future task cannot add a network dependency to the suite without
+    // this test noticing — the suite is offline BY ASSERTION, not by
+    // inspection.
+    expect(report.skipped).toBe(0);
+    for (const task of report.tasks) {
+      expect(task.skipped, `${task.id} is skipped: ${task.skipReason ?? 'no reason'}`).toBe(false);
+    }
   });
 
   it('runs real checks rather than none', () => {

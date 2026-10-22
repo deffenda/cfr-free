@@ -19,12 +19,27 @@
  * (`ROADMAP.md` §M3).
  *
  * WHY IT IS OFFLINE. Every task in the suite runs against the LOCAL index
- * and the local surfaces only. The two families that need the network
- * (F4's point-in-time comparison, and the live eCFR fetch behind a
- * redline) are marked `network: true` and SKIPPED here, with the skip
- * counted and reported. A check that needs the network is a check that
- * fails for reasons outside the change, which is how a gate stops being
- * trusted.
+ * and the local surfaces only, and no check it runs performs a network
+ * call. (The suite's import graph DOES reach network-capable modules —
+ * the command modules value-import the eCFR client factory — but nothing
+ * the suite calls reaches the network: the client is constructed only by
+ * the CLI, and the suite drives the service directly. The one family that
+ * needs a document from eCFR, F4, is given a STUB client that serves two
+ * tiny in-memory documents. Verified by running the whole suite with
+ * `globalThis.fetch` replaced by a counter that throws: every check passed
+ * and the counter read zero.)
+ *
+ * F4's point-in-time COMPARISON is therefore checked against real core
+ * code, over stub documents — what IS checked offline is the half the
+ * protocol calls out as the real content of the task: that the surfaces
+ * STATE the limit on what their dates mean. A check that needs the network
+ * is a check that fails for reasons outside the change, which is how a
+ * gate stops being trusted.
+ *
+ * A task that cannot run offline at all sets `skipped: true` with a
+ * `skipReason`, and the suite's own test asserts that NO task is skipped
+ * today — so a future task cannot quietly reach the network without the
+ * suite noticing.
  *
  * The answerability criterion is deliberately narrow: for each task, can
  * the surface the task NAMES produce the answer the task asks for? The
@@ -45,12 +60,71 @@ import { Store } from '../../../src/core/store.js';
 import { formatSearchResults } from '../../../src/commands/search.js';
 import { formatIssueDiff } from '../../../src/commands/diff.js';
 import { formatSectionRedline } from '../../../src/commands/redline.js';
+import { diffIssues } from '../../../src/core/diff.js';
+import { redlineSection } from '../../../src/core/redline.js';
+import { historicalSection } from '../../../src/core/historical.js';
+import type { EcfrApi } from '../../../src/core/ecfr.js';
+import type { Logger } from '../../../src/logger.js';
 import { formatHistoricalSection } from '../../../src/commands/historical.js';
 import {
   POINT_IN_TIME_NOTICE,
   POINT_IN_TIME_NOTICE_SECTION,
 } from '../../../src/core/point-in-time.js';
 import { USAGE } from '../../../src/cli.js';
+
+/**
+ * The two dates the F4 task names — § 3.17 between 2026-01-01 and
+ * 2026-10-16, the pair the protocol's rehearsal record used
+ * (`docs/research/pilot-rehearsal-2026-10-21.md`). The stub serves a
+ * document for each of them, so the comparison the task text describes is
+ * the comparison that runs.
+ */
+const F4_FROM_DATE = '2026-01-01';
+const F4_TO_DATE = '2026-10-16';
+
+/**
+ * A two-document eCFR, tiny, with § 3.17 changed between the dates. This
+ * is what the STUB eCFR serves: it is enough for the core to parse a
+ * provision, hash it, and produce a real diff or redline — and it reaches
+ * no network.
+ */
+const STUB_XML: Readonly<Record<string, string>> = {
+  [F4_FROM_DATE]:
+    '<ECFR><DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD>' +
+    '<DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD>' +
+    '<DIV5 N="3" TYPE="PART"><HEAD>Part 3</HEAD>' +
+    '<DIV8 N="3.17" TYPE="SECTION"><HEAD>§ 3.17 Income limitations.</HEAD>' +
+    '<P>Original body text.</P></DIV8></DIV5></DIV3></ECFR>',
+  [F4_TO_DATE]:
+    '<ECFR><DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD>' +
+    '<DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD>' +
+    '<DIV5 N="3" TYPE="PART"><HEAD>Part 3</HEAD>' +
+    '<DIV8 N="3.17" TYPE="SECTION"><HEAD>§ 3.17 Income limitations.</HEAD>' +
+    '<P>Amended body text.</P></DIV8></DIV5></DIV3></ECFR>',
+};
+
+/**
+ * An eCFR client that serves the stub documents. It never opens a socket —
+ * that is what lets the suite exercise the CORE's diff, redline and
+ * historical paths offline, rather than only the formatters.
+ */
+function stubEcfr(): EcfrApi {
+  return {
+    getFullTitleXml: async (issueDate: string) => {
+      const xml = STUB_XML[issueDate];
+      if (xml === undefined) throw new Error(`stub eCFR has no document for ${issueDate}`);
+      return xml;
+    },
+  } as unknown as EcfrApi;
+}
+
+/** A logger that discards everything — the suite reports, it does not log. */
+const SILENT_LOGGER: Logger = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+};
 
 /** One check inside a task: a named claim about the surface. */
 export interface RehearsalCheck {
@@ -111,7 +185,7 @@ function indexPath(): string {
  * adopted if the file is empty (a fresh CI fixture index), which is the
  * only write the suite can perform, and it is on a copy.
  */
-export function runRehearsal(): RehearsalReport {
+export async function runRehearsal(): Promise<RehearsalReport> {
   const file = indexPath();
   if (!existsSync(file)) {
     throw new Error(`no index at ${file} — set CFR_INDEX_PATH to an index to rehearse against`);
@@ -125,7 +199,7 @@ export function runRehearsal(): RehearsalReport {
       f2aShorthandToCriteria(service),
       f2bSubjectGap(service),
       f3aCrossReference(service),
-      f4aHistoricalComparison(),
+      await f4aHistoricalComparison(),
       f5aExportAndCopy(service, issueDate),
       f5bIncompletenessWarning(service),
     ];
@@ -382,8 +456,7 @@ function f3aCrossReference(service: CFRService): RehearsalTask {
 }
 
 /**
- * F4-A — historical comparison (§6.6). NEEDS THE NETWORK for the
- * comparison itself.
+ * F4-A — historical comparison (§6.6).
  *
  * The task's own third requirement is that the participant "tells me what
  * the tool does and does not claim about which revision it served". The
@@ -391,66 +464,64 @@ function f3aCrossReference(service: CFRService): RehearsalTask {
  * was only answerable by running `historical` or reading the SPEC. The
  * change view now carries a `notice`, and `historical` prints the limit.
  *
- * The point-in-time comparison itself needs eCFR, so that half is SKIPPED
- * offline. What IS checked offline is the half the protocol calls out as
- * the real content of the task: that the surfaces STATE the limit, so a
- * participant running the change view can answer the third requirement
- * without leaving it.
+ * THE PAYLOADS UNDER TEST COME FROM THE PRODUCT'S OWN CORE — `diffIssues`
+ * and `redlineSection` and `historicalSection`, run against a STUB eCFR
+ * that serves two tiny documents. That is the whole point of this family.
+ * An earlier version of it built the diff and redline payloads by hand and
+ * then asserted that the formatter printed the notice it had put there —
+ * which cannot tell a working product from a core that stopped attaching
+ * the notice at all: the hand-built payload always had one. Here the
+ * payload is what the core produced, so if the core drops the notice, the
+ * payload has none, and the check fails.
+ *
+ * The stub reaches no network, so the family still runs offline.
  */
-function f4aHistoricalComparison(): RehearsalTask {
+async function f4aHistoricalComparison(): Promise<RehearsalTask> {
   const checks: RehearsalCheck[] = [];
+  const deps = { ecfr: stubEcfr(), logger: SILENT_LOGGER };
+
+  const diff = await diffIssues(deps, F4_FROM_DATE, F4_TO_DATE);
   checks.push(
     check(
-      'the limit on what the two dates mean is stated in one place',
+      'the diff the CORE produces carries the limit on what its two dates mean',
       '§6.6 F4-A',
-      POINT_IN_TIME_NOTICE.length > 0,
-      'the notice constant is empty',
+      diff.notice === POINT_IN_TIME_NOTICE,
+      `the core's diff carried notice ${JSON.stringify(diff.notice)}`,
     ),
   );
   checks.push(
     check(
       'the CLI diff prints that limit',
       '§6.6 F4-A',
-      formatIssueDiff({
-        fromIssueDate: '2026-01-01',
-        toIssueDate: '2026-06-01',
-        changed: [],
-        added: [],
-        removed: [],
-        notice: POINT_IN_TIME_NOTICE,
-      }).includes(POINT_IN_TIME_NOTICE),
+      formatIssueDiff(diff).includes(POINT_IN_TIME_NOTICE),
       'the CLI diff output did not carry the notice',
+    ),
+  );
+
+  const redline = await redlineSection(deps, F4_FROM_DATE, F4_TO_DATE, '3.17');
+  checks.push(
+    check(
+      'the redline the CORE produces carries the limit',
+      '§6.6 F4-A',
+      redline.notice === POINT_IN_TIME_NOTICE,
+      `the core's redline carried notice ${JSON.stringify(redline.notice)}`,
     ),
   );
   checks.push(
     check(
       'the CLI redline prints that limit',
       '§6.6 F4-A',
-      formatSectionRedline({
-        fromIssueDate: '2026-01-01',
-        toIssueDate: '2026-06-01',
-        citation: '3.17',
-        status: 'unchanged',
-        hunks: [],
-        coarse: false,
-        notice: POINT_IN_TIME_NOTICE,
-      }).includes(POINT_IN_TIME_NOTICE),
+      formatSectionRedline(redline).includes(POINT_IN_TIME_NOTICE),
       'the CLI redline output did not carry the notice',
     ),
   );
+
+  const historical = await historicalSection(deps, F4_FROM_DATE, '3.17');
   checks.push(
     check(
       'the historical read prints that limit, so a participant can obtain it',
       '§6.6 F4-A',
-      formatHistoricalSection({
-        citation: '3.17',
-        requestedDate: '2026-01-01',
-        heading: 'Heading',
-        text: 'body',
-        // the field the command reads
-      } as unknown as Parameters<typeof formatHistoricalSection>[0]).includes(
-        POINT_IN_TIME_NOTICE_SECTION,
-      ),
+      formatHistoricalSection(historical).includes(POINT_IN_TIME_NOTICE_SECTION),
       'the historical output did not carry the limit',
     ),
   );
@@ -580,7 +651,7 @@ export function renderRehearsal(report: RehearsalReport): string {
 // Human entry point: run the rehearsal against the index at CFR_INDEX_PATH.
 if (process.argv[1]?.endsWith('run.ts') || process.argv[1]?.endsWith('run.js')) {
   try {
-    process.stdout.write(renderRehearsal(runRehearsal()));
+    process.stdout.write(renderRehearsal(await runRehearsal()));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 2;
