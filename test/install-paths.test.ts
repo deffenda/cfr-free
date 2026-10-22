@@ -185,6 +185,59 @@ describe('the workflows', () => {
   });
 });
 
+describe('the release workflow', () => {
+  const workflow = readFileSync(path.join(ROOT, '.github', 'workflows', 'release.yml'), 'utf8');
+
+  it('publishes a GitHub Release with the tarball attached', () => {
+    // The repository had two tags and NO GitHub releases, so the releases
+    // page was empty: a tag published an image to GHCR and (behind an
+    // operator-only gate) a package to npm, but there was no downloadable
+    // artifact. This job puts the packed tarball on the tag's release, which
+    // is the one install route needing neither a registry nor a compiler.
+    expect(workflow).toContain('github-release:');
+    expect(workflow).toContain('gh release create');
+    expect(workflow).toContain('contents: write');
+  });
+
+  it('attaches the tarball the npm job would publish', () => {
+    // Both jobs must pack the SAME artifact, or the release and the
+    // registry could ship different bytes.
+    //
+    // The assertion is scoped to the `gh release create` invocation, not to
+    // the file: the same filename also appears in the release notes, and a
+    // plain `toContain` would stay green if the UPLOAD argument were
+    // renamed while the documentation kept the name.
+    expect(workflow).toMatch(/\n\s+gh release create[\s\S]*?\n\s*"cfr-free-\$\{PKG\}\.tgz"/);
+  });
+
+  it('will not create a tag that is missing', () => {
+    // `gh release create` creates a tag from the default branch when the
+    // given tag does not exist, which would attach the built bytes to the
+    // wrong commit. The tag is always present here, so `--verify-tag` only
+    // turns a silent wrong-artifact path into a loud failure.
+    //
+    // The match is anchored to the COMMAND line: the explanatory comment
+    // above it names `gh release create` and `--verify-tag` too, so an
+    // unanchored match would be satisfied by the prose and would stay
+    // green if the flag were dropped from the command.
+    const invocation = workflow.match(/\n\s+gh release create[\s\S]*?cfr-free-\$\{PKG\}\.tgz"/);
+    expect(invocation).not.toBeNull();
+    expect(invocation?.[0]).toContain('--verify-tag');
+  });
+
+  it('refuses to release a tag that disagrees with the manifest', () => {
+    // The same guard the npm job uses: the tag and package.json must agree,
+    // or the release would carry a version the manifest does not claim.
+    //
+    // Scoped to THIS job: the npm job carries the identical message, so a
+    // whole-file `toContain` would stay green if this job's guard were
+    // deleted outright.
+    const job = workflow.match(/\n {2}github-release:[\s\S]*?(?=\n {2}[a-z-]+:|\n {2}# Preserved)/);
+    expect(job).not.toBeNull();
+    expect(job?.[0]).toContain('bump package.json before tagging');
+  });
+});
+
 describe('the release guard', () => {
   it('declares a version that is not already taken by a tag', () => {
     // The release workflow refuses to publish when the tag and package.json
