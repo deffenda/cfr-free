@@ -1,7 +1,7 @@
 # cfr-free
 
 [![CI](https://github.com/deffenda/cfr-free/actions/workflows/ci.yml/badge.svg)](https://github.com/deffenda/cfr-free/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/deffenda/cfr-free/blob/main/LICENSE)
 
 Self-hosted **Title 38 CFR data service**: it builds a local, full-text
 searchable index of Title 38 of the Code of Federal Regulations (the VA
@@ -49,8 +49,9 @@ keys, no telemetry — one Node process and one SQLite file.
 
 ## Quickstart
 
-Three ways in, depending on what you have. The first needs nothing but
-Docker; the second needs only Node; the third needs a checkout.
+Four ways in, depending on what you have. The first needs nothing but
+Docker; the second needs only npm; the third needs npm and a compiler; the
+fourth needs a checkout.
 
 ### 1. Docker (nothing to install)
 
@@ -67,7 +68,29 @@ ghcr.io/deffenda/cfr-free:latest sync` to refresh, or `… export
 /data/backup.sqlite` to snapshot into the volume. Details under
 [Docker](#docker) below.
 
-### 2. From GitHub (no publish step)
+### 2. From npm (no compiler, no Docker)
+
+```bash
+npm install -g cfr-free
+
+# or, with no install at all:
+npx -y cfr-free version         # -> 0.2.1
+npx -y cfr-free sync            # build the local index (~2-3 MB, ~5 s)
+npx -y cfr-free serve           # HTTP API on http://127.0.0.1:8787
+```
+
+The published tarball ships the compiled `dist/`, so this route needs
+neither a compiler nor a checkout — it is the fastest way in.
+
+> **Is it on the registry yet?** `npm view cfr-free version` answers with a
+> version number once the package is published, and with `404 Not Found`
+> before that. Publication runs from the `v*`-tag release workflow with OIDC
+> provenance (no publish token) and is gated behind trusted-publishing
+> registration on npmjs.com, so this route goes live when that gate opens.
+> Until it does, the Docker route above and the GitHub route below both
+> work today with no gate at all.
+
+### 3. From GitHub (no publish step)
 
 ```bash
 npx -y github:deffenda/cfr-free version    # -> 0.2.1
@@ -86,14 +109,23 @@ npm install github:deffenda/cfr-free
 ```
 
 > **A global install from a git URL (`npm install -g github:…`) does not
-> work**, and the failure is npm's rather than the project's: npm unpacks a
-> git dependency into the global tree in a way that drops the `node_modules`
-> of its dependencies, and the install ends with a broken package. This was
-> measured on npm 10.9.9 and npm 11.20.0, and it reproduces on the
-> unmodified repository too. Use `npx`, a project-local install, or the
-> Docker image instead.
+> work**, and the failure is npm's rather than the project's. Measured on
+> npm 11.20.0, five runs in a row left the SAME broken end state: the
+> package is not installed, and the `cfr-free` command npm puts in your
+> PATH points at a file that does not exist, so running it fails with "no
+> such file or directory".
+>
+> Whether npm _reports_ the failure varies, and the quiet case is the more
+> misleading one: most runs print "added 104 packages" and exit 0, so
+> nothing looks wrong until you run the command; some abort part-way with
+> `ENOENT … chmod … node_modules/which/bin/node-which` (exit 254). On npm
+> 10.9.9 the same class of failure presents as a dropped dependency tree
+> (`ENOENT … readlink … node_modules/.bin/fxparser`). All of this was
+> measured, and it reproduces on the unmodified repository too. Use `npx`, a
+> project-local install, the npm route above, or the Docker image instead —
+> all four were re-verified on npm 11.20.0.
 
-### 3. From a source checkout
+### 4. From a source checkout
 
 ```bash
 # requires Node >= 22.5
@@ -127,16 +159,6 @@ somewhere else:
 CFR_INDEX_PATH=/tmp/cfr-smoke.sqlite node dist/cli.js sync   # ~5 s, then delete the file
 ```
 
-**`npm install -g cfr-free` does not work yet.** The package is not on the
-npm registry: the registry returns 404 for `cfr-free` (last checked
-2026-10-22). Publication runs
-from the `v*`-tag release workflow with OIDC provenance and is gated behind
-trusted-publishing registration, so until that gate opens, the Docker and
-GitHub routes above are the installation paths. Re-check with
-`curl -sS -o /dev/null -w '%{http_code}\n' https://registry.npmjs.org/cfr-free`
-— a 200 means the package is installable and `npm install -g cfr-free`
-works.
-
 ### Docker
 
 ```bash
@@ -165,18 +187,31 @@ download.
 
 npm publishing runs from the `v*`-tag release workflow with OIDC provenance
 (no publish tokens), gated behind the `NPM_TRUSTED_PUBLISHING` repository
-variable plus one-time trusted-publisher registration on npmjs.com. Until that
-gate is activated, `npm install -g cfr-free` resolves nothing and installing
-from a source checkout is the way to go (see Quickstart).
+variable plus one-time trusted-publisher registration on npmjs.com. The
+publish job verifies before it publishes that the packed tarball carries the
+executable and every file it imports, and that the tag matches the
+`package.json` version — so a release cannot ship a broken package. Check
+whether the gate is open with `npm view cfr-free version` (see
+[Quickstart](#quickstart)).
 
 ### Verify the install (smoke checklist)
 
 Every command below was run against an isolated throwaway index
 (`CFR_INDEX_PATH=/tmp/smoke.sqlite`) on the 2026-10-16 corpus; the
 outputs are what you should see. Nothing outside `/tmp` is touched.
-**Clean-install testing is unverified by an agent** — installs are
-forbidden to it — so the sequence is verified against provisioned
-dependencies.
+**The install routes were measured, not assumed.** A clean global install of
+the packed tarball into a throwaway prefix was run and the installed binary
+was exercised (`--version`, and a search against a copy of the index); the
+GitHub Release asset route — the same tarball, fetched from a release URL —
+was created, downloaded and installed end to end **in a scratch
+repository**, since this repository has no release yet; a project-local
+`npm install github:deffenda/cfr-free` was run and its binary exercised;
+and `npx -y github:deffenda/cfr-free` was run, MCP over stdio included.
+The route that does **not** work — `npm install -g github:…` — was measured
+too, and the failure is npm's (see [Quickstart](#quickstart)). The sequence
+below was run against a provisioned checkout; what it does not cover is an
+install on a machine with no npm cache and no network beyond the first
+fetch.
 
 ```bash
 export CFR_INDEX_PATH=/tmp/smoke.sqlite   # never your real index
@@ -231,15 +266,18 @@ Add to your MCP client config (e.g. `claude_desktop_config.json`):
   "mcpServers": {
     "cfr-free": {
       "command": "npx",
-      "args": ["-y", "github:deffenda/cfr-free", "mcp"]
+      "args": ["-y", "cfr-free", "mcp"]
     }
   }
 }
 ```
 
-That form needs nothing installed and no path to edit — `npx` fetches and
-compiles the project on first use (verified end to end: the `list_parts`
-tool answers over stdio). If you built it from a checkout, use the absolute
+That form needs nothing installed and no path to edit, and the published
+tarball ships compiled — no compiler runs on first use. Before the package
+is on the registry, the same config works from the git URL
+(`"args": ["-y", "github:deffenda/cfr-free", "mcp"]`), which `npx` fetches
+and compiles on first use (verified end to end: the `list_parts` tool
+answers over stdio). If you built it from a checkout, use the absolute
 path to the built CLI, because MCP clients do not inherit your shell's
 `PATH`:
 
@@ -324,7 +362,7 @@ curl 'http://127.0.0.1:8787/metrics'
 ```
 
 The full request/response contract (schemas, error envelopes) is documented in
-[`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1).
+[`docs/openapi.yaml`](https://github.com/deffenda/cfr-free/blob/main/docs/openapi.yaml) (OpenAPI 3.1).
 
 The API is intentionally minimal: **GET-only, no request bodies, no
 templating**, bound to `127.0.0.1` by default. The deliberate non-JSON
@@ -422,7 +460,7 @@ not legal advice; verify citations against the official eCFR.
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for reporting vulnerabilities and the security
+See [SECURITY.md](https://github.com/deffenda/cfr-free/blob/main/SECURITY.md) for reporting vulnerabilities and the security
 posture summary. Reported by default: lint/strict-TS/typecheck/coverage/Audit
 gates (plus local trivy/semgrep/osv-scanner/gitleaks scans), zero runtime
 dependencies beyond the MCP SDK, XML parser hardening (no
@@ -431,4 +469,4 @@ surface), and loopback-only networking by default.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/deffenda/cfr-free/blob/main/LICENSE)
