@@ -210,7 +210,7 @@ describe('the release guard', () => {
 });
 
 describe('the packed artifact', () => {
-  it('contains the executable, the prepare script and the readme', () => {
+  it('contains the executable, its imports, the prepare script and the readme', () => {
     // The release workflow packs the tarball and checks the same thing
     // before publishing, so a broken `files` list must fail here first.
     //
@@ -229,6 +229,11 @@ describe('the packed artifact', () => {
       writeFileSync(path.join(staging, 'LICENSE'), 'MIT\n');
       mkdirSync(path.join(staging, 'dist'), { recursive: true });
       writeFileSync(path.join(staging, 'dist', 'cli.js'), '#!/usr/bin/env node\n');
+      // `dist/config.js` stands in for a real import of the entry point
+      // (`src/cli.ts` imports './config.js'). npm ALWAYS force-includes the
+      // `bin` target, so asserting only on `dist/cli.js` could not fail
+      // however the `files` list was broken — this one can.
+      writeFileSync(path.join(staging, 'dist', 'config.js'), '// stub\n');
       mkdirSync(path.join(staging, 'scripts'), { recursive: true });
       writeFileSync(path.join(staging, 'scripts', 'prepare.mjs'), '// stub\n');
 
@@ -240,6 +245,7 @@ describe('the packed artifact', () => {
       const parsed = JSON.parse(output) as Array<{ files?: Array<{ path: string }> }>;
       const paths = (parsed[0]?.files ?? []).map((file) => file.path);
       expect(paths).toContain('dist/cli.js');
+      expect(paths).toContain('dist/config.js');
       expect(paths).toContain('scripts/prepare.mjs');
       expect(paths).toContain('package.json');
       expect(paths).toContain('README.md');
