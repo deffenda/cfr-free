@@ -47,6 +47,7 @@ interface PackageManifest {
   readonly bin?: Record<string, string>;
   readonly files?: readonly string[];
   readonly scripts?: Record<string, string>;
+  readonly devDependencies?: Record<string, string>;
 }
 
 function readManifest(): PackageManifest {
@@ -132,14 +133,20 @@ describe('the prepare script', () => {
     // `npm_config_global=true` is inherited. Without `--global=false` the
     // install lands in the global node_modules instead of the package's
     // own, and the compiler is still not where the build looks for it.
-    expect(script).toContain('--global=false');
+    //
+    // The pattern matches the QUOTED argument, not the prose above it: a
+    // plain `toContain('--global=false')` would also be satisfied by the
+    // explanatory comment, so deleting the flag would leave the test green.
+    expect(script).toMatch(/'--global=false'/);
   });
 
-  it('pins the compiler version the project builds with', () => {
-    // A floating version would let the fallback compile with a different
-    // compiler than the checked-in build, so the two could disagree.
+  it("builds with the project's own compiler and tsconfig", () => {
+    // The fallback installs the project's own dev dependencies, so it
+    // compiles with the same pinned TypeScript as the checked-in build
+    // rather than a version of its own choosing.
     const manifest = readManifest();
     expect(manifest.scripts?.['build']).toContain('tsconfig.build.json');
+    expect(manifest.devDependencies?.['typescript']).toBe('5.9.3');
   });
 });
 
