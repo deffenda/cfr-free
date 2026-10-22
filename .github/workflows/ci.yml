@@ -16,18 +16,19 @@ jobs:
   quality:
     name: quality (${{ matrix.node }})
     runs-on: ubuntu-latest
-    # A push to main re-tests a tree a pull_request run has already
-    # validated: squash merges keep the tree byte-identical (checked on
-    # PRs #128, #130, #131, #132 — identical tree hashes), so the second
-    # leg adds nothing there. Node 22 is the minimum the package claims
-    # (`engines` requires >=22.5), so it is the leg the branch itself
-    # needs. If this condition ever misbehaves, both legs run — the old
-    # behaviour, not a broken gate.
-    if: github.event_name == 'pull_request' || matrix.node == 22
     strategy:
       fail-fast: false
       matrix:
-        node: [22, 24]
+        # A push to main re-tests a tree a pull_request run has already
+        # validated: squash merges keep the tree byte-identical (checked
+        # on PRs #128, #130, #131, #132 — identical tree hashes), so the
+        # second leg has nothing left to prove there. Node 22 is the floor
+        # `engines` claims (>=22.5), so it is the leg the branch itself
+        # needs. The condition lives in the matrix because a *job-level*
+        # `if` cannot see the `matrix` context — attempting it invalidates
+        # the whole workflow, which GitHub reports as a failed run with
+        # zero jobs rather than as a filter that did not match.
+        node: ${{ github.event_name == 'pull_request' && fromJSON('[22, 24]') || fromJSON('[22]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
