@@ -36,7 +36,7 @@ servers:
     description: Default loopback bind (CFR_HOST/CFR_PORT may override deliberately).
 paths:
   /:
-    # source: src/titan/http-server.ts:544
+    # source: src/titan/http-server.ts:545
     get:
       summary: Read-only web UI (HTML shell)
       responses:
@@ -61,7 +61,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /ui.js:
-    # source: src/titan/http-server.ts:548
+    # source: src/titan/http-server.ts:549
     get:
       summary: Web UI script (embedded string, no external assets)
       responses:
@@ -86,7 +86,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /ui.css:
-    # source: src/titan/http-server.ts:552
+    # source: src/titan/http-server.ts:553
     get:
       summary: Web UI stylesheet (embedded string, no external assets)
       responses:
@@ -111,7 +111,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /health:
-    # source: src/titan/http-server.ts:501
+    # source: src/titan/http-server.ts:502
     get:
       summary: Index freshness report
       responses:
@@ -136,7 +136,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /metrics:
-    # source: src/titan/http-server.ts:520
+    # source: src/titan/http-server.ts:521
     get:
       summary: Prometheus exposition
       responses:
@@ -161,7 +161,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/search:
-    # source: src/titan/http-server.ts:524 (router), :279 (revalidatable send)
+    # source: src/titan/http-server.ts:525 (router), :279 (revalidatable send)
     get:
       summary: Full-text search over the local index
       responses:
@@ -248,7 +248,7 @@ paths:
           description: 'Restrict to one chapter by Roman-numeral identifier — exact and case-sensitive (e.g. "I").'
           schema: { type: string, minLength: 1, maxLength: 8, pattern: '^[IVXLCDM]+$' }
   /api/v1/sections/{citation}:
-    # source: src/titan/http-server.ts:528 (router), :297 (revalidatable send)
+    # source: src/titan/http-server.ts:529 (router), :297 (revalidatable send)
     get:
       summary: Full text of one section or appendix
       responses:
@@ -303,7 +303,7 @@ paths:
           description: 'Citation or appendix name — 4.125, § 4.125, or 38 CFR 4.125 — URL-encoded (≤ 120 chars).'
           schema: { type: string, maxLength: 120 }
   /api/v1/browse:
-    # source: src/titan/http-server.ts:532 (router), :312 (revalidatable send)
+    # source: src/titan/http-server.ts:533 (router), :312 (revalidatable send)
     get:
       summary: Structure-tree navigation
       responses:
@@ -380,7 +380,7 @@ paths:
           description: "Subject-group identifier (1–40 chars; the eCFR node id, e.g. `ECFRd158704dcab040e`); requires `part`. Subject groups hang off a part or a subpart, and hold the sections the flat tree could not reach (1,910 of the corpus's 2,953 sections)."
           schema: { type: string, minLength: 1, maxLength: 40 }
   /api/v1/diff:
-    # source: src/titan/http-server.ts:536
+    # source: src/titan/http-server.ts:537
     get:
       summary: Point-in-time provision diff between two eCFR issue dates
       responses:
@@ -427,7 +427,7 @@ paths:
           description: 'End issue date (YYYY-MM-DD), later than `from`.'
           schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
   /api/v1/redline:
-    # source: src/titan/http-server.ts:540
+    # source: src/titan/http-server.ts:541
     get:
       summary: Line redline of one provision between two eCFR issue dates
       responses:
@@ -488,19 +488,19 @@ paths:
 components:
   responses:
     BadRequest:
-      # source: src/titan/http-server.ts:293,619,624 (encoding, URL parse, byte caps) + :428 (service input) + :347 (diff params) + :409 (redline params)
+      # source: src/titan/http-server.ts:293,620,625 (encoding, URL parse, byte caps) + :429 (service input) + :347 (diff params) + :410 (redline params)
       description: '{ error: "invalid_input", message } — malformed URL or citation encoding, oversized q (800 bytes) or part (10 bytes), a service-level input rejection (incl. missing/empty `from`/`to` on /api/v1/diff, missing/empty `from`/`to`/`citation` on /api/v1/redline, and impossible dates like month 13).'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     NotFound:
-      # source: src/titan/http-server.ts:556 (no route), :425 (structure/service miss)
+      # source: src/titan/http-server.ts:557 (no route), :426 (structure/service miss)
       description: '{ error: "not_found", message } — any path not listed here, a citation absent from the index, a citation missing from BOTH dates on /api/v1/redline, or a nonexistent browse node (browse adds `available`: the identifiers that do exist).'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     MethodNotAllowed:
-      # source: src/titan/http-server.ts:595
+      # source: src/titan/http-server.ts:596
       description: '{ error: "method_not_allowed", message } — any method other than GET/HEAD, on any path.'
       headers:
         allow: { description: 'Always GET, HEAD.', schema: { type: string } }
@@ -508,13 +508,13 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     UriTooLong:
-      # source: src/titan/http-server.ts:611
+      # source: src/titan/http-server.ts:612
       description: '{ error: "uri_too_long", message } — request URL over 2048 bytes.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     RateLimited:
-      # source: src/titan/http-server.ts:602
+      # source: src/titan/http-server.ts:603
       description: '{ error: "rate_limited", message } — per-peer token bucket exhausted (armed only when CFR_ALLOW_REMOTE=1; loopback never throttles).'
       headers:
         retry-after: { description: Seconds to wait., schema: { type: integer } }
@@ -522,7 +522,7 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     InternalError:
-      # source: src/titan/http-server.ts:668
+      # source: src/titan/http-server.ts:669
       description: '{ error: "internal_error", message } — unexpected failure; details are logged server-side only.'
       content:
         application/json:
@@ -789,6 +789,7 @@ components:
         - added
         - removed
         - truncated
+        - notice
       properties:
         fromIssueDate: { type: string, description: 'The `from` date as requested (YYYY-MM-DD).' }
         toIssueDate: { type: string, description: 'The `to` date as requested (YYYY-MM-DD).' }
@@ -810,6 +811,9 @@ components:
         truncated:
           type: boolean
           description: True when any of the three citation lists was cut at the 100-entry cap.
+        notice:
+          type: string
+          description: 'The limit on what the two dates MEAN, stated on the surface that shows the comparison: eCFR serves the revision in force on the requested date and does not report which issue date that is, so the dates are selectors and not a stamp of the revision served.'
       additionalProperties: false
     RedlineResult:
       type: object
@@ -821,6 +825,7 @@ components:
         - status
         - hunks
         - coarse
+        - notice
       properties:
         fromIssueDate:
           {
@@ -868,4 +873,7 @@ components:
         coarse:
           type: boolean
           description: True when either side exceeded the core's 2000-line cap — `hunks` then holds two whole-text blocks (not an LCS walk), so no per-line identity is claimed.
+        notice:
+          type: string
+          description: 'The limit on what the two dates MEAN, stated on the surface that shows the comparison: eCFR serves the revision in force on the requested date and does not report which issue date that is, so the dates are selectors and not a stamp of the revision served.'
       additionalProperties: false

@@ -494,6 +494,12 @@ export const UI_JS = String.raw`(function () {
     if (body.coarse === true) {
       meta += ' — coarse diff: the provision is too large for a line-by-line comparison';
     }
+    // The limit on what the two dates mean travels with the comparison
+    // itself, so a reader of the change view is not left to find it
+    // elsewhere. It is a sentence, not a link, and it is set as text.
+    if (typeof body.notice === 'string' && body.notice !== '') {
+      meta += ' — ' + body.notice;
+    }
     redlineMeta.textContent = meta;
     var lines = [];
     if (status === 'unchanged') {
@@ -630,7 +636,12 @@ export const UI_JS = String.raw`(function () {
       if (reference.available === true) {
         appendCitationLink(item, String(reference.citation));
       } else {
-        item.textContent = String(reference.citation) + ' (not indexed)';
+        // "not in this copy" says what is true: the provision is not in
+        // THIS index. "not indexed" reads as "this does not exist", which
+        // is a different claim — a section can be in the CFR and missing
+        // from this copy. The pilot protocol records this wording as the
+        // reason a participant has to make the tool's inference for it.
+        item.textContent = String(reference.citation) + ' (not in this copy)';
       }
       sectionReferences.appendChild(item);
     }

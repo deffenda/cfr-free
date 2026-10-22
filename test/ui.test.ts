@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { runInNewContext } from 'node:vm';
+import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
 import { UI_JS } from '../src/titan/ui.js';
 
 /**
@@ -243,6 +244,17 @@ function sectionBody(citation: string, heading: string): Record<string, unknown>
 }
 
 /** A section whose text carries the P1-01 image marker. */
+/** A section carrying a cross-cite that is NOT in this local index. */
+function sectionBodyWithMissingReference(citation: string): Record<string, unknown> {
+  return {
+    ...sectionBody(citation, 'Heading ' + citation),
+    references: [
+      { citation: '4.125', available: true },
+      { citation: '4.83', available: false },
+    ],
+  };
+}
+
 function sectionBodyWithImage(citation: string): Record<string, unknown> {
   return {
     ...sectionBody(citation, 'Heading ' + citation),
@@ -515,6 +527,23 @@ describe('UI route ownership (P1-02)', () => {
     expect(harness.element('section-path').textContent).toContain('Chapter I');
     expect(harness.element('section-references').allText).toContain('4.125');
   });
+
+  it('says a missing cross-cite is not in THIS copy, not that it does not exist', async () => {
+    // "not indexed" reads as "this provision does not exist", which is a
+    // different claim from "it is not in this index" — a provision can be
+    // in the CFR and missing from this copy. The pilot protocol records
+    // this wording as the reason a participant has to make the tool's
+    // inference for it.
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.130');
+    harness.calls[0]?.respond(true, sectionBodyWithMissingReference('4.130'));
+    await harness.flush();
+
+    const references = harness.element('section-references').allText;
+    expect(references).toContain('4.83');
+    expect(references).toContain('not in this copy');
+    expect(references).not.toContain('not indexed');
+  });
 });
 
 describe('UI copy-a-citation (M5 slice 1)', () => {
@@ -610,6 +639,7 @@ describe('UI redline view (M5 slice 2)', () => {
       toText: 'New line.\n',
       hunks: [HUNK, ADDED],
       coarse: false,
+      notice: POINT_IN_TIME_NOTICE,
       ...overrides,
     };
   }
@@ -652,6 +682,18 @@ describe('UI redline view (M5 slice 2)', () => {
     harness.calls[0]?.respond(true, redlineBody({ coarse: true }));
     await harness.flush();
     expect(harness.element('redline-meta').textContent).toContain('coarse diff');
+  });
+
+  it('states the limit on what the two dates mean, on the change view', async () => {
+    // The dates are selectors, not a stamp of the revision served. The
+    // change view is where a reader comparing two revisions is most likely
+    // to over-read them, so the limit travels with the comparison.
+    const harness = makeHarness();
+    await harness.navigate('#/redline');
+    await submitRedline(harness);
+    harness.calls[0]?.respond(true, redlineBody());
+    await harness.flush();
+    expect(harness.element('redline-meta').textContent).toContain(POINT_IN_TIME_NOTICE);
   });
 
   it('reports an unchanged provision plainly', async () => {

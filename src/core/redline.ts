@@ -3,6 +3,7 @@ import { hashText } from './changes.js';
 import { normalizeCitation, type ParsedCitation } from './citations.js';
 import { assertIssueDate } from './diff.js';
 import type { EcfrApi } from './ecfr.js';
+import { POINT_IN_TIME_NOTICE } from './point-in-time.js';
 import { ServiceError } from './service.js';
 import { SyncError } from './sync.js';
 import { parseTitleXml, type RawSection } from './xml.js';
@@ -51,6 +52,14 @@ export interface SectionRedline {
    * of an LCS walk, so no per-line identity is claimed above the cap.
    */
   readonly coarse: boolean;
+  /**
+   * The limit on what the two dates MEAN, stated on the surface that shows
+   * the comparison. eCFR serves the revision in force on a requested date
+   * and does not report which issue date that revision was, so the dates
+   * are SELECTORS and not a stamp of what was served. A reader comparing two
+   * revisions is exactly the reader most likely to over-read them.
+   */
+  readonly notice: string;
 }
 
 /**
@@ -214,13 +223,20 @@ function presenceHunks(lines: readonly string[], presentSide: 'from' | 'to'): Hu
  * line work — a large identical provision never reaches the LCS), then the
  * capped line diff itself.
  */
+/**
+ * The redline WITHOUT the notice, so the notice is attached once, at the
+ * single place the redline leaves the core, and cannot be missing from one
+ * status.
+ */
+type RedlineBody = Omit<SectionRedline, 'notice'>;
+
 function deriveRedline(
   fromSections: readonly RawSection[],
   toSections: readonly RawSection[],
   target: ParsedCitation,
   fromDate: string,
   toDate: string,
-): SectionRedline {
+): RedlineBody {
   const fromRow = findProvision(fromSections, target);
   const toRow = findProvision(toSections, target);
 
@@ -340,5 +356,8 @@ export async function redlineSection(
     hunks: redline.hunks.length,
     coarse: redline.coarse,
   });
-  return redline;
+  // The notice is attached HERE, at the single place the redline leaves the
+  // core, rather than in each of the four branches that build it — so the
+  // limit cannot be missing from one status.
+  return { ...redline, notice: POINT_IN_TIME_NOTICE };
 }

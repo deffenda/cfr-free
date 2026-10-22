@@ -23,10 +23,20 @@ export async function runSearchCommand(
   }
 }
 
+/**
+ * One hit, rendered for a reader.
+ *
+ * The URL printed is the DATED one — the revision the indexed text actually
+ * came from — not the current eCFR URL for the same citation. The two point
+ * at different revisions, and a reader who pastes the current URL into a
+ * memo has cited text they cannot show they read. This is the same
+ * distinction the section read and the UI's copy block make, and it is what
+ * the pilot protocol's F1 task asks the participant to state.
+ */
 function formatHit(hit: PresentedHit, rank: number): string {
   return [
     `${rank}. ${hit.citationDisplay} — ${hit.heading}`,
-    `   ${hit.sourceUrl}`,
+    `   ${hit.sourceUrlAtIndexDate}`,
     `   ${hit.snippet}`,
   ].join('\n');
 }

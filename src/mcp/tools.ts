@@ -176,6 +176,13 @@ const changeReportOutputSchema = z.object({
   truncated: z
     .boolean()
     .describe(`true when any citation list was cut at the ${CHANGE_LIST_CAP}-citation cap`),
+  notice: z
+    .string()
+    .describe(
+      'the limit on what the two dates mean: eCFR serves the revision in force on the ' +
+        'requested date and does not report which issue date that is, so the dates are ' +
+        'selectors and not a stamp of the revision served',
+    ),
 });
 
 /**
@@ -201,6 +208,13 @@ const redlineOutputSchema = z.object({
     }),
   ),
   coarse: z.boolean(),
+  notice: z
+    .string()
+    .describe(
+      'the limit on what the two dates mean: eCFR serves the revision in force on the ' +
+        'requested date and does not report which issue date that is, so the dates are ' +
+        'selectors and not a stamp of the revision served',
+    ),
 });
 
 type SearchOutput = z.infer<typeof searchOutputSchema>;
@@ -615,6 +629,7 @@ export function registerTools(
               diff.changed.length > CHANGE_LIST_CAP ||
               diff.added.length > CHANGE_LIST_CAP ||
               diff.removed.length > CHANGE_LIST_CAP,
+            notice: diff.notice,
           };
           return {
             content: [{ type: 'text', text: textContent(structuredContent) }],
@@ -680,6 +695,7 @@ export function registerTools(
             toText: redline.toText,
             hunks: redline.hunks.map((hunk) => ({ ...hunk })),
             coarse: redline.coarse,
+            notice: redline.notice,
           };
           return {
             content: [{ type: 'text', text: textContent(structuredContent) }],
