@@ -63,6 +63,23 @@ const CORPUS = [
     heading: 'Schedule of ratings—ear.',
     text: 'Tinnitus is a frequent occurrence and is rated under the general rating formula.',
   }),
+  // A BODY-ONLY distractor for the F2-A query, repeating the query's
+  // phrase many times. The real corpus has 17.149 ("Sensori-neural aids"),
+  // whose text mentions hearing loss and which the real query returns among
+  // its hits.
+  //
+  // The repetition is what makes this distractor LOAD-BEARING. bm25 weighs
+  // term frequency WITHIN a column, so without the heading-phrase key
+  // (SPEC §4.1) the body-heavy § 17.149 would outrank § 4.85 — which
+  // carries the query's phrase in its HEADING. With one mention instead of
+  // ten, the seed's § 4.85 would lead either way and the F2-A check
+  // would pass even with the ranking guarantee broken. A check that cannot
+  // fail is not a check: this distractor is what makes the check real.
+  makeSection({
+    citation: '17.149',
+    heading: 'Sensori-neural aids.',
+    text: 'Hearing loss is rated. Hearing loss is rated. Hearing loss is rated. Hearing loss is rated. Hearing loss is rated. Hearing loss is rated. Hearing loss is rated. Hearing loss is rated. Hearing loss is rated. Hearing loss is rated. Veterans with hearing loss may be provided hearing aids under this section.',
+  }),
   makeSection({
     citation: '3.350',
     heading: 'Special monthly compensation rates.',

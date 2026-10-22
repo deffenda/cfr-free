@@ -160,6 +160,19 @@ function f1CitationLookup(service: CFRService, issueDate: string): RehearsalTask
         top === undefined ? 'no hits' : `top hit was § ${top.citation}`,
       ),
     );
+    // The PIN, not just the ranking: a citation query must put that
+    // provision FIRST and mark it as the pin. Without this, a regression
+    // that breaks the pin would still pass the check above whenever the
+    // citation happens to rank first anyway — which it does in a small
+    // corpus, and did in the seed.
+    checks.push(
+      check(
+        `the citation form "${form}" is PINNED to the top, not merely ranked there`,
+        '§6.3 F1',
+        top?.direct === true,
+        top === undefined ? 'no hits' : `the top hit was not the pin`,
+      ),
+    );
   }
 
   const hit = service.search({ query: '4.130', perPage: 5 }).hits[0];

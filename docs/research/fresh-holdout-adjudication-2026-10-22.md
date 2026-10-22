@@ -192,8 +192,9 @@ precedent keeps content questions with the operator.
    **reworded to eligibility** and the expectation is 3.1704/3.1705 — a
    ruling the corpus supports, but the choice of wording is the operator's.
 2. **`MST`** — no provision in Title 38 is headed "military sexual
-   trauma", and the phrase appears only in Vet Center provisions
-   (17.2000, 77.2, 78.10), none of which is a service-connection rule.
+   trauma", and the phrase appears in exactly **two** provisions
+   (17.2000 "Vet Center services" and 78.10 "Eligible individuals"),
+   neither of which is a service-connection rule.
    Whether the abbreviation means the PTSD/psychosis presumption (3.309),
    the direct-service-connection rule (3.304) or the Vet Center
    entitlement (78.10) is **author intent**. The expectation is widened

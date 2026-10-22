@@ -129,7 +129,7 @@ export const FRESH_QUERIES: readonly RetrievalQuery[] = [
     category: 'abbreviation',
     expected: ['3.304', '3.309'],
     rationale:
-      'military sexual trauma: no provision in Title 38 is headed "military sexual trauma" and the phrase appears only in the Vet Center provisions (17.2000, 77.2, 78.10) — none of them a service-connection rule. The two service-connection rules a practitioner lands on are 3.304 (direct service connection; wartime and peacetime) and 3.309 (disease subject to presumptive service connection). OPERATOR DECISION PENDING: if the abbreviation was meant as the Vet Center entitlement, the expectation is 78.10.',
+      'military sexual trauma: no provision in Title 38 is headed "military sexual trauma" and the phrase appears in exactly TWO provisions (17.2000 Vet Center services, 78.10 Eligible individuals) — neither a service-connection rule. The two service-connection rules a practitioner lands on are 3.304 (direct service connection; wartime and peacetime) and 3.309 (disease subject to presumptive service connection). OPERATOR DECISION PENDING: if the abbreviation was meant as the Vet Center entitlement, the expectation is 78.10.',
     sourceDate: SOURCE_DATE,
     adjudication: 'provisional',
   },
@@ -281,7 +281,7 @@ export const FRESH_QUERIES: readonly RetrievalQuery[] = [
     category: 'quoted-phrase',
     expected: ['3.303'],
     rationale:
-      'an exact regulatory phrase (3.303 is "Principles relating to service connection"). The phrase is carried by many provisions — 60 by LIKE, 225 by FTS — so this entry takes the CANONICAL-provision reading, the one the dev and holdout sets use. OPERATOR DECISION PENDING: whether a quoted-phrase query expects every provision carrying the phrase or only the canonical one; the two readings differ by an order of magnitude, and the set is not measurement-ready until it is settled.',
+      'an exact regulatory phrase (3.303 is "Principles relating to service connection"). The phrase is carried by many provisions — 60 by LIKE, 225 by FTS — so this entry takes the CANONICAL-provision reading. OPERATOR DECISION PENDING: the repo\'s own two frozen sets already disagree on the policy — the dev set expects the FULL set for "schedule of ratings" (16 provisions, on the committee ruling that a phrase with no subject is weak ground truth) while the holdout expects a CURATED set for "aid and attendance" (3) and the CANONICAL one for "special monthly compensation" (1). A rule that is not uniform across the repo\'s own sets is not a rule; the set is not measurement-ready until the policy is settled and applied uniformly.',
     sourceDate: SOURCE_DATE,
     adjudication: 'provisional',
   },
@@ -299,7 +299,7 @@ export const FRESH_QUERIES: readonly RetrievalQuery[] = [
     category: 'quoted-phrase',
     expected: ['4.16'],
     rationale:
-      'an exact regulatory phrase: 4.16, "Total disability ratings for compensation based on unemployability of the individual". The phrase occurs 11 times in the corpus (3.341, 3.343, 3.350, 3.750, 3.1704, 4.28 and others); 4.16 is the canonical answer. A committee member proposed rewording the query on the ground that the heading reads "unemployability of the individual" — checked against the corpus and REJECTED: "individual unemployability" IS an exact phrase of the corpus (11 LIKE hits, 11 FTS phrase hits), so the query stands as written',
+      'an exact regulatory phrase: 4.16, "Total disability ratings for compensation based on unemployability of the individual". The phrase occurs 11 times in the corpus (3.341, 3.343, 3.350, 3.750, 3.1704, 4.28 and others); 4.16 is the canonical answer, and the CANONICAL reading is taken here (see the operator decision pending on the quoted-phrase policy). A committee member proposed rewording the query on the ground that the heading reads "unemployability of the individual" — checked against the corpus and REJECTED: "individual unemployability" IS an exact phrase of the corpus (11 LIKE hits, 11 FTS phrase hits), so the query stands as written',
     sourceDate: SOURCE_DATE,
     adjudication: 'provisional',
   },
@@ -317,7 +317,7 @@ export const FRESH_QUERIES: readonly RetrievalQuery[] = [
     category: 'quoted-phrase',
     expected: ['3.350'],
     rationale:
-      'an exact regulatory phrase (3.350, "Special monthly compensation ratings"). The query was REWRITTEN from "special monthly compensation rate", which is not a phrase of the corpus (0 LIKE hits) but whose FTS phrase match reaches 3.350, 4.71a and 4.73 — so the original single-element expectation was under-specified for its own query. The CANONICAL reading is taken here; the bare phrase reaches 8 provisions',
+      'an exact regulatory phrase (3.350, "Special monthly compensation rates"). The query was REWRITTEN from "special monthly compensation rate", which is not a phrase of the corpus (0 LIKE hits) but whose FTS phrase match reaches 3.350, 4.71a and 4.73 — so the original single-element expectation was under-specified for its own query. The CANONICAL reading is taken here (see the operator decision pending on the quoted-phrase policy); the bare phrase reaches 8 provisions',
     sourceDate: SOURCE_DATE,
     adjudication: 'provisional',
   },
