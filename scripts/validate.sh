@@ -167,11 +167,16 @@ fi
 
 fmt_files=()
 lint_files=()
+workflow_changed=0
 related_files=()
 direct_files=()
 live_changed=0
 for f in "${changed[@]}"; do
   case "$f" in
+    .github/workflows/*.yml | .github/workflows/*.yaml)
+      fmt_files+=("$f")
+      workflow_changed=1
+      ;;
     *.ts)
       fmt_files+=("$f")
       lint_files+=("$f")
@@ -345,6 +350,30 @@ elif npx vitest run test/markdown-tables.test.ts >"$tmp/tables.log" 2>&1; then
   fi
 else
   finish tables FAIL "$((SECONDS - start))" "$(fail_reason "$tmp/tables.log")"
+fi
+
+section 'actions (actionlint — workflow files; CI cannot start on an invalid workflow)'
+start=$SECONDS
+# actionlint is an external tool (brew/go): UNAVAILABLE is a warning, not a
+# failure, so a machine without it still gets a passing gate — but the check
+# is the only thing that can see an invalid .github/workflows/*.yml before
+# GitHub answers with a zero-job failed run. See AGENTS.md evidence rules.
+if ! tool_ok actionlint; then
+  finish actions UNAVAILABLE "$((SECONDS - start))" 'actionlint not installed (brew install actionlint)'
+elif [ "$all" -eq 1 ]; then
+  if actionlint .github/workflows/*.yml >"$tmp/actions.log" 2>&1; then
+    finish actions pass "$((SECONDS - start))"
+  else
+    finish actions FAIL "$((SECONDS - start))" "$(fail_reason "$tmp/actions.log")"
+  fi
+elif [ "$workflow_changed" -eq 0 ]; then
+  finish actions skip "$((SECONDS - start))" 'no workflow files changed'
+else
+  if actionlint .github/workflows/*.yml >"$tmp/actions.log" 2>&1; then
+    finish actions pass "$((SECONDS - start))"
+  else
+    finish actions FAIL "$((SECONDS - start))" "$(fail_reason "$tmp/actions.log")"
+  fi
 fi
 
 section 'scan (tools/security-scan.sh — npm audit, osv-scanner, gitleaks, trivy, semgrep)'

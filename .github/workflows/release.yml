@@ -43,7 +43,10 @@ jobs:
       - name: Serve and verify the HTTP surface
         run: |
           docker run -d --name cfr -v cfr-release-vol:/data -p 8787:8787 cfr-free:release
-          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8787/health >/dev/null && break || sleep 1; done
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8787/health >/dev/null; then break; fi
+            sleep 1
+          done
           curl -fsS http://127.0.0.1:8787/health | grep '"status":"ok"'
           curl -fsS http://127.0.0.1:8787/metrics | grep -E '^cfr_free_sections [1-9]'
           curl -fsS 'http://127.0.0.1:8787/api/v1/search?q=mental+disorder&per_page=1' | grep '"citation"'
