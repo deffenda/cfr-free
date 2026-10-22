@@ -208,16 +208,31 @@ precedent keeps content questions with the operator.
    service-connection rules generally, which makes it hard to distinguish
    from two other queries in the same file. The operator may replace it
    with a near-miss that is actually out of corpus.
-4. **`"service connection"` and `"individual unemployability"` — the
-   quoted-phrase POLICY.** A quoted phrase reaches many provisions
+4. **The quoted-phrase POLICY — and the repo's own two frozen sets already
+   disagree on it.** A quoted phrase reaches many provisions
    (`"service connection"` matches 60 by `LIKE` and 225 by FTS). Does a
    quoted-phrase query expect _every_ provision carrying the phrase, or
-   only the canonical one? The set cannot be used for measurement until
-   this is settled, because the two readings differ by an order of
-   magnitude. B flagged this as a policy question; it is the operator's.
-   The entries as adjudicated take the **canonical-provision** reading
-   (the one the existing dev/holdout sets use), and that is recorded in
-   the rationale of each quoted-phrase entry.
+   only the canonical one? The two readings differ by an order of
+   magnitude, so the set cannot be used for measurement until this is
+   settled.
+
+   **There is no settled precedent to follow, because the two existing sets
+   already answer it differently:**
+
+   | set     | query                            | expectation                                                                  | reading                                                                                                                                                                                                      |
+   | ------- | -------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+   | dev     | `"schedule of ratings"`          | **16** provisions — every section whose heading begins "Schedule of ratings" | the FULL set, and the dev rationale records the committee ruling that "a single-section expectation for a phrase with no subject is a weak ground truth, so the honest answer is the set" (`queries.dev.ts`) |
+   | holdout | `"aid and attendance"`           | **3** provisions (3.504, 3.352, 3.350)                                       | a CURATED set                                                                                                                                                                                                |
+   | holdout | `"special monthly compensation"` | **1** provision (3.350)                                                      | the CANONICAL provision                                                                                                                                                                                      |
+
+   B flagged this as a policy question; it is the operator's, and the
+   disagreement above is the reason it is the operator's rather than the
+   committee's. The fresh entries take the **canonical-provision** reading
+   and each says so in its rationale, so the choice is visible rather than
+   silent — and the fresh entry for `"aid and attendance"` is a case where
+   the two existing sets would answer the SAME query text differently
+   (the holdout expects three provisions; the fresh entry expects one),
+   which is the sharpest illustration that the policy is unsettled.
 
 ## 6. What changed in the file
 
