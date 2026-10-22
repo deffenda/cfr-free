@@ -19,12 +19,19 @@
  * (`ROADMAP.md` §M3).
  *
  * WHY IT IS OFFLINE. Every task in the suite runs against the LOCAL index
- * and the local surfaces only, and the suite imports no network code at
- * all. F4's point-in-time COMPARISON needs eCFR, so what the suite checks
- * for F4 is the half that can be checked offline — that the surfaces STATE
- * the limit on what their dates mean — and the comparison itself is left
- * to the network path. A check that needs the network is a check that
- * fails for reasons outside the change, which is how a gate stops being
+ * and the local surfaces only, and no check it runs performs a network
+ * call. (The suite's import graph DOES reach network-capable modules —
+ * the command modules value-import the eCFR client factory — but nothing
+ * the suite calls reaches the network: the client is constructed only by
+ * the CLI, and the suite drives the service directly. Verified by running
+ * the whole suite with `globalThis.fetch` replaced by a counter that
+ * throws: 32 checks passed and the counter read zero.)
+ *
+ * F4's point-in-time COMPARISON needs eCFR, so what the suite checks for
+ * F4 is the half that can be checked offline — that the surfaces STATE
+ * the limit on what their dates mean — and the comparison itself is not
+ * checked offline. A check that needs the network is a check that fails
+ * for reasons outside the change, which is how a gate stops being
  * trusted.
  *
  * A task that cannot run offline at all sets `skipped: true` with a
