@@ -109,16 +109,21 @@ npm install github:deffenda/cfr-free
 ```
 
 > **A global install from a git URL (`npm install -g github:…`) does not
-> work**, and the failure is npm's rather than the project's. On npm
-> 11.20.0 it aborts part-way through with
-> `ENOENT … chmod … node_modules/which/bin/node-which`, installs nothing,
-> and leaves a `cfr-free` command in your PATH that points at a file that
-> does not exist — so `cfr-free` then fails with "no such file or
-> directory". On npm 10.9.9 the same class of failure presents as a
-> dropped dependency tree. Both were measured, and both reproduce on the
-> unmodified repository too. Use `npx`, a project-local install, the npm
-> route above, or the Docker image instead — all four were re-verified on
-> npm 11.20.0.
+> work**, and the failure is npm's rather than the project's. Measured on
+> npm 11.20.0, five runs in a row left the SAME broken end state: the
+> package is not installed, and the `cfr-free` command npm puts in your
+> PATH points at a file that does not exist, so running it fails with "no
+> such file or directory".
+>
+> Whether npm _reports_ the failure varies, and the quiet case is the more
+> misleading one: most runs print "added 104 packages" and exit 0, so
+> nothing looks wrong until you run the command; some abort part-way with
+> `ENOENT … chmod … node_modules/which/bin/node-which` (exit 254). On npm
+> 10.9.9 the same class of failure presents as a dropped dependency tree
+> (`ENOENT … readlink … node_modules/.bin/fxparser`). All of this was
+> measured, and it reproduces on the unmodified repository too. Use `npx`, a
+> project-local install, the npm route above, or the Docker image instead —
+> all four were re-verified on npm 11.20.0.
 
 ### 4. From a source checkout
 
