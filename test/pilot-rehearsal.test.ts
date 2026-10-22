@@ -180,6 +180,18 @@ describe('the M6 rehearsal — every task still answerable', () => {
     ]);
   });
 
+  it('skips no task, so no task can quietly reach the network', () => {
+    // A task that cannot run offline sets `skipped: true`. Today none do:
+    // every family is answered from the local index. Pinning it means a
+    // future task cannot add a network dependency to the suite without
+    // this test noticing — the suite is offline BY ASSERTION, not by
+    // inspection.
+    expect(report.skipped).toBe(0);
+    for (const task of report.tasks) {
+      expect(task.skipped, `${task.id} is skipped: ${task.skipReason ?? 'no reason'}`).toBe(false);
+    }
+  });
+
   it('runs real checks rather than none', () => {
     // The suite must not be able to pass by checking nothing.
     expect(report.passed).toBeGreaterThan(20);

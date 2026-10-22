@@ -19,12 +19,18 @@
  * (`ROADMAP.md` §M3).
  *
  * WHY IT IS OFFLINE. Every task in the suite runs against the LOCAL index
- * and the local surfaces only. The two families that need the network
- * (F4's point-in-time comparison, and the live eCFR fetch behind a
- * redline) are marked `network: true` and SKIPPED here, with the skip
- * counted and reported. A check that needs the network is a check that
+ * and the local surfaces only, and the suite imports no network code at
+ * all. F4's point-in-time COMPARISON needs eCFR, so what the suite checks
+ * for F4 is the half that can be checked offline — that the surfaces STATE
+ * the limit on what their dates mean — and the comparison itself is left
+ * to the network path. A check that needs the network is a check that
  * fails for reasons outside the change, which is how a gate stops being
  * trusted.
+ *
+ * A task that cannot run offline at all sets `skipped: true` with a
+ * `skipReason`, and the suite's own test asserts that NO task is skipped
+ * today — so a future task cannot quietly reach the network without the
+ * suite noticing.
  *
  * The answerability criterion is deliberately narrow: for each task, can
  * the surface the task NAMES produce the answer the task asks for? The

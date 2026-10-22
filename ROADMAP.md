@@ -699,8 +699,8 @@ cross-cite as "(not indexed)" — a claim the provision does not exist,
 where the true claim is that it is not in THIS copy — and that neither
 change view stated the limit on what its two dates mean (the dates are
 selectors, not a stamp of the revision served). All three are fixed, and
-the limit now lives in one constant so the diff and the redline cannot
-drift apart in wording.
+the limit now lives in one constant — `POINT_IN_TIME_NOTICE`, used by both
+the diff and the redline — so they cannot drift apart in wording.
 
 ### M7 — Integrations and support, conditional on pilot demand
 
