@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -209,20 +210,42 @@ describe('the release guard', () => {
 });
 
 describe('the packed artifact', () => {
-  it('contains the executable and its imports', () => {
+  it('contains the executable, the prepare script and the readme', () => {
     // The release workflow packs the tarball and checks the same thing
-    // before publishing. Doing it here means a broken `files` list fails
-    // on the pull request rather than on the publish.
-    const output = execFileSync('npm', ['pack', '--dry-run', '--ignore-scripts', '--json'], {
-      cwd: ROOT,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    const parsed = JSON.parse(output) as Array<{ files?: Array<{ path: string }> }>;
-    const paths = (parsed[0]?.files ?? []).map((file) => file.path);
-    expect(paths).toContain('dist/cli.js');
-    expect(paths).toContain('scripts/prepare.mjs');
-    expect(paths).toContain('package.json');
-    expect(paths).toContain('README.md');
+    // before publishing, so a broken `files` list must fail here first.
+    //
+    // The pack runs in a SYNTHETIC tree rather than in the checkout: the
+    // `files` allowlist is what is under test, and the checkout's `dist/`
+    // does not exist at this point in CI (the test run precedes the build
+    // step in `npm run ci`), so packing the checkout would test the
+    // checkout's build state instead of the manifest.
+    const staging = mkdtempSync(path.join(tmpdir(), 'cfr-free-pack-'));
+    try {
+      writeFileSync(
+        path.join(staging, 'package.json'),
+        readFileSync(path.join(ROOT, 'package.json'), 'utf8'),
+      );
+      writeFileSync(path.join(staging, 'README.md'), '# stub\n');
+      writeFileSync(path.join(staging, 'LICENSE'), 'MIT\n');
+      mkdirSync(path.join(staging, 'dist'), { recursive: true });
+      writeFileSync(path.join(staging, 'dist', 'cli.js'), '#!/usr/bin/env node\n');
+      mkdirSync(path.join(staging, 'scripts'), { recursive: true });
+      writeFileSync(path.join(staging, 'scripts', 'prepare.mjs'), '// stub\n');
+
+      const output = execFileSync('npm', ['pack', '--dry-run', '--ignore-scripts', '--json'], {
+        cwd: staging,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const parsed = JSON.parse(output) as Array<{ files?: Array<{ path: string }> }>;
+      const paths = (parsed[0]?.files ?? []).map((file) => file.path);
+      expect(paths).toContain('dist/cli.js');
+      expect(paths).toContain('scripts/prepare.mjs');
+      expect(paths).toContain('package.json');
+      expect(paths).toContain('README.md');
+      expect(paths).toContain('LICENSE');
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+    }
   });
 });
