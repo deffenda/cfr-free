@@ -155,6 +155,128 @@ async function withRehearsal(): Promise<RehearsalReport> {
   }
 }
 
+/**
+ * One outbound seam the hermeticity trap covers.
+ *
+ * `install` puts the trap in place and returns the undo; `probe` invokes
+ * the seam once, so a control can observe the trap firing. Both the
+ * measurement test and the liveness control go through THIS list, so the
+ * control cannot cover fewer seams than the trap installs — which is
+ * exactly the gap a fetch-only control left open.
+ */
+interface NetworkSeam {
+  /** How an attempt through this seam is labelled. */
+  readonly label: string;
+  /** Install the trap; returns the undo. */
+  readonly install: (onAttempt: (label: string) => void) => () => void;
+  /** Invoke the seam once. Throws when the trap is live. */
+  readonly probe: () => void;
+}
+
+/** Trap a property, and return the undo. */
+function propertyTrap(
+  holder: object,
+  key: string,
+  label: string,
+  onAttempt: (label: string) => void,
+): () => void {
+  const original = Object.getOwnPropertyDescriptor(holder, key);
+  Object.defineProperty(holder, key, {
+    configurable: true,
+    writable: true,
+    value: () => {
+      onAttempt(label);
+      throw new Error(`network attempt: ${label}`);
+    },
+  });
+  return () => {
+    if (original === undefined) delete (holder as Record<string, unknown>)[key];
+    else Object.defineProperty(holder, key, original);
+  };
+}
+
+/**
+ * Every outbound seam a rehearsal could reach the network through.
+ *
+ * `fetch` is the product's own path (its HTTP client resolves
+ * `this.options.fetchFn ?? fetch` at CALL TIME, so replacing the global
+ * intercepts it). The node builtins are the paths a future FIXTURE could
+ * take, and they are here so that the guarantee means "no network" rather
+ * than "no fetch".
+ *
+ * `get` is listed separately from `request` because node's `http.get` calls
+ * the module-LOCAL `request`, not the exported property — trapping
+ * `http.request` alone does NOT intercept `http.get`. (Proven by mutation:
+ * an `https.get` inside the suite went past the trapped `https.request`.)
+ */
+const NETWORK_SEAMS: readonly NetworkSeam[] = [
+  {
+    label: 'fetch',
+    install: (onAttempt) => propertyTrap(globalThis, 'fetch', 'fetch', onAttempt),
+    probe: () => {
+      void (globalThis.fetch as (input: string) => unknown)('https://probe.invalid/');
+    },
+  },
+  {
+    label: 'http.request',
+    install: (onAttempt) => propertyTrap(http, 'request', 'http.request', onAttempt),
+    probe: () => {
+      void http.request('http://127.0.0.1:1/probe');
+    },
+  },
+  {
+    label: 'http.get',
+    install: (onAttempt) => propertyTrap(http, 'get', 'http.get', onAttempt),
+    probe: () => {
+      void http.get('http://127.0.0.1:1/probe');
+    },
+  },
+  {
+    label: 'https.request',
+    install: (onAttempt) => propertyTrap(https, 'request', 'https.request', onAttempt),
+    probe: () => {
+      void https.request('https://127.0.0.1:1/probe');
+    },
+  },
+  {
+    label: 'https.get',
+    install: (onAttempt) => propertyTrap(https, 'get', 'https.get', onAttempt),
+    probe: () => {
+      void https.get('https://127.0.0.1:1/probe');
+    },
+  },
+  {
+    label: 'net.connect',
+    install: (onAttempt) => propertyTrap(net, 'connect', 'net.connect', onAttempt),
+    probe: () => {
+      void net.connect(1, '127.0.0.1');
+    },
+  },
+  {
+    label: 'dgram.createSocket',
+    install: (onAttempt) => propertyTrap(dgram, 'createSocket', 'dgram.createSocket', onAttempt),
+    probe: () => {
+      void dgram.createSocket('udp4');
+    },
+  },
+  {
+    label: 'net.Socket.connect',
+    install: (onAttempt) => {
+      const original = net.Socket.prototype.connect;
+      net.Socket.prototype.connect = function trappedConnect() {
+        onAttempt('net.Socket.connect');
+        throw new Error('network attempt: net.Socket.connect');
+      };
+      return () => {
+        net.Socket.prototype.connect = original;
+      };
+    },
+    probe: () => {
+      void new net.Socket().connect(1, '127.0.0.1');
+    },
+  },
+];
+
 describe('the M6 rehearsal — every task still answerable', () => {
   // The suite is ASYNC: the F4 family runs the product's own diff, redline
   // and historical cores against a STUB eCFR, so the payloads under test are
@@ -207,53 +329,15 @@ describe('the M6 rehearsal — every task still answerable', () => {
     // call". That claim is now ENFORCED rather than documented, so the
     // claim and the suite cannot drift apart.
     //
-    // Every outbound seam is trapped, not just fetch: the product's HTTP
+    // EVERY outbound seam is trapped, not just fetch: the product's HTTP
     // client resolves `fetch` at CALL TIME (`this.options.fetchFn ?? fetch`
     // in src/core/http-client.ts), so replacing the global intercepts the
-    // product's own path. But a suite that reached the network through
-    // `node:https`, `node:http` or `node:net` would slip past a fetch-only
-    // trap, so those are trapped too — the whole point is that the zero
-    // below means "no network", not "no fetch".
+    // product's own path — but a suite that reached the network through
+    // `node:https`, `node:http`, `node:net` or `node:dgram` would slip
+    // past a fetch-only trap. The whole point is that the zero below
+    // means "no network", not "no fetch".
     const attempts: string[] = [];
-    const restore: Array<() => void> = [];
-
-    const trap = (holder: object, key: string, label: string): void => {
-      const original = Object.getOwnPropertyDescriptor(holder, key);
-      Object.defineProperty(holder, key, {
-        configurable: true,
-        writable: true,
-        value: (...args: unknown[]) => {
-          attempts.push(`${label}(${String(args[0])})`);
-          throw new Error(`network attempt: ${label}`);
-        },
-      });
-      restore.push(() => {
-        if (original === undefined) delete (holder as Record<string, unknown>)[key];
-        else Object.defineProperty(holder, key, original);
-      });
-    };
-
-    trap(globalThis, 'fetch', 'fetch');
-    // `get` is trapped separately from `request`: node's `http.get` calls
-    // the module-LOCAL `request`, not the exported property, so replacing
-    // `http.request` alone does not intercept `http.get`. (Proven by
-    // mutation: an `https.get` inside the suite reached the socket, not
-    // the trapped `https.request`.)
-    trap(http, 'request', 'http.request');
-    trap(http, 'get', 'http.get');
-    trap(https, 'request', 'https.request');
-    trap(https, 'get', 'https.get');
-    trap(net, 'connect', 'net.connect');
-    trap(dgram, 'createSocket', 'dgram.createSocket');
-    const socketConnect = net.Socket.prototype.connect;
-    net.Socket.prototype.connect = function trappedConnect(...args: unknown[]) {
-      attempts.push(`net.Socket.connect(${String(args[0])})`);
-      throw new Error('network attempt: net.Socket.connect');
-    };
-    restore.push(() => {
-      net.Socket.prototype.connect = socketConnect;
-    });
-
+    const restore = NETWORK_SEAMS.map((seam) => seam.install((label) => attempts.push(label)));
     try {
       const trapped = await withRehearsal();
       expect(trapped.failed, 'the suite failed while the network was trapped').toBe(0);
@@ -264,28 +348,52 @@ describe('the M6 rehearsal — every task still answerable', () => {
     }
   });
 
-  it('the network traps are live, so the zero above is a real zero', async () => {
+  it('EVERY network trap is live, so the zero above is a real zero', () => {
     // A DEAD trap also reads zero. Without this control, the assertion
     // above could pass for the wrong reason — traps that never fire
     // because they were never wired up would look identical to a suite
-    // that genuinely makes no calls. So: fire them deliberately, and prove
-    // they fire.
+    // that genuinely makes no calls. So: fire EVERY seam deliberately,
+    // through the SAME list the measurement test installs, and prove each
+    // one fires.
+    //
+    // It used to cover only `fetch`, which meant a dead trap set for the
+    // other seven seams still passed. That was caught by a review that
+    // deleted one trap and watched the suite stay green.
     const attempts: string[] = [];
-    const realFetch = globalThis.fetch;
-    globalThis.fetch = (() => {
-      attempts.push('fetch');
-      throw new Error('trapped on purpose');
-    }) as typeof fetch;
+    const restore = NETWORK_SEAMS.map((seam) => seam.install((label) => attempts.push(label)));
     try {
-      // The trap throws synchronously, so the call is wrapped in a
-      // microtask to turn that throw into the rejection being asserted.
-      await expect(Promise.resolve().then(() => fetch('http://127.0.0.1:1/never'))).rejects.toThrow(
-        'trapped on purpose',
-      );
+      for (const seam of NETWORK_SEAMS) {
+        expect(() => seam.probe(), `${seam.label} did not trip its trap`).toThrow(
+          /network attempt/,
+        );
+      }
     } finally {
-      globalThis.fetch = realFetch;
+      for (const undo of restore.reverse()) undo();
     }
-    expect(attempts).toEqual(['fetch']);
+    // Every seam fired exactly once, in the order the list declares.
+    expect(attempts).toEqual(NETWORK_SEAMS.map((seam) => seam.label));
+  });
+
+  it('traps every outbound seam it claims to, and cannot be quietly narrowed', () => {
+    // The liveness control above proves the seams IN THE LIST are live. It
+    // cannot prove a seam that was REMOVED from the list is still trapped,
+    // because the list is the single source of truth for both the traps
+    // and the control — so shrinking the list would be self-consistent and
+    // would silently weaken the guarantee.
+    //
+    // Therefore the list itself is pinned. Dropping a seam now fails this
+    // assertion, and adding one fails it too — the set of trapped seams
+    // can only change deliberately.
+    expect(NETWORK_SEAMS.map((seam) => seam.label)).toEqual([
+      'fetch',
+      'http.request',
+      'http.get',
+      'https.request',
+      'https.get',
+      'net.connect',
+      'dgram.createSocket',
+      'net.Socket.connect',
+    ]);
   });
 
   it('runs real checks rather than none', () => {

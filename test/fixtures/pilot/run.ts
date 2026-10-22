@@ -31,7 +31,8 @@
  * `net.connect`, `net.Socket.prototype.connect` and `dgram.createSocket` —
  * and asserts both that nothing was attempted and that the traps are LIVE,
  * because a dead trap also reads zero. Each seam was proven to fire by
- * mutating it into the suite.)
+ * mutating it into the suite, and the SET of trapped seams is itself
+ * pinned, so the guarantee cannot be quietly narrowed.)
  *
  * F4's point-in-time COMPARISON is therefore checked against real core
  * code, over stub documents — what IS checked offline is the half the
