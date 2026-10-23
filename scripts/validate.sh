@@ -361,7 +361,7 @@ start=$SECONDS
 if ! tool_ok actionlint; then
   finish actions UNAVAILABLE "$((SECONDS - start))" 'actionlint not installed (brew install actionlint)'
 elif [ "$all" -eq 1 ]; then
-  if actionlint .github/workflows/*.yml >"$tmp/actions.log" 2>&1; then
+  if actionlint >"$tmp/actions.log" 2>&1; then
     finish actions pass "$((SECONDS - start))"
   else
     finish actions FAIL "$((SECONDS - start))" "$(fail_reason "$tmp/actions.log")"
@@ -369,7 +369,7 @@ elif [ "$all" -eq 1 ]; then
 elif [ "$workflow_changed" -eq 0 ]; then
   finish actions skip "$((SECONDS - start))" 'no workflow files changed'
 else
-  if actionlint .github/workflows/*.yml >"$tmp/actions.log" 2>&1; then
+  if actionlint >"$tmp/actions.log" 2>&1; then
     finish actions pass "$((SECONDS - start))"
   else
     finish actions FAIL "$((SECONDS - start))" "$(fail_reason "$tmp/actions.log")"
