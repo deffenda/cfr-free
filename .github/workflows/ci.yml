@@ -19,7 +19,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [22, 24]
+        # A push to main re-tests a tree a pull_request run has already
+        # validated: squash merges keep the tree byte-identical (checked
+        # on PRs #128, #130, #131, #132 — identical tree hashes), so the
+        # second leg has nothing left to prove there. Node 22 is the floor
+        # `engines` claims (>=22.5), so it is the leg the branch itself
+        # needs. The condition lives in the matrix because a *job-level*
+        # `if` cannot see the `matrix` context — attempting it invalidates
+        # the whole workflow, which GitHub reports as a failed run with
+        # zero jobs rather than as a filter that did not match.
+        node: ${{ github.event_name == 'pull_request' && fromJSON('[22, 24]') || fromJSON('[22]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -30,7 +39,23 @@ jobs:
       # build, and this job builds explicitly in `npm run ci` — running it
       # during install would build twice.
       - run: npm ci --ignore-scripts
-      - run: npm run ci
+      # `npm run ci` runs these six steps in this order for local use. CI
+      # calls them individually so a failure names itself: four of the
+      # five failures in the week to 2026-10-22 surfaced only as
+      # "Run npm run ci", which sends the reader back to a local
+      # reproduction to learn what actually failed.
+      - name: format (prettier)
+        run: npm run format:check
+      - name: lint (eslint)
+        run: npm run lint
+      - name: typecheck (tsc --noEmit)
+        run: npm run typecheck
+      - name: test (vitest, coverage)
+        run: npm run test:coverage
+      - name: build (tsc)
+        run: npm run build
+      - name: audit (npm audit, high)
+        run: npm run scan:audit
       - name: Upload coverage report
         if: matrix.node == 24
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -59,6 +84,12 @@ jobs:
   docker:
     name: docker
     runs-on: ubuntu-latest
+    # Same tree-identity argument as the second quality leg: the image a
+    # squash-merged commit would build is the image the pull_request run
+    # already built and smoke-tested. The release workflow builds and
+    # e2e-tests the image from the tag, so main loses no container
+    # coverage by skipping this.
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build image
