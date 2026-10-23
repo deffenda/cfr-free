@@ -33,6 +33,7 @@
     "prepare": "node scripts/prepare.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
+    "lint:actions": "actionlint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",

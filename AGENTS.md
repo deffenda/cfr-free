@@ -165,6 +165,18 @@ All of:
   the main checkout's `node_modules` only after verifying the main
   checkout is at the same commit, disclose it in the report, and remove
   it after the gate run.
+- **Workflow files are checked by `actionlint`, locally, before they are
+  pushed — not in CI.** CI cannot report an invalid workflow file:
+  GitHub answers an invalid workflow with a failed run carrying zero
+  jobs, so no `pull_request` check ever reports and the pull request
+  can never go green (this happened once, on `chore/ci-churn`'s first
+  push). `actionlint` is the only tool that sees the failure before it
+  reaches GitHub. Run `npm run lint:actions` on any change under
+  `.github/workflows/` (install: `brew install actionlint` or
+  `go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12`).
+  It is deliberately not part of `npm run ci`: the gate stays hermetic
+  (no external binary), and CI cannot be the enforcer for the very
+  failure mode it cannot start from.
 
 ## What an AI must never do in this repo
 
