@@ -60,7 +60,7 @@ establish the privacy properties of a separately chosen AI client.
 
 ### Dispatch rules for the next orchestrator
 
-1. Read `AGENTS.md` and the cross-model review contract. Consult
+1. Read `AGENTS.md`. Consult
    `~/.orchestrator/JOURNAL.md` (operator-maintained, outside the repo), open
    PRs/issues, and current origin/main before
    claiming work. The journal recorded batch-8 E1–E6 on 2026-10-20: redline
