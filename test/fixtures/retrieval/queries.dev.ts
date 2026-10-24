@@ -23,7 +23,10 @@
  * QUOTED-PHRASE EXPECTATIONS follow the operator's all-match policy
  * (selected in chat 2026-10-22, recorded on issue #135): a quoted phrase
  * expects EVERY product FTS result for the phrase — the same rule the
- * fresh set carries.
+ * fresh set carries. Rationale notes label the ruling
+ * `OPERATOR DECISION 2026-10-23`, the date that ruling's note was written
+ * into the fresh fixture — the label convention
+ * `docs/research/fresh-holdout-adjudication-2026-10-22.md` §5 documents.
  */
 
 export type QueryCategory =
