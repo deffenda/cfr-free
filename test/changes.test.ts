@@ -110,8 +110,9 @@ describe('corpusHash', () => {
       ),
     ).toBe('9ff58a42f2b5f4aa26c2bcbc961e9eecd2595694040becdea0410d144a53879c');
     // Collation: citations compare by UTF-16 code unit, so '4.10' sorts
-    // BEFORE '4.9'. A locale/numeric-aware comparator ("cleanup") changes
-    // this constant and must fail here.
+    // BEFORE '4.9' (catches a numeric-aware comparator) and '4.71B' sorts
+    // before '4.71a' (catches a locale-aware one, which would put the
+    // lowercase first). Either "cleanup" changes a constant and fails here.
     expect(
       corpusHash(
         new Map([
@@ -120,6 +121,14 @@ describe('corpusHash', () => {
         ]),
       ),
     ).toBe('2501d82b439ff2632f7da7f7f1db1426bbae62502e462f09f71c958276e66b27');
+    expect(
+      corpusHash(
+        new Map([
+          ['4.71B', h1],
+          ['4.71a', h2],
+        ]),
+      ),
+    ).toBe('ddfbb3d7da44fd60195e230c7acf6996031e61db8035bbbfd082780412af0ab5');
   });
 
   it('pins hashContent itself: text, NUL, heading — a known-answer constant', () => {

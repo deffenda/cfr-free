@@ -197,24 +197,23 @@ visible in the diff. The holdout set is not tuned on.
 
 **Index receipt:** every rebuild records a corpus receipt in `meta`: the eCFR
 issue date plus `corpus_hash`, a sha256 over each provision's
-(citation, content-hash) pair — the content hash is `text\0heading` over text
-
-- heading (rendering and structure metadata are outside the digest) — with
-  the pairs joined as `citation\0hash\n` and sorted by citation in UTF-16
-  code-unit order (`4.10` sorts before `4.9`), so the digest binds content to
-  citations. `index_status` (the MCP tool and the HTTP `/health`
-  report) surfaces it and the retrieval runner prints it. Any change round that
-  touches index-affecting code (parsing, sync, schema, ranking inputs) must
-  re-record the receipt against a rebuilt index and cite (issue date, corpus
-  hash) in the change request; retrieval results are only comparable when their
-  provenance carries the same receipt. Reports written before the receipt field
-  existed record none, and the runner prints `unknown` for an index built
-  before it — such runs are comparable only among themselves and by issue
-  date; comparability across the cutover starts at the first receipt-bearing
-  rebuild, not retroactively. The digest definition is part of the
-  contract: changing `hashContent`, `corpusHash` or their framing changes every
-  future receipt, so such a change must be stated in the change request
-  alongside the receipt it replaces.
+(citation, content-hash) pair — the content hash is `text\0heading` over the
+provision's text + heading (rendering and structure metadata are outside the
+digest) — with the pairs joined as `citation\0hash\n` and sorted by citation
+in UTF-16 code-unit order (`4.10` sorts before `4.9`), so the digest binds
+content to citations. `index_status` (the MCP tool and the HTTP `/health`
+report) surfaces it and the retrieval runner prints it. Any change round that
+touches index-affecting code (parsing, sync, schema, ranking inputs) must
+re-record the receipt against a rebuilt index and cite (issue date, corpus
+hash) in the change request; retrieval results are only comparable when their
+provenance carries the same receipt. Reports written before the receipt field
+existed record none, and the runner prints `unknown` for an index built
+before it — such runs are comparable only among themselves and by issue
+date; comparability across the cutover starts at the first receipt-bearing
+rebuild, not retroactively. The digest definition is part of the contract:
+changing `hashContent`, `corpusHash` or their framing changes every future
+receipt, so such a change must be stated in the change request alongside the
+receipt it replaces.
 
 ### 4.1 The candidate set and the ranking order
 
