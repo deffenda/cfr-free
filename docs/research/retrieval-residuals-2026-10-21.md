@@ -13,18 +13,18 @@ burned 2026-10-16 holdout remains a regression set only.
 ## Fresh holdout
 
 `test/fixtures/retrieval/queries.fresh.ts` was written before running the
-retriever. **2026-10-21 snapshot:** 43 queries — 35 answerable and 8
+retriever; it is separate from `queries.dev.ts` and `queries.holdout.ts`.
+**2026-10-21 snapshot:** 43 queries — 35 answerable and 8
 proposed no-answer cases — all marked `adjudication: 'provisional'`, with
 a category tally of 6 bare citations + 5 display citations + 7
 abbreviations + 12 natural-phrasing + 5 quoted-phrase + 8 no-answer = 43.
 **Current (2026-10-23):** 41 queries — 33 answerable and 8 no-answer, all
 `adjudicated`; two quoted-phrase entries were removed because their query
-text duplicated burned-holdout entries, so the quoted-phrase tally is now 3. It is separate from `queries.dev.ts` and `queries.holdout.ts`.
+text duplicated burned-holdout entries, so the quoted-phrase tally is now 3.
 
 The set intentionally includes bare and display citations, abbreviations,
 natural phrasing, quoted phrases, and out-of-corpus candidates. Before it
-could gate anything, an expert had to complete the following (all four done
-by 2026-10-23 — see `docs/research/fresh-holdout-adjudication-2026-10-22.md`):
+could gate anything, an expert had to:
 
 1. verify each expected provision against the provision heading and the
    question asked;
@@ -34,6 +34,16 @@ by 2026-10-23 — see `docs/research/fresh-holdout-adjudication-2026-10-22.md`):
    wording; and
 4. read the adjudicated set exactly once as the first threshold-bearing
    evaluation.
+
+**Status of the four (2026-10-23):** items 1 and 2 are done — the record
+is `docs/research/fresh-holdout-adjudication-2026-10-22.md`. Item 3 was
+done with recorded DEVIATIONS: query wording WAS changed (three entries
+rewritten, two reworded by operator ruling), each recorded in the
+adjudication record §5–§6. Item 4 has NOT happened: no threshold-bearing
+evaluation has run, and the 2026-10-23 baseline is explicitly
+non-threshold. How the "read exactly once" discipline counts
+non-threshold baseline reads is not stated in-repo and is the operator's
+to rule when the first threshold-bearing round opens.
 
 The preliminary run against the 2026-10-16 local index produced 18/35 exact
 citations, 21/35 recall@5, MRR 0.5524, and 0/8 no-answer violations (on the

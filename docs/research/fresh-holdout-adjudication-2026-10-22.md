@@ -226,8 +226,9 @@ the phrase (item 4 below — the readings for `"service connection"` (225),
    (`"service connection"` matches 60 by `LIKE` and 225 by FTS). Does a
    quoted-phrase query expect _every_ provision carrying the phrase, or
    only the canonical one? The two readings differ by an order of
-   magnitude, so the set cannot be used for measurement until this is
-   settled.
+   magnitude, so as written the set could not be used for measurement
+   until this was settled (it was, on 2026-10-23 — see the end of this
+   item).
 
    **There is no settled precedent to follow, because the two existing sets
    already answer it differently:**
@@ -240,12 +241,19 @@ the phrase (item 4 below — the readings for `"service connection"` (225),
 
    B flagged this as a policy question; it is the operator's, and the
    disagreement above is the reason it is the operator's rather than the
-   committee's. The fresh entries take the **canonical-provision** reading
-   and each says so in its rationale, so the choice is visible rather than
-   silent — and the fresh entry for `"aid and attendance"` is a case where
-   the two existing sets would answer the SAME query text differently
-   (the holdout expects three provisions; the fresh entry expects one),
-   which is the sharpest illustration that the policy is unsettled.
+   committee's. As written on 2026-10-22 the fresh entries took the
+   **canonical-provision** reading, and the fresh entry for
+   `"aid and attendance"` (since removed as a burned-holdout duplicate)
+   illustrated the disagreement most sharply — the two frozen sets would
+   answer the SAME query text differently (the holdout expects three
+   provisions; the fresh entry expected one). **RESOLVED by operator
+   ruling 2026-10-23 (issue #135): a fresh quoted-phrase expectation is
+   EVERY product FTS result for the phrase — the dev set's reading.** The
+   surviving entries carry the full sets (225 / 11 / 16 provisions for
+   `"service connection"`, `"individual unemployability"` and
+   `"hearing impairment"`); the holdout's curated expectations in the
+   table above remain byte-frozen as a regression set, not a policy
+   carrier.
 
 ## 6. What changed in the file
 
@@ -256,10 +264,12 @@ because a quoted-phrase query whose string is not a phrase of the corpus
 cannot be adjudicated as a quoted-phrase query; rewording is what makes it
 a valid instance of its category.
 
-**As written on 2026-10-22, the set was not a gate.** It became a structural gate on 2026-10-23 (see the section at the end). Originally: it becomes one when the operator
-ratifies the four §5 decisions, at which point the `adjudication`
-markers can move from `provisional` to `adjudicated` and the set can
-gate a threshold-bearing round.
+**As written on 2026-10-22, the set was not a gate.** It became a
+structural gate on 2026-10-23 (see the section at the end). The original
+plan recorded here was that it would become one when the operator ratified
+the four §5 decisions, at which point the `adjudication` markers could
+move from `provisional` to `adjudicated` and the set could gate a
+threshold-bearing round — which is what happened.
 
 ## 7. What the operator still owns
 
@@ -326,9 +336,24 @@ as in the handoff above), index issue date 2026-10-16:
 | MRR                  | 0.596 |
 | no-answer violations | 0/8   |
 
-By category (exact-citation; no-answer counted as violations):
-bare-citation 6/6, display-citation 5/5, quoted-phrase 3/3,
-natural-phrasing 8/12, abbreviation 1/7, no-answer 0/8.
+By category — the runner's "by category" line prints recall@5
+(`test/fixtures/retrieval/run.ts`); exact-citation below is the count of
+outcomes with `topHitExpected` grouped by `category`, re-derived 2026-10-23
+from `evaluateSet` on the same index (both columns sum to the table above):
+
+| category         | exact-citation | recall@5 |
+| ---------------- | -------------- | -------- |
+| abbreviation     | 0/7            | 1/7      |
+| bare-citation    | 6/6            | 6/6      |
+| display-citation | 5/5            | 5/5      |
+| natural-phrasing | 3/12           | 8/12     |
+| quoted-phrase    | 3/3            | 3/3      |
+
+No-answer: 0/8 violations (recall@5 is not defined for a no-answer case —
+the runner prints 0/8 there by construction). The quoted-phrase row cannot
+discriminate ranking quality: under the all-match policy those
+expectations are the full FTS result sets (caveat in the 2026-10-23
+section above).
 
 Provenance: darwin 25.6.0 arm64, node v26.12.1, 8 cpus, 24576 MB; index
 issue date 2026-10-16; 41 adjudicated entries, 0 provisional.
