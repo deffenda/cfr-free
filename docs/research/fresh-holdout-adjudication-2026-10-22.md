@@ -7,7 +7,7 @@ sections at the end) with no numeric threshold: 41 entries (33 answerable,
 removed (43 → 41 on 2026-10-23). The rulings below were the state on
 2026-10-22; the file was **not a gate** until the operator ratified it —
 selection made in chat 2026-10-22, recorded on issue #135 (opened
-2026-10-23) — effective with the 2026-10-23 gate commit (see "What the
+2026-10-22) — effective with the 2026-10-23 gate commit (see "What the
 operator still owns").
 
 **This records one thing and changes one thing.** It records the
@@ -212,7 +212,7 @@ rule; 19.2 is legacy-appeal-specific.
 These stayed **provisional** as written on 2026-10-22. The corpus does not
 decide them, and the repo's precedent keeps content questions with the
 operator. **All four were selected by the operator in chat on 2026-10-22
-and recorded on issue #135 (opened 2026-10-23)**; each entry's rationale
+and recorded on issue #135 (opened 2026-10-22)**; each entry's rationale
 in `test/fixtures/retrieval/queries.fresh.ts` carries its ruling as an
 `OPERATOR DECISION 2026-10-23` note (the date the note was written into
 the file): burial allowance is eligibility, not a rate (3.1704/3.1705),
@@ -276,7 +276,7 @@ note in the same form.
    answer the SAME query text differently (the holdout expects three
    provisions; the fresh entry expected one). **RESOLVED — selected by
    the operator in chat on 2026-10-22, recorded on issue #135 (opened
-   2026-10-23): a fresh quoted-phrase expectation is EVERY product FTS
+   2026-10-22): a fresh quoted-phrase expectation is EVERY product FTS
    result for the phrase.** This is a FRESH-SET rule,
    not a description of the dev set: dev's committed quoted-phrase
    expectations are heading-based (16 provisions for
@@ -318,7 +318,7 @@ sets no threshold).
    2026-10-22, recorded on issue #135, see §5.**
 2. Ratification, which is what makes the set gate-worthy. **Done for the
    fresh set — selected in chat 2026-10-22, recorded on issue #135
-   (opened 2026-10-23); the issue stays OPEN until its two remaining AC
+   (opened 2026-10-22); the issue stays OPEN until its two remaining AC
    land — the dev realignment, and the AC requiring the offline runner
    to exercise the fresh set in CI (no CI test evaluates the fresh set
    today)** (see the 2026-10-23 sections below).
@@ -358,7 +358,7 @@ against the copied index.
 - Removed two fresh entries, `"aid and attendance"` and `"special monthly compensation"`. Their query text is identical to burned holdout entries, so they were not unseen. Answerable count 35 → 33; total 43 → 41.
 - Caveat on quoted-phrase entries (ratified by the committee, 2026-10-23): under the all-match policy every quoted-phrase expectation equals the full FTS result set for that phrase. Those entries cannot discriminate ranking quality. Scoring is inclusion-based (`run.ts`), so a quoted entry fails only when none of its top 5 is in the expected set. Dropping one expected citation from a long list is not detected.
 - Disjointness is exact-string only. Near-duplicates are not caught. Example: fresh `"hearing impairment"` is a substring of dev `"evaluation of hearing impairment"`.
-- Changes carried in from earlier work, recorded here for the first time: the two rewrites (3.1, 3.3) in the fresh set, the two operator rewordings (burial allowance → eligibility, Purple Heart → copayment exemption), and the quoted-phrase expectation sets for `"service connection"`, `"individual unemployability"`, and `"hearing impairment"` expanded to the full FTS set. The expansions are the operator's 2026-10-22/23 all-match ruling; it is a FRESH-SET rule — the dev set's heading-based quoted-phrase expectations (16 for `"schedule of ratings"`, 1 for `"evaluation of hearing impairment"`) are unchanged, and their alignment to the FTS totals (18 and 2) is the pending re-measure. The quoted `"special monthly compensation"` entry was also removed (see the first bullet of this section).
+- Changes carried in from earlier work, recorded here for the first time: the two rewrites (3.1, 3.3), whose entries were later removed as burned-holdout duplicates (so no cross-check rewrite survives in the set); the two operator rewordings that do survive (burial allowance → eligibility, Purple Heart → copayment exemption); and the quoted-phrase expectation sets for `"service connection"`, `"individual unemployability"`, and `"hearing impairment"` expanded to the full FTS set. The expansions are the operator's 2026-10-22/23 all-match ruling; it is a FRESH-SET rule — the dev set's heading-based quoted-phrase expectations (16 for `"schedule of ratings"`, 1 for `"evaluation of hearing impairment"`) are unchanged, and their alignment to the FTS totals (18 and 2) is the pending re-measure. The quoted `"special monthly compensation"` entry was also removed (see the first bullet of this section).
 - Expected lists in the quoted-phrase entries are string-sorted, not numerically sorted. Scoring is set-based, so this has no runtime effect.
 
 ### Handoff state (2026-10-23)
@@ -416,11 +416,10 @@ Housekeeping for the docs round that records this (`chore/docs-m3-baseline`):
 the stale counts the handoff names at `ROADMAP.md:355` and
 `docs/research/retrieval-residuals-2026-10-21.md:12-17` are corrected
 there. The handoff's "final SHA needs its own review" was reported
-satisfied at merge time (APPROVE at `f4b7228`), but no canonical artifact
-of that review exists — PR #141's body records the review of `05d34a3`
-and says a fresh review was required at `f4b7228`, and the journal has no
-entry — so an audit should treat it as an unverified claim, recorded here
-as a process gap. Still open and NOT part of
+satisfied at merge time, but no canonical artifact of that review exists —
+PR #141's body records the review of `05d34a3` and says a fresh review was
+required at `f4b7228`, and the journal has no entry — so an audit should
+treat it as an unverified claim, recorded here as a process gap. Still open and NOT part of
 this measurement: the dev quoted-phrase re-measure saved outside the repo
 (`$TMPDIR/opencode/dev-quoted-phrase-edits.md`) — it needs its own
 re-measure and record before it can land.

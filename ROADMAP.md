@@ -354,13 +354,13 @@ expert adjudication before it gates anything, and read exactly once.
 **The fresh holdout is WRITTEN, ADJUDICATED, RATIFIED and GATED (PR #141,
 `6f459ec`, 2026-10-23).** `test/fixtures/retrieval/queries.fresh.ts` carries
 41 queries (33 answerable, 8 no-answer). The original 43 were written on
-2026-10-21 before any retriever run, but two surviving queries were later
-rewritten on corpus evidence (the cross-check, §3.1/§3.3 of the
-adjudication record) and two were reworded by operator ruling (burial
-allowance, Purple Heart); two of the 43 were removed on 2026-10-23
-because their query text duplicated burned-holdout entries, so they were
-not unseen
-(`"aid and attendance"`, `"special monthly compensation"`). Two committee
+2026-10-21 before any retriever run. The cross-check rewrote two queries
+(§3.1/§3.3 of the adjudication record) and both entries were later removed
+on 2026-10-23 as burned-holdout duplicates — their query text duplicated
+burned-holdout entries, so they were not unseen
+(`"aid and attendance"`, `"special monthly compensation"`). The only
+query-text changes the surviving 41 carry are two operator rewordings
+(burial allowance, Purple Heart). Two committee
 members adjudicated every entry against the corpus, blind to the
 retriever's output, and the rulings were cross-checked against each other
 and against the corpus
@@ -379,7 +379,7 @@ with per-token receipts and positive controls.
 cannot settle (burial-allowance wording, MST scope, NSC scope, and the
 quoted-phrase POLICY — §5 of the adjudication record) were selected by
 the operator in chat on 2026-10-22 and recorded on issue #135 (opened
-2026-10-23), each as an `OPERATOR DECISION 2026-10-23` note in the
+2026-10-22), each as an `OPERATOR DECISION 2026-10-23` note in the
 entry's rationale: burial allowance is eligibility, not a rate
 (3.1704/3.1705); MST is read as service connection (3.304/3.309); NSC
 stays broad (3.303/3.309); and a quoted phrase expects EVERY product FTS
