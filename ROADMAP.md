@@ -388,10 +388,11 @@ result for the phrase. The Purple Heart rewording (§4.1 — the corpus
 settled the dispute, the operator owned the final wording) was recorded
 the same way: the query asks the copayment exemption the corpus actually
 holds (17.108). That last rule is FRESH-SET-ONLY for now: issue #135's
-AC require the same policy on the dev set too, and two of the issue's AC
-remain open — that dev realignment, and the AC requiring the offline
-runner to exercise the fresh set in CI (no CI test evaluates the fresh
-set today; `test/retrieval-eval.test.ts` asserts its structure only).
+AC require the same policy on the dev set too, and one of the issue's AC
+remains open — that dev realignment. The other AC (the offline runner
+exercising the fresh set in CI) landed: `test/retrieval-eval.test.ts`
+pushes all 41 entries through the runner against the hermetic seeded
+corpus, with no numeric threshold.
 The dev set's committed quoted-phrase expectations are heading-based —
 16 provisions for `"schedule of ratings"`, 1 for
 `"evaluation of hearing impairment"` — where the product FTS totals are
