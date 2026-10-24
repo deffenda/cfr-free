@@ -210,7 +210,11 @@ provenance carries the same receipt. Reports written before the receipt field
 existed record none, and the runner prints `unknown` for an index built
 before it — such runs are comparable only among themselves and by issue
 date; comparability across the cutover starts at the first receipt-bearing
-rebuild, not retroactively. The digest definition is part of the contract:
+rebuild, not retroactively. One stale-receipt path remains: a rebuild
+performed by a build that predates the receipt writes only the meta keys it
+knows, so the previous receipt stays behind while the rows move on — re-sync
+with a receipt-bearing build before citing one. The digest definition is
+part of the contract:
 changing `hashContent`, `corpusHash` or their framing changes every future
 receipt, so such a change must be stated in the change request alongside the
 receipt it replaces.
