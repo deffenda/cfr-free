@@ -40,7 +40,7 @@ Applies to every repository in the fleet. It is generated from one source; repos
 ## Repository-specific
 
 - Public repository: every file here, and anything an agent writes into it (code, comments, commit messages, pull request text), is world-readable. Never add host names, user names, IP addresses, keys, tokens or other real data.
-- Operator: `@deffenda` is the sole CODEOWNER and holds merge, tag, money and publishing authority. Operator instructions given in chat supersede these files for the current run.
+- Operator: `@deffenda` is the sole CODEOWNER and holds tag, money and publishing authority; merge follows the Merge bullet below. Operator instructions given in chat supersede these files for the current run.
 - Authority: `docs/SPEC.md` is the design authority; `CONTRIBUTING.md`, the workflows in `.github/workflows/` and the scripts win on technical build, test and CI content. Do not edit `docs/SPEC.md` so that it contradicts the implementation; change both in the same reviewed diff.
 - Validation: `npm run ci` (format check, lint, typecheck, coverage tests, build, `scan:audit`). While developing, run the one file you changed (`npx vitest run test/<file>`), not the full gate. A docs-only change still needs the four tests that read docs: `markdown-tables`, `no-conflict-markers`, `openapi-conformance` and `install-paths`.
 - Workflow files: run `npm run lint:actions` (`actionlint`, install with `brew install actionlint` or `go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12`) before pushing any change under `.github/workflows/`. CI cannot report an invalid workflow file: GitHub answers it with a failed run that has zero jobs, so no check ever reports and the pull request cannot go green. It is deliberately not part of `npm run ci`.
