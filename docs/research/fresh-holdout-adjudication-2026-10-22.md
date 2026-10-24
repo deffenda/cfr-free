@@ -321,10 +321,10 @@ sets no threshold).
    2026-10-22, recorded on issue #135, see §5.**
 2. Ratification, which is what makes the set gate-worthy. **Done for the
    fresh set — selected in chat 2026-10-22, recorded on issue #135
-   (opened 2026-10-22); the issue stays OPEN until its two remaining AC
-   land — the dev realignment, and the AC requiring the offline runner
-   to exercise the fresh set in CI (no CI test evaluates the fresh set
-   today)** (see the 2026-10-23 sections below).
+   (opened 2026-10-22); the issue stays OPEN until its one remaining AC
+   lands — the dev realignment. The runner AC landed: CI now exercises
+   the fresh set through the runner against the hermetic seeded corpus**
+   (see the 2026-10-23 sections below).
 3. Whether to replace `NSC` with a stronger near-miss. **Open** — the
    ruling kept the entry broad, which leaves the weak-test observation
    (§5.3) standing.
@@ -348,12 +348,14 @@ prints the full report — totals, MRR, no-answer violations, provenance
 and the per-category recall@5 line. The hermetic path —
 `npx vitest run test/retrieval-eval.test.ts`, under the repo's standard
 disclosed `node_modules` symlink from a checkout at the same commit —
-re-runs only the structural gate and prints no metrics. The
-per-category exact-citation cells in the measured-baseline section below
-came from a one-off probe over `evaluateSet` in
-`test/fixtures/retrieval/run.ts` — a throwaway script, not a committed
-entry point — so reproducing them offline means rebuilding that probe
-under vitest; no committed command prints those cells.
+re-runs the structural gate and exercises the fresh set through the
+runner against the hermetic seeded corpus; it prints no metrics, and its
+seeded-corpus outcomes are not the baseline (the baseline needs the real
+corpus index). The per-category exact-citation cells in the
+measured-baseline section below came from a one-off probe over
+`evaluateSet` in `test/fixtures/retrieval/run.ts` — a throwaway script,
+not a committed entry point — so reproducing them offline means rebuilding
+that probe under vitest; no committed command prints those cells.
 
 The two member findings are recorded verbatim in the review record for
 this round; the corpus receipts quoted above (the 0-hit probes, the FTS
