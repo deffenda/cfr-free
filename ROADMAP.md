@@ -90,8 +90,8 @@ establish the privacy properties of a separately chosen AI client.
    except a clean automatic merge of the base branch, which keeps the
    review.
 5. Authentication, schema migrations, CI/release changes and changes to the
-   merge rule itself need the operator's sign-off before merge; the first
-   three are AGENTS.md's merge floor, and merging follows the merge rule
+   merge rule itself need the operator's sign-off before merge; all four
+   are AGENTS.md's merge floor, and merging follows the merge rule
    there. Publication and paid work need their separate authorization.
    Track dependencies explicitly; green checks do not authorize
    scope growth.
@@ -439,7 +439,8 @@ adjudicate the 39 provisional expectations — INCLUDING their ORDER. **DONE
 2026-10-21 by committee** (the content and the order were both adjudicated and
 cross-checked against the corpus); what remains is the operator's expert
 ratification of that result — the 39 provisional entries are 25 dev + 14
-holdout across the two 50-entry frozen sets, and the 2026-10-22 operator
+holdout across the 50-entry frozen benchmark (30 dev + 20 holdout), and
+the 2026-10-22 operator
 decisions recorded on issue #135 ratified the FRESH set as a gate after
 review, not this result. The
 order matters more than it looks: measured on the frozen 50, 42 answerable
