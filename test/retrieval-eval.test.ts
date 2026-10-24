@@ -11,6 +11,7 @@ import {
 } from './fixtures/retrieval/run.js';
 import { DEV_QUERIES, type RetrievalQuery } from './fixtures/retrieval/queries.dev.js';
 import { HOLDOUT_QUERIES } from './fixtures/retrieval/queries.holdout.js';
+import { FRESH_QUERIES } from './fixtures/retrieval/queries.fresh.js';
 
 /**
  * The runner's own correctness, against a SEEDED temporary index — the
@@ -188,6 +189,23 @@ describe('retrieval evaluation runner (M3)', () => {
     ] as const) {
       expect([...categories]).toContain(required);
     }
+  });
+
+  it('gates the fresh set structurally, with no numeric threshold', () => {
+    const fresh = queriesFor('fresh');
+    expect(fresh).toBe(FRESH_QUERIES);
+    expect(fresh.length).toBe(41);
+    const frozen = new Set([...DEV_QUERIES, ...HOLDOUT_QUERIES].map((q) => q.query));
+    const freshQueries = new Set(fresh.map((q) => q.query));
+    expect(freshQueries.size).toBe(fresh.length);
+    for (const query of fresh) {
+      expect(frozen.has(query.query)).toBe(false);
+      expect(query.rationale.length).toBeGreaterThan(0);
+      expect(query.sourceDate).toBe('2026-10-16');
+      expect(query.adjudication).toBe('adjudicated');
+    }
+    expect(fresh.filter((query) => query.expected.length > 0)).toHaveLength(33);
+    expect(fresh.filter((query) => query.expected.length === 0)).toHaveLength(8);
   });
 
   it('selects a set by name', () => {
