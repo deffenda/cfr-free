@@ -365,8 +365,9 @@ members adjudicated every entry against the corpus, blind to the
 retriever's output, and the rulings were cross-checked against each other
 and against the corpus
 (`docs/research/fresh-holdout-adjudication-2026-10-22.md`). The
-cross-check found seven wrong-or-incomplete expectations and rewrote two
-quoted-phrase queries — one whose string occurs nowhere in the corpus,
+cross-check landed seven expectation amendments — an eighth ruling (§3.3
+of the record) was recorded but never applied — and rewrote two
+quoted-phrase queries: one whose string occurs nowhere in the corpus,
 one whose string made the entry under-specified for its own expectation;
 it also **overrode a
 member** on one point (the corpus showed the disputed phrase IS exact), and

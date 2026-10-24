@@ -36,13 +36,15 @@ never opened in place.
 | Blind to            | the retriever's output; each other's rulings; the prior adjudication's answers                               |
 | Measured afterwards | the adjudicated set, once, with the repo's own runner                                                        |
 
-The cross-check found **real defects in the author-written set** — seven
-entries whose expectations were wrong or incomplete, and two
+The cross-check found **real defects in the author-written set**: seven
+expectation amendments that landed in the file, an eighth expectation
+ruling (§3.3) recorded in this document but never applied, and two
 quoted-phrase queries rewritten (one whose string occurs nowhere in the
 corpus; one whose string made the entry under-specified for its own
 expectation). Git is the receipt: `git diff 1de9b90 1e9dee7 --
 test/fixtures/retrieval/queries.fresh.ts` shows exactly seven `expected:`
-changes and two `query:` changes. Both members found the
+changes and two `query:` changes — the seven landed amendments, not the
+§3.3 ruling. Both members found the
 no-answer set clean, independently and with receipts.
 
 ## 2. The no-answer set: 8 of 8 confirmed
@@ -339,13 +341,18 @@ CFR_INDEX_PATH=/tmp/eval-index.sqlite npx tsx test/fixtures/retrieval/run.ts fre
 
 Note on running this without installs: `tsx` is not a repo dependency, so
 `npx tsx` fetches it from the registry and fails offline in a worktree
-without `node_modules` (installs are forbidden there). The hermetic path
-is vitest — a devDependency — under the repo's standard disclosed
-`node_modules` symlink from a checkout at the same commit:
-`npx vitest run test/retrieval-eval.test.ts`. The per-category table
-in the measured-baseline section below was re-derived that way, through
-a one-off probe over `evaluateSet`
-in `test/fixtures/retrieval/run.ts`, not through `tsx`.
+without `node_modules` (installs are forbidden there). Be precise about
+what each path reproduces. The `run.ts fresh` command above (online)
+prints the full report — totals, MRR, no-answer violations, provenance
+and the per-category recall@5 line. The hermetic path —
+`npx vitest run test/retrieval-eval.test.ts`, under the repo's standard
+disclosed `node_modules` symlink from a checkout at the same commit —
+re-runs only the structural gate and prints no metrics. The
+per-category exact-citation cells in the measured-baseline section below
+came from a one-off probe over `evaluateSet` in
+`test/fixtures/retrieval/run.ts` — a throwaway script, not a committed
+entry point — so reproducing them offline means rebuilding that probe
+under vitest; no committed command prints those cells.
 
 The two member findings are recorded verbatim in the review record for
 this round; the corpus receipts quoted above (the 0-hit probes, the FTS
