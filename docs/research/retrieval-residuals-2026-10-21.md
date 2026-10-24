@@ -127,7 +127,12 @@ chat on 2026-10-22 and recorded on issue #135; it was applied to the dev set
 in this round (2026-10-24). The dev set's two quoted-phrase entries were
 heading-based; they now carry the all-match sets.
 
-**Expectation changes** — the only edits to `test/fixtures/retrieval/queries.dev.ts`:
+**Expectation changes** — the expectation and rationale edits to
+`test/fixtures/retrieval/queries.dev.ts` (this round also updated the
+file's header and `adjudicated` doc comments: `adjudicated` now covers
+operator decisions recorded on issue #135 alongside the committee's
+2026-10-21 ruling, because the two realigned entries rest on the
+operator's policy decision):
 
 | query                                | before | after | added                           |
 | ------------------------------------ | ------ | ----- | ------------------------------- |
@@ -154,8 +159,16 @@ opened):
    The surface matters: a LIKE over the body `text` column alone returns 4
    and 1, and a LIKE over the heading alone returns exactly the OLD 16 and 1
    — the 16 heading-based citations match the HEADING, while `3.321`,
-   `3.383` and `Appendix A to Part 4` carry the phrase in the body. Only the
-   three-column surface is comparable to the product's FTS hit set.
+   `3.383` and `Appendix A to Part 4` carry the phrase in the body. For
+   these two phrases the three-column LIKE agreed with the product's FTS
+   set exactly, which makes it a valid CROSS-CHECK here — not a
+   substitute: porter stemming diverges from substring matching on this
+   corpus, as the fresh set already records (`"hearing impairment"`
+   reaches 16 by FTS and 14 by LIKE; `"service connection"` 225 by FTS
+   and 60 by LIKE — `test/fixtures/retrieval/queries.fresh.ts`, and §3.4
+   of `docs/research/fresh-holdout-adjudication-2026-10-22.md`). Issue
+   #135's rule stands: do not silently substitute one matcher for
+   another.
 
 **Re-measured dev baseline** (the runner, `test/fixtures/retrieval/run.ts`,
 against the 2026-10-16 index copy): 30 queries, 29 answerable, 1 no-answer —

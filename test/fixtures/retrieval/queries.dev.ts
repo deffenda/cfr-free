@@ -270,7 +270,7 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
       'Appendix A to Part 4',
     ],
     rationale:
-      'the all-match set for the phrase: every provision whose text carries "schedule of ratings" (18 by product FTS, 18 by LIKE); OPERATOR DECISION 2026-10-23 — all-match policy selected in chat 2026-10-22 and recorded on issue #135, applied to the dev set 2026-10-24',
+      'the all-match set for the phrase: every provision whose heading or body carries "schedule of ratings" — heading hits 16, body hits 4, union 18 — the same set as 18 by product FTS and by LIKE over citation/heading/text; OPERATOR DECISION 2026-10-23 — all-match policy selected in chat 2026-10-22 and recorded on issue #135, applied to the dev set 2026-10-24',
     sourceDate: SOURCE_DATE,
     adjudication: 'adjudicated',
   },
