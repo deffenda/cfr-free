@@ -528,10 +528,16 @@ describe('syncIndex change reporting', () => {
     const deps = makeDeps(makeFetch({ issueDate: '2026-10-16', xml: DUPLICATE_CITATION_XML }));
     try {
       await expect(syncIndex(deps)).rejects.toThrow(/UNIQUE constraint failed/i);
+      // The UNIQUE-constraint failure fires in the INSERT loop, before the
+      // meta upserts run: the failed rebuild leaves neither rows nor meta
+      // behind.
       expect(deps.store.countSections()).toBe(0);
       expect(deps.store.getMeta('issue_date')).toBeNull();
       expect(deps.store.getMeta('last_changes')).toBeNull();
       expect(deps.store.getMeta('synced_at')).toBeNull();
+      // The receipt (SPEC §4) is part of "no state at all": a failed first
+      // rebuild must not leave one behind either.
+      expect(deps.store.getMeta('corpus_hash')).toBeNull();
     } finally {
       deps.temp.cleanup();
     }
