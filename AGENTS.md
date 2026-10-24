@@ -14,7 +14,7 @@ Applies to every repository in the fleet. It is generated from one source; repos
 
 ### Changes
 - One bounded task per change request. Stay in scope: no drive-by edits and no agent scratch files committed.
-- Run the repository's validation (named below) before pushing.
+- Run the repository's validation (named below) before pushing. When it passes, commit, push a branch (never the default branch) and open the change request yourself, within the limits below; no hand-off to a person is needed. Supervised runs (for example SureForge) are optional: use one when the owner asks or the task needs a contract-bound run.
 - A change request merges when a fresh-context review of the exact head has no unresolved P0 or P1 findings and every required check is green. A new commit needs a new review; a clean automatic merge of the base branch keeps the review.
 - At most three open non-draft change requests per repository. While the fleet backlog check reports a backlog, finish and land existing work and start nothing new.
 - Fix a finding that takes minutes in the current change; fold the rest into an existing tracking issue. A session closes at least as many issues as it opens on its own initiative; tickets the owner asks for in chat are separate.
@@ -28,6 +28,7 @@ Applies to every repository in the fleet. It is generated from one source; repos
 ### Layout
 - AGENTS.md is the canonical agent file; where a CLAUDE.md exists it only imports it. Keep this file under 200 lines.
 - Name this repository's validation command, merge rule and changelog rule outside the markers. Rules kept outside the repository are not visible here: if a task seems to need one, ask rather than guess.
+- Rules any adopter needs live in SureForge and in this core; rules that name a machine, account or model live in the operator's own configuration repository, from which each tool's settings are meant to be generated so every agent on every machine follows the same rules.
 - Shared skills are installed per machine from the fleet skills hub. Name the ones this repository expects below.
 
 ### Forge: GitHub
