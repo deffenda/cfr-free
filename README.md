@@ -222,7 +222,7 @@ node dist/cli.js version                  # -> 0.2.1
 # 2. network: build the index (~2-3 MB, ~5 s)
 node dist/cli.js sync
 # -> synced 2953 sections + 17 appendices (issue date 2026-10-16; ...
-#    9 provisions contain image content not included; 2134 ms)
+#    9 provisions contain image content not included; 2134 ms; corpus hash ...)
 
 # 3. HTTP read (no network from here on)
 CFR_PORT=8791 node dist/cli.js serve & SERVER_PID=$!

@@ -202,8 +202,11 @@ export async function syncIndex(deps: SyncDeps): Promise<SyncReport> {
 
   // The corpus receipt (SPEC §4): a sha256 over the whole corpus's
   // per-provision content hashes. It is set on the SAME meta object the
-  // rebuild upserts, so the receipt rides the rebuild's COMMIT — an index
-  // can never carry a receipt that does not describe it.
+  // rebuild upserts, so the receipt rides the rebuild's COMMIT — this
+  // rebuild path cannot commit rows without the receipt that describes
+  // them (meta keys it does not write are left as they are, so a rebuild
+  // performed by a binary that predates the receipt would leave a stale
+  // one behind; SPEC §4 scopes comparability to receipt-bearing rebuilds).
   meta.corpus_hash = corpusHash(newHashes);
 
   // The baseline snapshot (previous issue date, previous parser, outgoing

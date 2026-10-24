@@ -109,5 +109,24 @@ describe('corpusHash', () => {
         ]),
       ),
     ).toBe('9ff58a42f2b5f4aa26c2bcbc961e9eecd2595694040becdea0410d144a53879c');
+    // Collation: citations compare by UTF-16 code unit, so '4.10' sorts
+    // BEFORE '4.9'. A locale/numeric-aware comparator ("cleanup") changes
+    // this constant and must fail here.
+    expect(
+      corpusHash(
+        new Map([
+          ['4.9', h1],
+          ['4.10', h2],
+        ]),
+      ),
+    ).toBe('2501d82b439ff2632f7da7f7f1db1426bbae62502e462f09f71c958276e66b27');
+  });
+
+  it('pins hashContent itself: text, NUL, heading — a known-answer constant', () => {
+    // SPEC §4 makes hashContent's framing contractual; this constant fails
+    // if the separator, the field order or the field set ever changes.
+    expect(
+      hashContent('Diagnosis of mental disorders.', '4.125 Diagnosis of mental disorders.'),
+    ).toBe('cad4974f374f2e126d1d16a167656d2f984931d8c7ac8c08afcc61e62876020d');
   });
 });
