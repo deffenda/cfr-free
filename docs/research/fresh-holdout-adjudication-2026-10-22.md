@@ -5,8 +5,10 @@ below; **as of 2026-10-23 the set is a structural gate** (see the 2026-10-23
 sections at the end) with no numeric threshold: 41 entries (33 answerable,
 8 no-answer), all `adjudicated`, after two burned-holdout duplicates were
 removed (43 → 41 on 2026-10-23). The rulings below were the state on
-2026-10-22; the file was **not a gate** until the operator ratified it on
-2026-10-23 on issue #135 (see "What the operator still owns").
+2026-10-22; the file was **not a gate** until the operator ratified it —
+selection made in chat 2026-10-22, recorded on issue #135 (opened
+2026-10-23) — effective with the 2026-10-23 gate commit (see "What the
+operator still owns").
 
 **This records one thing and changes one thing.** It records the
 adjudication of the expectations in `test/fixtures/retrieval/queries.fresh.ts`
@@ -34,9 +36,13 @@ never opened in place.
 | Blind to            | the retriever's output; each other's rulings; the prior adjudication's answers                               |
 | Measured afterwards | the adjudicated set, once, with the repo's own runner                                                        |
 
-The cross-check found **real defects in the author-written set** — five
-entries where the expectation was the wrong object, and one where the
-query did not correspond to the corpus at all. Both members found the
+The cross-check found **real defects in the author-written set** — seven
+entries whose expectations were wrong or incomplete, and two
+quoted-phrase queries rewritten (one whose string occurs nowhere in the
+corpus; one whose string made the entry under-specified for its own
+expectation). Git is the receipt: `git diff 1de9b90 1e9dee7 --
+test/fixtures/retrieval/queries.fresh.ts` shows exactly seven `expected:`
+changes and two `query:` changes. Both members found the
 no-answer set clean, independently and with receipts.
 
 ## 2. The no-answer set: 8 of 8 confirmed
@@ -52,7 +58,11 @@ rather than a broken matcher.
 
 **The no-answer set needs no change.**
 
-## 3. The five entries the cross-check changed (and one claim it rejected)
+## 3. The six §3 entries: five changed, one rejected
+
+(The full-set count — seven expectation amendments and two query
+rewrites across §3–§5 — is in the introduction; this section is the §3
+part of it.)
 
 ### 3.1 `"attendance allowance for veterans"` — REJECTED as written
 
@@ -64,11 +74,10 @@ quoted-phrase query whose string is not a phrase in the corpus.
 _Both members found this independently_ (A: "the quoted string occurs 0
 times"; B: "0 LIKE hits, 0 FTS phrase hits … miscategorized").
 
-**Ruling:** the entry is rewritten as a natural-phrasing query for the
-same topic, with the expectation that the corpus's own phrase carries.
-The quoted-phrase category requires the quoted string to BE a phrase of
-the corpus; three other quoted-phrase entries in the set are affected by
-the same rule and are re-checked below.
+**Ruling:** the entry is rewritten to the corpus's own phrase
+(`"aid and attendance"`, 31 provisions) — still a quoted-phrase query,
+but one whose string IS a phrase of the corpus. (The entry was later
+removed at `6f459ec` as a burned-holdout duplicate.)
 
 ### 3.2 `"individual unemployability"` — a member's claim, checked and REJECTED
 
@@ -89,11 +98,18 @@ ruling, and the cross-check is where it is caught.
 
 The quoted string returns **0** `LIKE` hits, but the FTS phrase match
 returns **3** provisions: **3.350, 4.71a, 4.73**. (The phrase without
-"rate" returns 8.) The original expectation listed 3.350 alone, so the
+"rate" reaches 16 provisions by FTS and 16 by `LIKE`, verified 2026-10-23
+against the index; the cross-check's count of 8 did not reproduce and is
+superseded.) The original expectation listed 3.350 alone, so the
 set was under-specified for its own query.
 
 **Ruling:** the expectation becomes all three provisions the phrase
-actually reaches, and the query is reworded to the corpus's phrase.
+actually reaches, and the query is reworded to the corpus's phrase. (The
+query rewrite reached the file at `1e9dee7`; the expectation change did
+not — the entry still carries `expected: ['3.350']` there under its
+rewritten query `"special monthly compensation"` — and the entry was
+removed at `6f459ec` as a burned-holdout duplicate, so this expectation
+ruling is recorded here only.)
 
 ### 3.4 `"hearing impairment"` — incomplete
 
@@ -102,7 +118,8 @@ The phrase reaches 16 provisions by FTS and 14 by LIKE (verified
 not reproduce and is superseded), of which the three that answer the
 question are **4.85** (Evaluation of hearing impairment), **4.86**
 (Exceptional patterns) and **4.87** (Schedule of ratings—ear). The
-original expectation had only 4.85.
+original expectation listed 4.85 and 4.86 (git receipt: `expected:
+['4.85', '4.86']` at `1de9b90`); 4.87 was the missing one.
 
 **Ruling:** amended to all three.
 
@@ -165,7 +182,9 @@ the PTSD service-connection paragraph (f); 3.309 carries the PTSD
 presumption.
 
 **Ruling:** amended to `[3.304, 3.309]` — the two provisions that carry
-PTSD service-connection text. 3.310 is dropped.
+PTSD service-connection text. 3.310 is dropped. (For the change count:
+this needed no edit — the entry already carried `[3.304, 3.309]` at
+creation (`1de9b90`), so only B's proposed 3.310 was rejected.)
 
 ### 4.3 `BVA review` — both amendments point at the wrong thing
 
@@ -188,15 +207,18 @@ rule; 19.2 is legacy-appeal-specific.
 
 These stayed **provisional** as written on 2026-10-22. The corpus does not
 decide them, and the repo's precedent keeps content questions with the
-operator. **All were ruled by the operator on 2026-10-23 (issue #135)**;
-each entry's rationale in `test/fixtures/retrieval/queries.fresh.ts`
-carries its ruling as an `OPERATOR DECISION 2026-10-23` note: burial
-allowance is eligibility, not a rate (3.1704/3.1705), MST is read as
-service connection (3.304/3.309), NSC stays broad (3.303/3.309), the
-Purple Heart query asks the copayment exemption the corpus holds
-(17.108), and a quoted-phrase expectation is every product FTS result for
-the phrase (item 4 below — the readings for `"service connection"` (225),
-`"individual unemployability"` (11) and `"hearing impairment"` (16)).
+operator. **All four were selected by the operator in chat on 2026-10-22
+and recorded on issue #135 (opened 2026-10-23)**; each entry's rationale
+in `test/fixtures/retrieval/queries.fresh.ts` carries its ruling as an
+`OPERATOR DECISION 2026-10-23` note (the date the note was written into
+the file): burial allowance is eligibility, not a rate (3.1704/3.1705),
+MST is read as service connection (3.304/3.309), NSC stays broad
+(3.303/3.309), and a quoted-phrase expectation is every product FTS
+result for the phrase (item 4 below — the readings for `"service
+connection"` (225), `"individual unemployability"` (11) and
+`"hearing impairment"` (16)). The Purple Heart rewording (§4.1, where the
+corpus settled the dispute and the operator owned the wording) carries a
+note in the same form.
 
 1. **`burial allowance rates`** — the corpus has **no rate**. § 3.1704
    and § 3.1705 authorize "the maximum burial allowance specified in
@@ -229,8 +251,8 @@ the phrase (item 4 below — the readings for `"service connection"` (225),
    quoted-phrase query expect _every_ provision carrying the phrase, or
    only the canonical one? The two readings differ by an order of
    magnitude, so as written the set could not be used for measurement
-   until this was settled (it was, on 2026-10-23 — see the end of this
-   item).
+   until this was settled (it was — selected in chat 2026-10-22, recorded
+   on issue #135; see the end of this item).
 
    **There is no settled precedent to follow, because the two existing sets
    already answer it differently:**
@@ -248,9 +270,10 @@ the phrase (item 4 below — the readings for `"service connection"` (225),
    `"aid and attendance"` (since removed as a burned-holdout duplicate)
    illustrated the disagreement most sharply — the two frozen sets would
    answer the SAME query text differently (the holdout expects three
-   provisions; the fresh entry expected one). **RESOLVED by operator
-   ruling 2026-10-23 (issue #135): a fresh quoted-phrase expectation is
-   EVERY product FTS result for the phrase.** This is a FRESH-SET rule,
+   provisions; the fresh entry expected one). **RESOLVED — selected by
+   the operator in chat on 2026-10-22, recorded on issue #135 (opened
+   2026-10-23): a fresh quoted-phrase expectation is EVERY product FTS
+   result for the phrase.** This is a FRESH-SET rule,
    not a description of the dev set: dev's committed quoted-phrase
    expectations are heading-based (16 provisions for
    `"schedule of ratings"`, 1 for `"evaluation of hearing impairment"`),
@@ -265,29 +288,34 @@ the phrase (item 4 below — the readings for `"service connection"` (225),
 ## 6. What changed in the file
 
 `test/fixtures/retrieval/queries.fresh.ts` — the expectations and
-rationales of the entries above, and the `adjudication` markers. **No
-query text was changed except the two rewritten ones** (3.1 and 3.3; §3.2's
-claim was rejected, so its query stands as written), because a
-quoted-phrase query whose string is not a phrase of the corpus cannot be
-adjudicated as a quoted-phrase query; rewording is what makes it a valid
-instance of its category. Two further query rewordings were the operator's
-2026-10-23 rulings, carried in the gate commit: burial allowance →
-eligibility and Purple Heart → copayment exemption (§5 and §4.1).
+rationales of the entries above, and the `adjudication` markers. **Four
+entries' query text changed in all. Two were rewritten by the cross-check**
+(3.1 and 3.3 — a quoted-phrase query whose string is not a phrase of the
+corpus cannot be adjudicated as a quoted-phrase query; rewording is what
+makes it a valid instance of its category; §3.2's claim was rejected, so
+its query stands as written) **and two were reworded by the operator's
+2026-10-23 rulings**, carried in the gate commit: burial allowance →
+eligibility and Purple Heart → copayment exemption (§5.1 and §4.1).
 
 **As written on 2026-10-22, the set was not a gate.** It became a
 structural gate on 2026-10-23 (see the section at the end). The original
 plan recorded here was that it would become one when the operator ratified
 the four §5 decisions, at which point the `adjudication` markers could
 move from `provisional` to `adjudicated` and the set could gate a
-threshold-bearing round — which is what happened.
+threshold-bearing round once a threshold was separately ratified. What
+happened on 2026-10-23 is the ratification, the marker move, and the
+structural gate — no threshold-bearing round has run (the baseline below
+sets no threshold).
 
 ## 7. What the operator still owns
 
 1. The four §5 content decisions (burial-allowance wording, MST scope,
-   NSC scope, and the quoted-phrase policy). **Done — ruled 2026-10-23,
-   see §5.**
-2. Ratification, which is what makes the set gate-worthy. **Done —
-   ratified 2026-10-23 on issue #135** (see the 2026-10-23 sections below).
+   NSC scope, and the quoted-phrase policy). **Done — selected in chat
+   2026-10-22, recorded on issue #135, see §5.**
+2. Ratification, which is what makes the set gate-worthy. **Done for the
+   fresh set — selected in chat 2026-10-22, recorded on issue #135
+   (opened 2026-10-23); the issue stays OPEN until its dev realignment
+   AC lands** (see the 2026-10-23 sections below).
 3. Whether to replace `NSC` with a stronger near-miss. **Open** — the
    ruling kept the entry broad, which leaves the weak-test observation
    (§5.3) standing.
@@ -302,6 +330,15 @@ changes no roadmap decision.
 cp ~/.cfr-free/index.sqlite /tmp/eval-index.sqlite   # never the live index
 CFR_INDEX_PATH=/tmp/eval-index.sqlite npx tsx test/fixtures/retrieval/run.ts fresh
 ```
+
+Note on running this without installs: `tsx` is not a repo dependency, so
+`npx tsx` fetches it from the registry and fails offline in a worktree
+without `node_modules` (installs are forbidden there). The hermetic path
+is vitest — a devDependency — under the repo's standard disclosed
+`node_modules` symlink from a checkout at the same commit:
+`npx vitest run test/retrieval-eval.test.ts`. The per-category table
+above was re-derived that way, through a one-off probe over `evaluateSet`
+in `test/fixtures/retrieval/run.ts`, not through `tsx`.
 
 The two member findings are recorded verbatim in the review record for
 this round; the corpus receipts quoted above (the 0-hit probes, the FTS

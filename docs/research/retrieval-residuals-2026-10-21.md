@@ -39,7 +39,7 @@ could gate anything, an expert had to:
 is `docs/research/fresh-holdout-adjudication-2026-10-22.md`. Item 3 was
 done with recorded DEVIATIONS: query wording WAS changed — two entries
 rewritten by the cross-check (§3.1 and §3.3) and two reworded by operator
-ruling (§4.1 and §5), all recorded in the adjudication record. Item 4 has
+ruling (§4.1 and §5.1), all recorded in the adjudication record. Item 4 has
 NOT happened: no threshold-bearing evaluation has run, and the
 2026-10-23 baseline is explicitly non-threshold. How the "read exactly
 once" discipline counts non-threshold baseline reads is not stated

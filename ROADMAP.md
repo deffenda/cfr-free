@@ -361,8 +361,10 @@ members adjudicated every entry against the corpus, blind to the
 retriever's output, and the rulings were cross-checked against each other
 and against the corpus
 (`docs/research/fresh-holdout-adjudication-2026-10-22.md`). The
-cross-check found six wrong-or-incomplete expectations and one quoted-phrase
-query whose string occurs nowhere in the corpus; it also **overrode a
+cross-check found seven wrong-or-incomplete expectations and rewrote two
+quoted-phrase queries — one whose string occurs nowhere in the corpus,
+one whose string made the entry under-specified for its own expectation;
+it also **overrode a
 member** on one point (the corpus showed the disputed phrase IS exact), and
 both members were wrong on another (there is no "Purple Heart benefits"
 provision in Title 38 — all four Purple Heart mentions are eligibility
@@ -370,19 +372,23 @@ carve-outs). All eight no-answer candidates were confirmed out of corpus
 with per-token receipts and positive controls.
 
 **No entry stays `provisional`.** The four content questions the corpus
-cannot settle (burial-allowance wording, MST scope, NSC scope, the Purple
-Heart wording) and the quoted-phrase POLICY were ruled by the operator on
-2026-10-23 (issue #135), each recorded as an `OPERATOR DECISION 2026-10-23`
-note in the entry's rationale: burial allowance is eligibility, not a rate
+cannot settle (burial-allowance wording, MST scope, NSC scope, and the
+quoted-phrase POLICY — §5 of the adjudication record) were selected by
+the operator in chat on 2026-10-22 and recorded on issue #135 (opened
+2026-10-23), each as an `OPERATOR DECISION 2026-10-23` note in the
+entry's rationale: burial allowance is eligibility, not a rate
 (3.1704/3.1705); MST is read as service connection (3.304/3.309); NSC
-stays broad (3.303/3.309); the Purple Heart query asks the copayment
-exemption the corpus actually holds (17.108); and a quoted phrase expects
-EVERY product FTS result for the phrase. That last rule is FRESH-SET-ONLY
-for now: the dev set's committed quoted-phrase expectations are
-heading-based — 16 provisions for `"schedule of ratings"`, 1 for
-`"evaluation of hearing impairment"` — where the product FTS totals are 18
-and 2, so aligning dev to the rule is the still-uncommitted re-measure
-recorded in the adjudication record's handoff. The dev set and the burned
+stays broad (3.303/3.309); and a quoted phrase expects EVERY product FTS
+result for the phrase. The Purple Heart rewording (§4.1 — the corpus
+settled the dispute, the operator owned the final wording) was recorded
+the same way: the query asks the copayment exemption the corpus actually
+holds (17.108). That last rule is FRESH-SET-ONLY for now: issue #135's
+AC require the same policy on the dev set too, and that dev realignment
+is the issue's one open AC — the dev set's committed quoted-phrase
+expectations are heading-based — 16 provisions for `"schedule of
+ratings"`, 1 for `"evaluation of hearing impairment"` — where the
+product FTS totals are 18 and 2, so the aligning re-measure is still
+uncommitted and recorded in the adjudication record's handoff. The dev set and the burned
 holdout keep their own expectations byte-for-byte as committed (the
 burned holdout's curated quoted-phrase expectations remain a frozen
 regression set, not a policy carrier). With that ratification the set became a
