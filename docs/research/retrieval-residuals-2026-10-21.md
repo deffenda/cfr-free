@@ -2,23 +2,32 @@
 
 ## Status
 
-This is a measurement artifact for M3 items 2 and 3. The fresh set is **not
-adjudicated and is not a quality gate**. Its expectations must be reviewed by
-an expert before any threshold, ranking change, or release claim uses it. The
+This is a measurement artifact for M3 items 2 and 3, written 2026-10-21.
+**Updated 2026-10-23:** the fresh set is adjudicated and is a structural
+gate (no numeric threshold) since `6f459ec` — 41 entries, 33 answerable and
+8 no-answer, all `adjudicated`. The counts below marked "2026-10-21
+snapshot" are the set as it then stood and are kept as written; the current
+record is `docs/research/fresh-holdout-adjudication-2026-10-22.md`. The
 burned 2026-10-16 holdout remains a regression set only.
 
 ## Fresh holdout
 
-`test/fixtures/retrieval/queries.fresh.ts` contains 43 queries written before
-running the retriever: 35 answerable queries and 8 proposed no-answer cases.
-It is separate from `queries.dev.ts` and `queries.holdout.ts`. All 43 entries
-are marked `adjudication: 'provisional'`. The category tally is 6 bare
-citations + 5 display citations + 7 abbreviations + 12 natural-phrasing + 5
-quoted-phrase + 8 no-answer = 43.
+`test/fixtures/retrieval/queries.fresh.ts` was written before running the
+retriever (two queries were later rewritten on corpus evidence — both
+rewritten entries were then removed at `6f459ec` — and two reworded by
+operator ruling; see the adjudication record); it is separate from
+`queries.dev.ts` and `queries.holdout.ts`.
+**2026-10-21 snapshot:** 43 queries — 35 answerable and 8
+proposed no-answer cases — all marked `adjudication: 'provisional'`, with
+a category tally of 6 bare citations + 5 display citations + 7
+abbreviations + 12 natural-phrasing + 5 quoted-phrase + 8 no-answer = 43.
+**Current (2026-10-23):** 41 queries — 33 answerable and 8 no-answer, all
+`adjudicated`; two quoted-phrase entries were removed because their query
+text duplicated burned-holdout entries, so the quoted-phrase tally is now 3.
 
 The set intentionally includes bare and display citations, abbreviations,
-natural phrasing, quoted phrases, and out-of-corpus candidates. Before it can
-gate anything, an expert must:
+natural phrasing, quoted phrases, and out-of-corpus candidates. Before it
+could gate anything, an expert had to:
 
 1. verify each expected provision against the provision heading and the
    question asked;
@@ -29,8 +38,23 @@ gate anything, an expert must:
 4. read the adjudicated set exactly once as the first threshold-bearing
    evaluation.
 
+**Status of the four (2026-10-23):** items 1 and 2 are done — the record
+is `docs/research/fresh-holdout-adjudication-2026-10-22.md`. Item 3 was
+done with recorded DEVIATIONS: query wording WAS changed — two entries
+rewritten by the cross-check (§3.1 and §3.3), both removed at `6f459ec`
+so only the operator rewordings survive in the gated 41, and two
+reworded by operator ruling (§4.1 and §5.1), all recorded in the
+adjudication record. Item 4 has
+NOT happened: no threshold-bearing evaluation has run, and the
+2026-10-23 baseline is explicitly non-threshold. How the "read exactly
+once" discipline counts non-threshold baseline reads is not stated
+in-repo and is the operator's to rule when the first threshold-bearing
+round opens.
+
 The preliminary run against the 2026-10-16 local index produced 18/35 exact
-citations, 21/35 recall@5, MRR 0.5524, and 0/8 no-answer violations. A corpus
+citations, 21/35 recall@5, MRR 0.5524, and 0/8 no-answer violations (on the
+original 43-entry set; the gated 41-entry set's baseline is 17/33, 23/33,
+MRR 0.596, 0/8 — recorded in the adjudication record). A corpus
 grep over both `sections.text` and `sections.markdown` returned zero matches
 for every token in the eight proposed no-answer cases:
 
@@ -42,8 +66,9 @@ for every token in the eight proposed no-answer cases:
 | `paleontology stratigraphy ammonite`; `meteorology baroclinic cyclone forecast` | 0 for all 6 tokens  |
 
 This is a reproducible corpus-receipt candidate, not expert adjudication: the
-terms are intentionally out-of-domain and must still be accepted or rejected
-by the adjudicator before they gate anything.
+terms are intentionally out-of-domain and had to be accepted or rejected by
+the adjudicator before they could gate anything (all eight were confirmed
+out of corpus and adjudicated 2026-10-22/23).
 
 The receipt was produced against a copied index with this exact query (one
 row per token, searching both rendered columns without FTS stemming):
@@ -88,7 +113,93 @@ score is insufficient.
 
 No implementation change to ranking, synonym expansion, or abstention is
 authorized by this artifact. The evidence currently supports context and
-measurement, not another lexical rule. The next engineering decision requires
-both an expert-adjudicated fresh set and the M6 observation of whether users
+measurement, not another lexical rule. The next engineering decision
+requires both an expert-adjudicated fresh set (met 2026-10-23) and the M6
+observation of whether users
 recover from a non-first result by reading its heading/snippet or browsing the
 structure.
+
+## 2026-10-24 — dev quoted-phrase realignment and re-measure
+
+The operator's quoted-phrase policy reached the dev set: a quoted phrase
+expects EVERY product FTS result for the phrase. The policy was selected in
+chat on 2026-10-22 and recorded on issue #135; it was applied to the dev set
+in this round (2026-10-24). The dev set's two quoted-phrase entries were
+heading-based; they now carry the all-match sets.
+
+**Expectation changes** — the expectation and rationale edits to
+`test/fixtures/retrieval/queries.dev.ts` (this round also updated the
+file's header and `adjudicated` doc comments: `adjudicated` now covers
+operator decisions recorded on issue #135 alongside the committee's
+2026-10-21 ruling, because the two realigned entries rest on the
+operator's policy decision):
+
+| query                                | before | after | added                           |
+| ------------------------------------ | ------ | ----- | ------------------------------- |
+| `"schedule of ratings"`              | 16     | 18    | `3.321`, `Appendix A to Part 4` |
+| `"evaluation of hearing impairment"` | 1      | 2     | `3.383`                         |
+
+**Verification.** Each set was checked two ways against a COPY of the
+2026-10-16 index (`~/.cfr-free/index.sqlite` copied; the live index was never
+opened):
+
+1. Product FTS — the phrase query `toFtsQuery` builds for a quoted span
+   (`src/core/store.ts`), `"<phrase>"*`, over the `sections_fts` table
+   (tokenizer `porter unicode61`):
+   `SELECT citation FROM sections_fts WHERE sections_fts MATCH '"schedule of ratings"*'`
+   → 18 rows — the 16 committed citations plus `3.321` and
+   `Appendix A to Part 4`; and the same query for
+   `"evaluation of hearing impairment"` → 2 rows, `3.383` and `4.85`.
+2. LIKE substring over the SAME surface the FTS indexes (`citation`,
+   `heading` and `text`):
+   `SELECT citation FROM sections WHERE lower(citation || ' ' || heading || ' ' || text) LIKE '%schedule of ratings%'`
+   → 18 rows, the identical set; the same query for
+   `evaluation of hearing impairment` → 2 rows, the identical set.
+
+   The surface matters: a LIKE over the body `text` column alone returns 4
+   and 1, and a LIKE over the heading alone returns exactly the OLD 16 and 1
+   — the 16 heading-based citations match the HEADING, while `3.321`,
+   `3.383` and `Appendix A to Part 4` carry the phrase in the body. For
+   these two phrases the three-column LIKE agreed with the product's FTS
+   set exactly, which makes it a valid CROSS-CHECK here — not a
+   substitute: porter stemming diverges from substring matching on this
+   corpus, as the fresh set already records (`"hearing impairment"`
+   reaches 16 by FTS and 14 by LIKE; `"service connection"` 225 by FTS
+   and 60 by LIKE — `test/fixtures/retrieval/queries.fresh.ts`, and §3.4
+   of `docs/research/fresh-holdout-adjudication-2026-10-22.md`). Issue
+   #135's rule stands: do not silently substitute one matcher for
+   another.
+
+**Re-measured dev baseline** (the runner, `test/fixtures/retrieval/run.ts`,
+against the 2026-10-16 index copy): 30 queries, 29 answerable, 1 no-answer —
+exact-citation **22/29**, recall@5 **28/29**, MRR **0.8448**, no-answer
+violations **1/1**. Provenance: darwin 25.6.0 (arm64), node v26.12.1, 8 cpus,
+24576 MB, index issue date 2026-10-16; 30 adjudicated expectations, 0
+provisional.
+
+**The numbers did not move.** The same probe over the PRE-realignment fixture
+on the same index copy reports the identical 22/29, 28/29, 0.8448 and 1/1.
+The reason is saturation plus monotonicity: both quoted-phrase queries were
+already exact-citation successes — `"schedule of ratings"` ranks `4.87a`
+first (expected by the old 16), and `"evaluation of hearing impairment"`
+ranks `4.85` first (the old sole expectation) — so `topHitExpected` was
+already true and the first expected hit already at rank 1, worth 1.0 to
+MRR. Adding expectations can only turn a scoring boolean on or lower the
+first expected rank, never the reverse, so a query already saturated on
+every metric cannot move. (For `"schedule of ratings"` the two additions
+`3.321` and `Appendix A to Part 4` also rank outside the runner's top-five
+window entirely; for `"evaluation of hearing impairment"` the added
+`3.383` sits inside it at rank 2 — it is included in the expectation but
+was not the first expected hit, so it changed no metric.) The same
+limitation is recorded for the fresh set in
+`docs/research/fresh-holdout-adjudication-2026-10-22.md` (expected provisions
+ranked below 5 are never checked). The dev baseline published in
+`docs/research/retrieval-baseline-2026-10-20.md` (22/29, 28/29, MRR 0.8448,
+1/1, after the 2026-10-21 exception-demotion round) therefore still stands
+unchanged.
+
+**Scope.** This touches the DEV set only. The fresh set's gated baseline
+(17/33 exact-citation, 23/33 recall@5, MRR 0.596, 0/8 no-answer violations)
+is unaffected — its quoted-phrase entries were already all-match. The burned
+holdout remains untouched and unchanged: its curated quoted-phrase expectations
+stay a frozen regression set, not a policy carrier.

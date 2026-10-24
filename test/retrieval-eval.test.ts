@@ -11,6 +11,7 @@ import {
 } from './fixtures/retrieval/run.js';
 import { DEV_QUERIES, type RetrievalQuery } from './fixtures/retrieval/queries.dev.js';
 import { HOLDOUT_QUERIES } from './fixtures/retrieval/queries.holdout.js';
+import { FRESH_QUERIES } from './fixtures/retrieval/queries.fresh.js';
 
 /**
  * The runner's own correctness, against a SEEDED temporary index — the
@@ -56,6 +57,17 @@ function withService(body: (service: CFRService) => void, sections = CORPUS): vo
   } finally {
     temp.cleanup();
   }
+}
+
+/**
+ * The rendered report's latency figures are MEASUREMENTS, not part of the
+ * compared surface, so they are stripped before two renderings are compared.
+ */
+function stripLatencyLines(text: string): string {
+  return text
+    .split('\n')
+    .filter((line) => !line.includes('ms'))
+    .join('\n');
 }
 
 const EXPECT_HIT: RetrievalQuery = {
@@ -138,12 +150,7 @@ describe('retrieval evaluation runner (M3)', () => {
       const b = renderReport(evaluateSet(service, 'dev'));
       // The report text is deterministic EXCEPT the latency figures,
       // which are measurements; compare the non-latency lines.
-      const strip = (text: string): string =>
-        text
-          .split('\n')
-          .filter((line) => !line.includes('ms'))
-          .join('\n');
-      expect(strip(a)).toBe(strip(b));
+      expect(stripLatencyLines(a)).toBe(stripLatencyLines(b));
       expect(a).toContain('retrieval evaluation — dev set');
       // The report's own provenance line must carry the frozen set's REAL
       // adjudication counts. Asserting only that the word "provisional"
@@ -188,6 +195,92 @@ describe('retrieval evaluation runner (M3)', () => {
     ] as const) {
       expect([...categories]).toContain(required);
     }
+  });
+
+  it('gates the fresh set structurally, with no numeric threshold', () => {
+    const fresh = queriesFor('fresh');
+    expect(fresh).toBe(FRESH_QUERIES);
+    expect(fresh.length).toBe(41);
+    const frozen = new Set([...DEV_QUERIES, ...HOLDOUT_QUERIES].map((q) => q.query));
+    const freshQueries = new Set(fresh.map((q) => q.query));
+    expect(freshQueries.size).toBe(fresh.length);
+    for (const query of fresh) {
+      expect(frozen.has(query.query)).toBe(false);
+      expect(query.rationale.length).toBeGreaterThan(0);
+      expect(query.sourceDate).toBe('2026-10-16');
+      expect(query.adjudication).toBe('adjudicated');
+    }
+    expect(fresh.filter((query) => query.expected.length > 0)).toHaveLength(33);
+    expect(fresh.filter((query) => query.expected.length === 0)).toHaveLength(8);
+  });
+
+  it('exercises the fresh set through the runner against the hermetic corpus', () => {
+    // Issue #135's AC: the offline runner must exercise the FRESH set, not
+    // only assert its structure. Every entry now travels the full pipeline
+    // (query -> FTS -> scoring -> aggregation -> report) against the seeded
+    // corpus. No numeric threshold is asserted: against two seeded
+    // provisions the quality numbers are artifacts of the corpus, not a
+    // measurement of the retriever, and a quality bar needs its own
+    // operator ratification. What IS asserted here is the runner's own
+    // arithmetic — the aggregates must be the rows' own numbers, and the
+    // rows must be classified by their EXPECTATION, not by their label.
+    const fresh = queriesFor('fresh');
+    withService((service) => {
+      const report = evaluateSet(service, 'fresh');
+      expect(report.outcomes).toHaveLength(41);
+      expect(report.totals.answerable).toBe(33);
+      expect(report.totals.noAnswerCases).toBe(8);
+      expect(report.totals.answerable + report.totals.noAnswerCases).toBe(41);
+      // The aggregates are recounts of the rows, not a second count.
+      expect(report.totals.exactCitationSuccess).toBe(
+        report.outcomes.filter((outcome) => outcome.topHitExpected).length,
+      );
+      expect(report.totals.recallAt5).toBe(
+        report.outcomes.filter((outcome) => outcome.recallAt5).length,
+      );
+      expect(report.totals.noAnswerViolations).toBe(
+        report.outcomes.filter((outcome) => outcome.noAnswerViolation).length,
+      );
+      // Every category the set carries must reach the report's breakdown,
+      // and nothing else may appear there.
+      const categories = new Set(fresh.map((query) => query.category));
+      expect(categories.size).toBe(6);
+      expect([...Object.keys(report.byCategory)].sort()).toEqual([...categories].sort());
+      // Classification follows the EXPECTATION: a row with no expected
+      // citation is a no-answer case, whatever its category says.
+      const noAnswer = report.outcomes.filter((outcome) => outcome.expected.length === 0);
+      expect(noAnswer).toHaveLength(8);
+      for (const outcome of noAnswer) {
+        // The seeded corpus holds only two unrelated provisions, so a
+        // confident hit on a no-answer query would be a violation of the
+        // runner's contract — the runner must decide from the RESULT, not
+        // from the query text.
+        expect(outcome.noAnswerViolation).toBe(false);
+      }
+      const answerable = report.outcomes.filter((outcome) => outcome.expected.length > 0);
+      expect(answerable).toHaveLength(report.totals.answerable);
+      for (const outcome of answerable) {
+        expect(outcome.noAnswerViolation).toBe(false);
+      }
+    });
+  });
+
+  it('renders a deterministic fresh report', () => {
+    withService((service) => {
+      const a = renderReport(evaluateSet(service, 'fresh'));
+      const b = renderReport(evaluateSet(service, 'fresh'));
+      // Same comparison as the dev report: the latency figures are
+      // measurements, everything else must be byte-identical.
+      expect(stripLatencyLines(a)).toBe(stripLatencyLines(b));
+      expect(a).toContain('retrieval evaluation — fresh set');
+      // The provenance line must carry the fresh set's REAL adjudication
+      // counts, derived from the frozen entries themselves.
+      const fresh = queriesFor('fresh');
+      const adjudicated = fresh.filter((query) => query.adjudication === 'adjudicated').length;
+      expect(a).toContain(
+        `expectations: ${adjudicated} adjudicated, ${fresh.length - adjudicated} provisional`,
+      );
+    });
   });
 
   it('selects a set by name', () => {

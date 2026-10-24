@@ -6,17 +6,24 @@
  * The holdout set (queries.holdout.ts) must not be used to tune or pick
  * anything.
  *
- * `adjudication: 'adjudicated'` means the entry was adjudicated by the
+ * `adjudication: 'adjudicated'` means the entry is settled: either the
  * two-member committee's ruling of 2026-10-21, cross-checked against the
- * other member and against the corpus. The record of those rulings is
+ * other member and against the corpus (the record of those rulings is
  * `docs/research/expectation-adjudication-2026-10-21.md`; the measured
- * consequence is `docs/research/retrieval-baseline-2026-10-20.md`. The
- * expected set is the committee's answer to the question the query asks —
- * it measures the RETRIEVER against that answer, not legal correctness,
- * and an expert remains the authority.
+ * consequence is `docs/research/retrieval-baseline-2026-10-20.md`), or an
+ * operator decision recorded on issue #135 (2026-10-22, e.g. the
+ * quoted-phrase all-match policy below). The expected set is the
+ * adjudicating authority's answer to the question the query asks — it
+ * measures the RETRIEVER against that answer, not legal correctness, and
+ * an expert remains the authority.
  *
  * Expectations are grounded in the 2026-10-16 Title 38 corpus (issue
  * date recorded in the runner's report).
+ *
+ * QUOTED-PHRASE EXPECTATIONS follow the operator's all-match policy
+ * (selected in chat 2026-10-22, recorded on issue #135): a quoted phrase
+ * expects EVERY product FTS result for the phrase — the same rule the
+ * fresh set carries.
  */
 
 export type QueryCategory =
@@ -43,8 +50,9 @@ export interface RetrievalQuery {
   /** The corpus issue date the expectation was formed against. */
   readonly sourceDate: string;
   /**
-   * 'adjudicated' = the committee's cross-checked ruling of 2026-10-21
-   * (see docs/research/expectation-adjudication-2026-10-21.md).
+   * 'adjudicated' = settled: the committee's cross-checked ruling of
+   * 2026-10-21 (docs/research/expectation-adjudication-2026-10-21.md),
+   * or an operator decision recorded on issue #135 (2026-10-22).
    * 'provisional' = the orchestrator's working expectation, not adjudicated.
    */
   readonly adjudication: 'provisional' | 'adjudicated';
@@ -242,6 +250,7 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     query: '"schedule of ratings"',
     category: 'quoted-phrase',
     expected: [
+      '3.321',
       '4.104',
       '4.114',
       '4.116',
@@ -258,17 +267,19 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
       '4.87a',
       '4.88b',
       '4.97',
+      'Appendix A to Part 4',
     ],
     rationale:
-      'the literal heading phrase names SIXTEEN schedules - every section whose heading begins "Schedule of ratings"; a single-section expectation for a phrase with no subject is a weak ground truth, so the committee ruled that the honest answer is the set',
+      'the all-match set for the phrase: every provision whose heading or body carries "schedule of ratings" — heading hits 16, body hits 4, union 18 — the same set as 18 by product FTS and by LIKE over citation/heading/text; OPERATOR DECISION 2026-10-23 — all-match policy selected in chat 2026-10-22 and recorded on issue #135, applied to the dev set 2026-10-24',
     sourceDate: SOURCE_DATE,
     adjudication: 'adjudicated',
   },
   {
     query: '"evaluation of hearing impairment"',
     category: 'quoted-phrase',
-    expected: ['4.85'],
-    rationale: 'the literal heading phrase of § 4.85',
+    expected: ['3.383', '4.85'],
+    rationale:
+      'the all-match set for the phrase (2 by product FTS, 2 by LIKE); OPERATOR DECISION 2026-10-23 — all-match policy selected in chat 2026-10-22 and recorded on issue #135, applied to the dev set 2026-10-24',
     sourceDate: SOURCE_DATE,
     adjudication: 'adjudicated',
   },
