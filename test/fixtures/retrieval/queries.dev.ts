@@ -6,14 +6,16 @@
  * The holdout set (queries.holdout.ts) must not be used to tune or pick
  * anything.
  *
- * `adjudication: 'adjudicated'` means the entry was adjudicated by the
+ * `adjudication: 'adjudicated'` means the entry is settled: either the
  * two-member committee's ruling of 2026-10-21, cross-checked against the
- * other member and against the corpus. The record of those rulings is
+ * other member and against the corpus (the record of those rulings is
  * `docs/research/expectation-adjudication-2026-10-21.md`; the measured
- * consequence is `docs/research/retrieval-baseline-2026-10-20.md`. The
- * expected set is the committee's answer to the question the query asks —
- * it measures the RETRIEVER against that answer, not legal correctness,
- * and an expert remains the authority.
+ * consequence is `docs/research/retrieval-baseline-2026-10-20.md`), or an
+ * operator decision recorded on issue #135 (2026-10-22, e.g. the
+ * quoted-phrase all-match policy below). The expected set is the
+ * adjudicating authority's answer to the question the query asks — it
+ * measures the RETRIEVER against that answer, not legal correctness, and
+ * an expert remains the authority.
  *
  * Expectations are grounded in the 2026-10-16 Title 38 corpus (issue
  * date recorded in the runner's report).
@@ -48,8 +50,9 @@ export interface RetrievalQuery {
   /** The corpus issue date the expectation was formed against. */
   readonly sourceDate: string;
   /**
-   * 'adjudicated' = the committee's cross-checked ruling of 2026-10-21
-   * (see docs/research/expectation-adjudication-2026-10-21.md).
+   * 'adjudicated' = settled: the committee's cross-checked ruling of
+   * 2026-10-21 (docs/research/expectation-adjudication-2026-10-21.md),
+   * or an operator decision recorded on issue #135 (2026-10-22).
    * 'provisional' = the orchestrator's working expectation, not adjudicated.
    */
   readonly adjudication: 'provisional' | 'adjudicated';
@@ -267,7 +270,7 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
       'Appendix A to Part 4',
     ],
     rationale:
-      'the all-match set for the phrase: every section whose text carries "schedule of ratings" (18 by product FTS, 18 by LIKE); OPERATOR DECISION 2026-10-24 — all-match policy selected in chat 2026-10-22, recorded on issue #135, applied to the dev set in this round',
+      'the all-match set for the phrase: every provision whose text carries "schedule of ratings" (18 by product FTS, 18 by LIKE); OPERATOR DECISION 2026-10-23 — all-match policy selected in chat 2026-10-22 and recorded on issue #135, applied to the dev set 2026-10-24',
     sourceDate: SOURCE_DATE,
     adjudication: 'adjudicated',
   },
@@ -276,7 +279,7 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     category: 'quoted-phrase',
     expected: ['3.383', '4.85'],
     rationale:
-      'the all-match set for the phrase (2 by product FTS, 2 by LIKE); OPERATOR DECISION 2026-10-24 — all-match policy selected in chat 2026-10-22, recorded on issue #135, applied to the dev set in this round',
+      'the all-match set for the phrase (2 by product FTS, 2 by LIKE); OPERATOR DECISION 2026-10-23 — all-match policy selected in chat 2026-10-22 and recorded on issue #135, applied to the dev set 2026-10-24',
     sourceDate: SOURCE_DATE,
     adjudication: 'adjudicated',
   },

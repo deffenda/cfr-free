@@ -279,12 +279,13 @@ note in the same form.
    provisions; the fresh entry expected one). **RESOLVED — selected by
    the operator in chat on 2026-10-22, recorded on issue #135 (opened
    2026-10-22): a fresh quoted-phrase expectation is EVERY product FTS
-   result for the phrase.** This is a FRESH-SET rule,
-   not a description of the dev set: dev's committed quoted-phrase
-   expectations are heading-based (16 provisions for
-   `"schedule of ratings"`, 1 for `"evaluation of hearing impairment"`),
-   where the product FTS totals are 18 and 2 — aligning dev to the rule
-   is the still-uncommitted re-measure noted in the handoff below. The
+   result for the phrase.** This was a FRESH-SET rule at the time of the
+   fresh set's adjudication; it reached the dev set in the 2026-10-24
+   round, where the dev set's then-heading-based quoted-phrase
+   expectations (16 provisions for `"schedule of ratings"`, 1 for
+   `"evaluation of hearing impairment"` — the product FTS totals are 18
+   and 2) were aligned to the rule and the dev baseline re-measured
+   (recorded in `docs/research/retrieval-residuals-2026-10-21.md`). The
    surviving entries carry the full sets (225 / 11 / 16 provisions for
    `"service connection"`, `"individual unemployability"` and
    `"hearing impairment"`); the holdout's curated expectations in the
@@ -321,10 +322,12 @@ sets no threshold).
    2026-10-22, recorded on issue #135, see §5.**
 2. Ratification, which is what makes the set gate-worthy. **Done for the
    fresh set — selected in chat 2026-10-22, recorded on issue #135
-   (opened 2026-10-22); the issue stays OPEN until its one remaining AC
-   lands — the dev realignment. The runner AC landed: CI now exercises
-   the fresh set through the runner against the hermetic seeded corpus**
-   (see the 2026-10-23 sections below).
+   (opened 2026-10-22). The runner AC landed (CI now exercises the fresh
+   set through the runner against the hermetic seeded corpus), and the
+   dev realignment landed in the 2026-10-24 round, so every #135 AC is
+   satisfied and the issue closes on that round's merge** (see the
+   2026-10-23 sections below and the 2026-10-24 section in
+   `docs/research/retrieval-residuals-2026-10-21.md`).
 3. Whether to replace `NSC` with a stronger near-miss. **Open** — the
    ruling kept the entry broad, which leaves the weak-test observation
    (§5.3) standing.
@@ -429,7 +432,10 @@ there. The handoff's "final SHA needs its own review" was reported
 satisfied at merge time, but no canonical artifact of that review exists —
 PR #141's body records the review of `05d34a3` and says a fresh review was
 required at `f4b7228`, and the journal has no entry — so an audit should
-treat it as an unverified claim, recorded here as a process gap. Still open and NOT part of
-this measurement: the dev quoted-phrase re-measure saved outside the repo
-(`$TMPDIR/opencode/dev-quoted-phrase-edits.md`) — it needs its own
-re-measure and record before it can land.
+treat it as an unverified claim, recorded here as a process gap. Also
+open at the time of that measurement, since closed: the dev
+quoted-phrase re-measure saved outside the repo
+(`$TMPDIR/opencode/dev-quoted-phrase-edits.md`) — it landed in its own
+round (2026-10-24): expectations aligned to the FTS totals, dev
+baseline re-measured, recorded in
+`docs/research/retrieval-residuals-2026-10-21.md`.

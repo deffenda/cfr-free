@@ -165,11 +165,19 @@ violations **1/1**. Provenance: darwin 25.6.0 (arm64), node v26.12.1, 8 cpus,
 provisional.
 
 **The numbers did not move.** The same probe over the PRE-realignment fixture
-on the same index copy reports the identical 22/29, 28/29, 0.8448 and 1/1. The
-reason is the runner's top-five cut: `"schedule of ratings"` returns
-`4.87a, 4.87, 4.130, 4.150, 4.116` and `"evaluation of hearing impairment"`
-returns `4.85, 3.383`, so every hit the runner sees was already inside the old
-expectation set, and the added provisions rank outside the window. The same
+on the same index copy reports the identical 22/29, 28/29, 0.8448 and 1/1.
+The reason is saturation plus monotonicity: both quoted-phrase queries were
+already exact-citation successes — `"schedule of ratings"` ranks `4.87a`
+first (expected by the old 16), and `"evaluation of hearing impairment"`
+ranks `4.85` first (the old sole expectation) — so `topHitExpected` was
+already true and the first expected hit already at rank 1, worth 1.0 to
+MRR. Adding expectations can only turn a scoring boolean on or lower the
+first expected rank, never the reverse, so a query already saturated on
+every metric cannot move. (For `"schedule of ratings"` the two additions
+`3.321` and `Appendix A to Part 4` also rank outside the runner's top-five
+window entirely; for `"evaluation of hearing impairment"` the added
+`3.383` sits inside it at rank 2 — it is included in the expectation but
+was not the first expected hit, so it changed no metric.) The same
 limitation is recorded for the fresh set in
 `docs/research/fresh-holdout-adjudication-2026-10-22.md` (expected provisions
 ranked below 5 are never checked). The dev baseline published in

@@ -400,10 +400,15 @@ ratings"` moves from 16 provisions to 18 and `"evaluation of hearing
 impairment"` from 1 to 2, matching the product FTS totals (18 and 2)
 exactly. The dev set was re-measured afterwards against the 2026-10-16
 index — exact-citation 22/29, recall@5 28/29, MRR 0.8448, no-answer
-violations 1/1 — the same numbers as before the realignment: the runner
-scores only whether its top five were already expected, and every
-top-five hit for both queries was already inside the old expectation
-sets, so the additions change nothing the runner measures. The burned
+violations 1/1 — the same numbers as before the realignment. Both queries
+were already exact-citation successes (top hit expected, MRR contribution
+1.0), and adding expectations is monotone — it can only turn a scoring
+boolean on or lower the first expected hit's rank, never the reverse — so
+a saturated pair cannot move. For `"schedule of ratings"` the two added
+citations also rank outside the runner's top-five window entirely
+(`4.87a, 4.87, 4.130, 4.150, 4.116`); for `"evaluation of hearing
+impairment"` the added `3.383` sits inside it at rank 2 but was not the
+first expected hit, so it changed no metric. The burned
 holdout keeps its own expectations byte-for-byte as committed (the
 burned holdout's curated quoted-phrase expectations remain a frozen
 regression set, not a policy carrier) and is untouched by this change.
