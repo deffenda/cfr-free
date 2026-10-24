@@ -207,14 +207,14 @@ describe('main: sync output', () => {
     try {
       // Baseline (no previous index) and identical re-sync: 0/0/0 by design.
       expect(await main(['sync'], io)).toBe(0);
-      expect(out.join('')).toMatch(/; no provision changes; \d+ ms\)\n$/);
+      expect(out.join('')).toMatch(/; no provision changes; \d+ ms; corpus hash [0-9a-f]{64}\)\n$/);
       expect(await main(['sync'], io)).toBe(0);
-      expect(out.join('')).toMatch(/; no provision changes; \d+ ms\)\n$/);
+      expect(out.join('')).toMatch(/; no provision changes; \d+ ms; corpus hash [0-9a-f]{64}\)\n$/);
       // Amended upstream: 4.125 changed, 4.130 added, Appendix A removed.
       xml = SYNC_XML_V2;
       expect(await main(['sync'], io)).toBe(0);
       expect(out.join('')).toMatch(
-        /synced 2 sections \+ 0 appendices \(issue date 2026-10-09; 1 changed, 1 added, 1 removed; \d+ ms\)\n$/,
+        /synced 2 sections \+ 0 appendices \(issue date 2026-10-09; 1 changed, 1 added, 1 removed; \d+ ms; corpus hash [0-9a-f]{64}\)\n$/,
       );
     } finally {
       vi.unstubAllGlobals();

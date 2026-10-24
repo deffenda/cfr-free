@@ -82,4 +82,32 @@ describe('corpusHash', () => {
     expect([...reversed.keys()]).not.toEqual([...base.keys()]);
     expect(corpusHash(reversed)).toBe(corpusHash(base));
   });
+
+  it('matches a known-answer constant and binds each hash to its citation', () => {
+    // The SPEC §4 contract: pairs framed `citation\0hash\n`, sorted by
+    // citation, sha256. These constants were computed ONCE from that framing;
+    // if the framing (separator, sort, fields inside the digest) ever changes,
+    // they must change — that is the point of pinning them.
+    const h1 = '0'.repeat(63) + '1';
+    const h2 = 'f'.repeat(64);
+    expect(
+      corpusHash(
+        new Map([
+          ['4.1', h1],
+          ['4.2', h2],
+        ]),
+      ),
+    ).toBe('76939bbef43de65a8648b61663996024a024d3afdeb76d991683884e8b502e8c');
+    // Same two content hashes swapped between the two citations MUST change
+    // the receipt: dropping the citation from the digest (or the citation
+    // binding anywhere else) fails here.
+    expect(
+      corpusHash(
+        new Map([
+          ['4.1', h2],
+          ['4.2', h1],
+        ]),
+      ),
+    ).toBe('9ff58a42f2b5f4aa26c2bcbc961e9eecd2595694040becdea0410d144a53879c');
+  });
 });

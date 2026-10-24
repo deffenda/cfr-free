@@ -51,7 +51,8 @@ export function hashText(text: string): string {
  * corpus: exactly one such heading-only amendment per ~2,921 provisions
  * per year, and it is invisible to a text-only comparison.
  *
- * The separator keeps the two fields unambiguous (no collision between a
+ * Framing (SPEC section 4): text, then the NUL character, then heading —
+ * the separator keeps the two fields unambiguous (no collision between a
  * text/heading pair and a different pair with the same concatenation).
  */
 export function hashContent(text: string, heading: string): string {

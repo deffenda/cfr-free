@@ -205,7 +205,10 @@ report) surfaces it and the retrieval runner prints it. Any change round that
 touches index-affecting code (parsing, sync, schema, ranking inputs) must
 re-record the receipt against a rebuilt index and cite (issue date, corpus
 hash) in the change request; retrieval results are only comparable when their
-provenance carries the same receipt. The digest definition is part of the
+provenance carries the same receipt. Reports predating the receipt carry
+`unknown` and are comparable only among themselves — comparability across the
+cutover starts at the first receipt-bearing rebuild, not retroactively. The
+digest definition is part of the
 contract: changing `hashContent`, `corpusHash` or their framing changes every
 future receipt, so such a change must be stated in the change request
 alongside the receipt it replaces.

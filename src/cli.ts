@@ -267,7 +267,8 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
           : '';
       io.out(
         `synced ${report.sections} sections + ${report.appendices} appendices ` +
-          `(issue date ${report.issueDate}; ${changes}${images}; ${report.durationMs} ms)\n`,
+          `(issue date ${report.issueDate}; ${changes}${images}; ${report.durationMs} ms; ` +
+          `corpus hash ${report.corpusHash})\n`,
       );
       return 0;
     }

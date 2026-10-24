@@ -316,7 +316,7 @@ aged out) so a client can never unknowingly quote a lapsed version.
 
 Beyond tools, the server exposes three MCP **resources** that clients can read
 directly — `cfr://index/status` (freshness JSON: issue date, last sync, row
-counts, staleness, drift), `cfr://title38/parts` (parts with titles and
+counts, staleness, drift, corpus receipt hash), `cfr://title38/parts` (parts with titles and
 counts), and `cfr://title38/definitions` (§ 3.1 master definitions section
 detail) — plus two **prompts**: `cfr_research` (`topic`, `part?`), which walks
 a model through the search → read → cite workflow, and
