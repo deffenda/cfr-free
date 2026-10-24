@@ -59,10 +59,9 @@ Requires Node ≥ 22.5.
 
 ## Reviews
 
-Human PR reviews are not required (solo maintainer). Independent **AI
-multi-model review** is required for every PR before merge — see the
-`AGENTS.md` and `claude/rules/cross-model-review.md` files at the repo
-root for the standing process (firm-but-fair critical reviewer with a
-senior-engineer persona, effort floor, verdict format). Gemma/LM-Studio passes were part of earlier rounds and
-are recorded in the SPEC review log when their findings changed the
-design.
+Human PR reviews are not required (solo maintainer). An independent
+fresh-context review of the exact head, with no unresolved P0 or P1
+findings, is required for every PR before merge — see `AGENTS.md` at the
+repo root for the merge rule. Gemma/LM-Studio passes were part of earlier
+rounds and are recorded in the SPEC review log when their findings changed
+the design.

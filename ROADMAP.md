@@ -58,9 +58,9 @@ replicable. Our proposed advantage must be earned through measured fidelity,
 reliable operation, and useful workflow integration. Local retrieval does not
 establish the privacy properties of a separately chosen AI client.
 
-### Dispatch rules for the next orchestrator
+### Dispatch rules for the next session
 
-1. Read `AGENTS.md` and the cross-model review contract. Consult
+1. Read `AGENTS.md` (the fleet standard plus this repo's rules). Consult
    `~/.orchestrator/JOURNAL.md` (operator-maintained, outside the repo), open
    PRs/issues, and current origin/main before
    claiming work. The journal recorded batch-8 E1–E6 on 2026-10-20: redline
@@ -76,17 +76,20 @@ establish the privacy properties of a separately chosen AI client.
    measurement, like P1-20261021-07, carries its own evidence instead.
 3. The M-items below are packet families. Split each into small PRs, normally
    within ~300 net lines, with evidence pointers, exact authorized files,
-   decided design, scope guard, tests, and a report format. Do not dispatch
-   an unresolved product/API decision to a coder as an implementation task.
+   decided design, scope guard, tests, and a report format. Do not take an
+   unresolved product/API decision into an implementation task.
 4. Use a worktree and the repo branch patterns. No dependency installs; only
-   reuse dependencies under AGENTS.md's same-commit symlink rule. Coder leaves
-   a dirty tree. Orchestrator verifies the diff/manifest, runs the appropriate
-   gates, and obtains independent review at the exact head SHA. New commits
-   require fresh review, including roadmap completion edits.
-5. Runtime work is MEDIUM unless it touches HIGH-risk surfaces. Authentication,
-   schema migrations, CI/release/governance changes need operator sign-off
-   before merge. Publication and paid work need their separate authorization.
-   Track dependencies explicitly; green checks do not authorize scope growth.
+   reuse dependencies under AGENTS.md's same-commit link rule. Code changes
+   run through a SureForge supervised contract (see AGENTS.md);
+   agent-configuration files (`AGENTS.md`, `CLAUDE.md`) are hand-made pull
+   requests. A merge needs a fresh-context review of the exact head SHA with
+   no unresolved P0 or P1 findings; a new commit requires a fresh review,
+   including roadmap completion edits.
+5. Authentication, schema migrations, CI/release changes and anything touching
+   the merge itself need the operator's sign-off before merge; see AGENTS.md's
+   ask-the-owner-first list. Publication and paid work need their separate
+   authorization. Track dependencies explicitly; green checks do not authorize
+   scope growth.
 
 ### Delivery order and exit gates
 
