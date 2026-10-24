@@ -377,11 +377,15 @@ note in the entry's rationale: burial allowance is eligibility, not a rate
 (3.1704/3.1705); MST is read as service connection (3.304/3.309); NSC
 stays broad (3.303/3.309); the Purple Heart query asks the copayment
 exemption the corpus actually holds (17.108); and a quoted phrase expects
-EVERY product FTS result for it — the reading the dev set already used, so
-the fresh set follows one settled rule. The dev set and the burned holdout
-keep their own expectations byte-for-byte as committed (the burned
-holdout's curated quoted-phrase expectations remain a frozen regression
-set, not a policy carrier). With that ratification the set became a
+EVERY product FTS result for the phrase. That last rule is FRESH-SET-ONLY
+for now: the dev set's committed quoted-phrase expectations are
+heading-based — 16 provisions for `"schedule of ratings"`, 1 for
+`"evaluation of hearing impairment"` — where the product FTS totals are 18
+and 2, so aligning dev to the rule is the still-uncommitted re-measure
+recorded in the adjudication record's handoff. The dev set and the burned
+holdout keep their own expectations byte-for-byte as committed (the
+burned holdout's curated quoted-phrase expectations remain a frozen
+regression set, not a policy carrier). With that ratification the set became a
 **structural gate**: `test/retrieval-eval.test.ts` asserts every entry
 `adjudicated`, unique by exact query text, disjoint from the dev and
 burned sets, and the 33/8 answerable split — and it sets **NO numeric

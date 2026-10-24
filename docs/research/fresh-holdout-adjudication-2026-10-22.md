@@ -52,7 +52,7 @@ rather than a broken matcher.
 
 **The no-answer set needs no change.**
 
-## 3. The six entries the cross-check changed
+## 3. The five entries the cross-check changed (and one claim it rejected)
 
 ### 3.1 `"attendance allowance for veterans"` — REJECTED as written
 
@@ -97,7 +97,9 @@ actually reaches, and the query is reworded to the corpus's phrase.
 
 ### 3.4 `"hearing impairment"` — incomplete
 
-The phrase reaches 8 provisions, of which the three that answer the
+The phrase reaches 16 provisions by FTS and 14 by LIKE (verified
+2026-10-23 against the index; the cross-check's original count of 8 did
+not reproduce and is superseded), of which the three that answer the
 question are **4.85** (Evaluation of hearing impairment), **4.86**
 (Exceptional patterns) and **4.87** (Schedule of ratings—ear). The
 original expectation had only 4.85.
@@ -248,7 +250,12 @@ the phrase (item 4 below — the readings for `"service connection"` (225),
    answer the SAME query text differently (the holdout expects three
    provisions; the fresh entry expected one). **RESOLVED by operator
    ruling 2026-10-23 (issue #135): a fresh quoted-phrase expectation is
-   EVERY product FTS result for the phrase — the dev set's reading.** The
+   EVERY product FTS result for the phrase.** This is a FRESH-SET rule,
+   not a description of the dev set: dev's committed quoted-phrase
+   expectations are heading-based (16 provisions for
+   `"schedule of ratings"`, 1 for `"evaluation of hearing impairment"`),
+   where the product FTS totals are 18 and 2 — aligning dev to the rule
+   is the still-uncommitted re-measure noted in the handoff below. The
    surviving entries carry the full sets (225 / 11 / 16 provisions for
    `"service connection"`, `"individual unemployability"` and
    `"hearing impairment"`); the holdout's curated expectations in the
@@ -259,10 +266,13 @@ the phrase (item 4 below — the readings for `"service connection"` (225),
 
 `test/fixtures/retrieval/queries.fresh.ts` — the expectations and
 rationales of the entries above, and the `adjudication` markers. **No
-query text was changed except the three rewritten ones** (3.1, 3.2, 3.3),
-because a quoted-phrase query whose string is not a phrase of the corpus
-cannot be adjudicated as a quoted-phrase query; rewording is what makes it
-a valid instance of its category.
+query text was changed except the two rewritten ones** (3.1 and 3.3; §3.2's
+claim was rejected, so its query stands as written), because a
+quoted-phrase query whose string is not a phrase of the corpus cannot be
+adjudicated as a quoted-phrase query; rewording is what makes it a valid
+instance of its category. Two further query rewordings were the operator's
+2026-10-23 rulings, carried in the gate commit: burial allowance →
+eligibility and Purple Heart → copayment exemption (§5 and §4.1).
 
 **As written on 2026-10-22, the set was not a gate.** It became a
 structural gate on 2026-10-23 (see the section at the end). The original
@@ -304,7 +314,7 @@ against the copied index.
 - Removed two fresh entries, `"aid and attendance"` and `"special monthly compensation"`. Their query text is identical to burned holdout entries, so they were not unseen. Answerable count 35 → 33; total 43 → 41.
 - Caveat on quoted-phrase entries (ratified by the committee, 2026-10-23): under the all-match policy every quoted-phrase expectation equals the full FTS result set for that phrase. Those entries cannot discriminate ranking quality. Scoring is inclusion-based (`run.ts`), so a quoted entry fails only when none of its top 5 is in the expected set. Dropping one expected citation from a long list is not detected.
 - Disjointness is exact-string only. Near-duplicates are not caught. Example: fresh `"hearing impairment"` is a substring of dev `"evaluation of hearing impairment"`.
-- Changes carried in from earlier work, recorded here for the first time: the three rewrites (3.1, 3.2, 3.3) in the fresh set, the rewording of two fresh entries, and the quoted-phrase expectation sets for `"service connection"`, `"individual unemployability"`, and `"hearing impairment"` expanded to the full FTS set. The expansions are the operator's 2026-10-22/23 all-match ruling. The quoted `"special monthly compensation"` entry was also removed (see the first bullet of this section).
+- Changes carried in from earlier work, recorded here for the first time: the two rewrites (3.1, 3.3) in the fresh set, the two operator rewordings (burial allowance → eligibility, Purple Heart → copayment exemption), and the quoted-phrase expectation sets for `"service connection"`, `"individual unemployability"`, and `"hearing impairment"` expanded to the full FTS set. The expansions are the operator's 2026-10-22/23 all-match ruling; it is a FRESH-SET rule — the dev set's heading-based quoted-phrase expectations (16 for `"schedule of ratings"`, 1 for `"evaluation of hearing impairment"`) are unchanged, and their alignment to the FTS totals (18 and 2) is the pending re-measure. The quoted `"special monthly compensation"` entry was also removed (see the first bullet of this section).
 - Expected lists in the quoted-phrase entries are string-sorted, not numerically sorted. Scoring is set-based, so this has no runtime effect.
 
 ### Handoff state (2026-10-23)

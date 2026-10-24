@@ -37,13 +37,14 @@ could gate anything, an expert had to:
 
 **Status of the four (2026-10-23):** items 1 and 2 are done — the record
 is `docs/research/fresh-holdout-adjudication-2026-10-22.md`. Item 3 was
-done with recorded DEVIATIONS: query wording WAS changed (three entries
-rewritten, two reworded by operator ruling), each recorded in the
-adjudication record §5–§6. Item 4 has NOT happened: no threshold-bearing
-evaluation has run, and the 2026-10-23 baseline is explicitly
-non-threshold. How the "read exactly once" discipline counts
-non-threshold baseline reads is not stated in-repo and is the operator's
-to rule when the first threshold-bearing round opens.
+done with recorded DEVIATIONS: query wording WAS changed — two entries
+rewritten by the cross-check (§3.1 and §3.3) and two reworded by operator
+ruling (§4.1 and §5), all recorded in the adjudication record. Item 4 has
+NOT happened: no threshold-bearing evaluation has run, and the
+2026-10-23 baseline is explicitly non-threshold. How the "read exactly
+once" discipline counts non-threshold baseline reads is not stated
+in-repo and is the operator's to rule when the first threshold-bearing
+round opens.
 
 The preliminary run against the 2026-10-16 local index produced 18/35 exact
 citations, 21/35 recall@5, MRR 0.5524, and 0/8 no-answer violations (on the
