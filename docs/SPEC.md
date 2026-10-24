@@ -195,6 +195,15 @@ quoted-phrase all-match policy); an expert remains
 the authority. A change to the set is a change to the benchmark and must be
 visible in the diff. The holdout set is not tuned on.
 
+**Index receipt:** every rebuild records a corpus receipt in `meta`: the eCFR
+issue date plus `corpus_hash`, a sha256 over the sorted per-provision content
+hashes (text + heading). `index_status` (MCP and HTTP) surfaces it and the
+retrieval runner prints it. Any change round that touches index-affecting
+code (parsing, sync, schema, ranking inputs) must re-record the receipt
+against a rebuilt index and cite (issue date, corpus hash) in the change
+request; retrieval results are only comparable when their provenance carries
+the same receipt.
+
 ### 4.1 The candidate set and the ranking order
 
 **The candidate set is the OR tier:** every provision that matches AT LEAST

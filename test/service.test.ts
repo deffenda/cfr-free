@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CFRService, ServiceError } from '../src/core/service.js';
 import { StructureError } from '../src/core/structure.js';
+import { syncIndex } from '../src/core/sync.js';
 import type { EcfrApi } from '../src/core/ecfr.js';
 import {
   createTestLogger,
@@ -9,6 +10,26 @@ import {
   makeSection,
   openTempStore,
 } from './helpers.js';
+
+/** One-provision Title 38 document — enough for a real rebuild to run. */
+const SYNC_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<ECFR>
+<DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD>
+<DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD>
+<DIV5 N="4" TYPE="PART"><HEAD>Part 4</HEAD>
+<DIV8 N="4.125" TYPE="SECTION"><HEAD>§ 4.125 Diagnosis of mental disorders.</HEAD><P>Body text.</P></DIV8>
+</DIV5>
+</DIV3>
+</ECFR>`;
+
+/** Offline eCFR stub: the rebuild path, without the network. */
+function fakeEcfr(): EcfrApi {
+  return {
+    getTitleSchedule: async () => ({ upToDateAsOf: '2026-10-09' }),
+    getStructureJson: async () => FIXTURE_STRUCTURE,
+    getFullTitleXml: async () => SYNC_XML,
+  } as unknown as EcfrApi;
+}
 
 function withService(fn: (service: CFRService) => void): void {
   const temp = openTempStore();
@@ -443,6 +464,26 @@ describe('CFRService.status', () => {
         structure_expected_sections: 'nope',
       });
       expect(service.status().structureDrift).toBe(true);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('reports the corpus receipt a rebuild recorded, and null before one exists', async () => {
+    const temp = openTempStore({ seed: false });
+    try {
+      const service = new CFRService(temp.store, 7);
+      // Never synced: no receipt exists — null, not an error.
+      expect(service.status().corpusHash).toBeNull();
+
+      await syncIndex({
+        ecfr: fakeEcfr(),
+        store: temp.store,
+        logger: createTestLogger(),
+      });
+      const status = service.status();
+      expect(status.corpusHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(status.corpusHash).toBe(temp.store.getMeta('corpus_hash'));
     } finally {
       temp.cleanup();
     }

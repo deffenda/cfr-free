@@ -1,6 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { corpusHash, hashContent } from '../src/core/changes.js';
 import type { EcfrApi } from '../src/core/ecfr.js';
 import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
 import { CFRService } from '../src/core/service.js';
@@ -265,6 +266,37 @@ describe('MCP server (in-memory transport)', () => {
     expect(result.structuredContent?.['maxAgeDays']).toBe(7);
     // Fixtures predate the expected-counts meta: drift is unknown, not false.
     expect(result.structuredContent?.['structureDrift']).toBeNull();
+    // The fixtures never synced through a rebuild, so no receipt exists.
+    expect(result.structuredContent?.['corpusHash']).toBeNull();
+  });
+
+  it('index_status carries the corpus receipt when the index has one', async () => {
+    const sections = [...FIXTURE_SECTIONS, DEFINITIONS_SECTION];
+    const receipt = corpusHash(
+      new Map(
+        sections.map((section) => [section.citation, hashContent(section.text, section.heading)]),
+      ),
+    );
+    const withReceipt = openTempStore({ sections });
+    const server = buildMcpServer(new CFRService(withReceipt.store, 7), createTestLogger());
+    const probe = new Client({ name: 'probe', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), probe.connect(clientTransport)]);
+    try {
+      // The receipt an index carries is what a rebuild recorded for it.
+      withReceipt.store.replaceAll(sections, '2026-10-09', { corpus_hash: receipt });
+      const result = (await probe.callTool({
+        name: 'index_status',
+        arguments: {},
+      })) as ToolCallResult;
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent?.['corpusHash']).toBe(receipt);
+      expect(result.structuredContent?.['corpusHash']).toMatch(/^[0-9a-f]{64}$/);
+    } finally {
+      await probe.close();
+      await server.close();
+      withReceipt.cleanup();
+    }
   });
 
   it('list_parts returns parts with titles and counts', async () => {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { corpusHash, hashContent } from '../src/core/changes.js';
 import { CFRService } from '../src/core/service.js';
 import type { RawSection } from '../src/core/xml.js';
 import { openTempStore } from './helpers.js';
@@ -163,6 +164,33 @@ describe('retrieval evaluation runner (M3)', () => {
         `expectations: ${adjudicated} adjudicated, ${dev.length - adjudicated} provisional`,
       );
     });
+  });
+
+  it('carries the index corpus receipt in the provenance line', () => {
+    // An index built before the receipt existed: the runner says 'unknown'
+    // rather than inventing a hash.
+    withService((service) => {
+      const report = evaluateSet(service, 'dev');
+      expect(report.provenance.indexCorpusHash).toBe('unknown');
+      expect(renderReport(report)).toContain('corpus hash unknown');
+    });
+
+    // An index that carries a receipt: the provenance line reports it, so
+    // two runs can be compared on it.
+    const temp = openTempStore({ sections: CORPUS, issueDate: '2026-10-16' });
+    try {
+      const receipt = corpusHash(
+        new Map(
+          CORPUS.map((section) => [section.citation, hashContent(section.text, section.heading)]),
+        ),
+      );
+      temp.store.replaceAll(CORPUS, '2026-10-16', { corpus_hash: receipt });
+      const report = evaluateSet(new CFRService(temp.store, 7), 'dev');
+      expect(report.provenance.indexCorpusHash).toBe(receipt);
+      expect(renderReport(report)).toContain(`corpus hash ${receipt}`);
+    } finally {
+      temp.cleanup();
+    }
   });
 
   it('exposes the frozen sets with their provenance and adjudication status', () => {

@@ -62,6 +62,34 @@ export function hashContent(text: string, heading: string): string {
     .digest('hex');
 }
 
+/**
+ * sha256 over the WHOLE corpus — the corpus receipt.
+ *
+ * The per-provision hashes are reduced to ONE value that pins the corpus a
+ * rebuild produced: the pairs are sorted by citation, so the receipt depends
+ * on the corpus CONTENT and on nothing else — not on the order the parser
+ * emitted the provisions, not on the sync time, not on the machine. Two
+ * rebuilds of the same corpus therefore carry the same receipt, and one
+ * amended character changes it.
+ *
+ * The input is the same content hash the change diff uses (text + heading),
+ * so a receipt covers exactly what a provision amendment changes.
+ */
+export function corpusHash(hashes: ReadonlyMap<string, string>): string {
+  const digest = createHash('sha256');
+  // Sorted by citation, then hashed as `citation\0hash\n` pairs. The pairs
+  // are taken from the map's own entries, so a key always carries its hash
+  // (no lookup that could miss).
+  const pairs = [...hashes.entries()].sort(([left], [right]) => {
+    if (left === right) return 0;
+    return left < right ? -1 : 1;
+  });
+  for (const [citation, hash] of pairs) {
+    digest.update(`${citation}\0${hash}\n`, 'utf8');
+  }
+  return digest.digest('hex');
+}
+
 /** Citation-level diff of two hash snapshots; result lists are sorted. */
 export function diffHashes(
   oldHashes: ReadonlyMap<string, string>,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { diffHashes, hashContent, hashText } from '../src/core/changes.js';
+import { corpusHash, diffHashes, hashContent, hashText } from '../src/core/changes.js';
 
 describe('hashText', () => {
   it('is stable for identical text and distinct for different text', () => {
@@ -48,5 +48,38 @@ describe('diffHashes', () => {
   it('reports an empty diff for identical snapshots', () => {
     const hashes = new Map([['4.1', hashText('a')]]);
     expect(diffHashes(hashes, hashes)).toEqual({ changed: [], added: [], removed: [] });
+  });
+});
+
+describe('corpusHash', () => {
+  const base = new Map([
+    ['4.125', hashContent('body of 4.125', 'Heading of 4.125.')],
+    ['4.130', hashContent('body of 4.130', 'Heading of 4.130.')],
+  ]);
+
+  it('is stable for the same corpus and a 64-char hex digest', () => {
+    expect(corpusHash(base)).toBe(corpusHash(new Map(base)));
+    expect(corpusHash(base)).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('changes when one provision changes', () => {
+    const amended = new Map(base);
+    amended.set('4.125', hashContent('body of 4.125, amended', 'Heading of 4.125.'));
+    expect(corpusHash(amended)).not.toBe(corpusHash(base));
+  });
+
+  it('changes when the set of provisions changes', () => {
+    const added = new Map(base);
+    added.set('17.15', hashContent('body of 17.15', 'Heading of 17.15.'));
+    expect(corpusHash(added)).not.toBe(corpusHash(base));
+    const removed = new Map(base);
+    removed.delete('4.130');
+    expect(corpusHash(removed)).not.toBe(corpusHash(base));
+  });
+
+  it('does not depend on the order the keys were inserted in', () => {
+    const reversed = new Map([...base].reverse());
+    expect([...reversed.keys()]).not.toEqual([...base.keys()]);
+    expect(corpusHash(reversed)).toBe(corpusHash(base));
   });
 });
