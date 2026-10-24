@@ -79,16 +79,21 @@ establish the privacy properties of a separately chosen AI client.
    decided design, scope guard, tests, and a report format. Do not take an
    unresolved product/API decision into an implementation task.
 4. Use a worktree and the repo branch patterns. No dependency installs; only
-   reuse dependencies under AGENTS.md's same-commit link rule. Code changes
-   run through a SureForge supervised contract (see AGENTS.md);
-   agent-configuration files (`AGENTS.md`, `CLAUDE.md`) are hand-made pull
-   requests. A merge needs a fresh-context review of the exact head SHA with
-   no unresolved P0 or P1 findings; a new commit requires a fresh review,
-   including roadmap completion edits.
-5. Authentication, schema migrations, CI/release changes and anything touching
-   the merge itself need the operator's sign-off before merge; see AGENTS.md's
-   ask-the-owner-first list. Publication and paid work need their separate
-   authorization. Track dependencies explicitly; green checks do not authorize
+   reuse dependencies under AGENTS.md's same-commit link rule. A SureForge
+   supervised contract is optional (fleet core); the standing pattern for
+   this repo's code changes is one when the owner asks for it or the task
+   needs a contract-bound run (see AGENTS.md), and agent-configuration
+   files (`AGENTS.md`, `CLAUDE.md`) are ordinary change requests, not
+   SureForge contracts. A merge needs an independent fresh-context review
+   of the exact head SHA with no unresolved P0 or P1 findings; a new
+   commit — including a roadmap completion edit — requires a fresh review,
+   except a clean automatic merge of the base branch, which keeps the
+   review.
+5. Authentication, schema migrations, CI/release changes and changes to the
+   merge rule itself need the operator's sign-off before merge; all four
+   are AGENTS.md's merge floor, and merging follows the merge rule
+   there. Publication and paid work need their separate authorization.
+   Track dependencies explicitly; green checks do not authorize
    scope growth.
 
 ### Delivery order and exit gates
@@ -415,10 +420,14 @@ first expected hit, so it changed no metric. The burned
 holdout keeps its own expectations byte-for-byte as committed (the
 burned holdout's curated quoted-phrase expectations remain a frozen
 regression set, not a policy carrier) and is untouched by this change.
-With that ratification the set became a
+With the operator's ratification of decisions selected in chat 2026-10-22
+(recorded on issue #135), effective with the 2026-10-23 gate commit, the
+fresh set became a
 **structural gate**: `test/retrieval-eval.test.ts` asserts every entry
 `adjudicated`, unique by exact query text, disjoint from the dev and
-burned sets, and the 33/8 answerable split — and it sets **NO numeric
+burned sets, and the 33/8 answerable split — and, since PR #143, pushes
+all 41 entries through the runner against the hermetic seeded corpus
+(arithmetic invariants only) — while it sets **NO numeric
 threshold**, which needs its own operator ratification; the fresh set must
 not be used to select thresholds or tune ranking. The measured baseline
 (exact-citation 17/33, recall@5 23/33, MRR 0.596, no-answer violations
@@ -429,7 +438,11 @@ adjudication record.
 adjudicate the 39 provisional expectations — INCLUDING their ORDER. **DONE
 2026-10-21 by committee** (the content and the order were both adjudicated and
 cross-checked against the corpus); what remains is the operator's expert
-ratification of the result. The
+ratification of that result — the 39 provisional entries are 25 dev + 14
+holdout across the 50-entry frozen benchmark (30 dev + 20 holdout), and
+the 2026-10-22 operator
+decisions recorded on issue #135 ratified the FRESH set as a gate after
+review, not this result. The
 order matters more than it looks: measured on the frozen 50, 42 answerable
 queries have their expected provision in the top five, but only 29 have it
 FIRST (the runner's measure: the top hit is one of the expected citations),

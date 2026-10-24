@@ -3,7 +3,10 @@
 ## Status
 
 This is a measurement artifact for M3 items 2 and 3, written 2026-10-21.
-**Updated 2026-10-23:** the fresh set is adjudicated and is a structural
+**Updated 2026-10-24:** the dev quoted-phrase realignment and re-measure
+landed (§2026-10-24 below), and since PR #143 the offline runner pushes
+the fresh set through the structural gate in CI. **Updated 2026-10-23:**
+the fresh set is adjudicated and is a structural
 gate (no numeric threshold) since `6f459ec` — 41 entries, 33 answerable and
 8 no-answer, all `adjudicated`. The counts below marked "2026-10-21
 snapshot" are the set as it then stood and are kept as written; the current

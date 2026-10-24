@@ -297,11 +297,15 @@ note in the same form.
 `test/fixtures/retrieval/queries.fresh.ts` — the expectations and
 rationales of the entries above, and the `adjudication` markers. **Four
 entries' query text changed in all. Two were rewritten by the cross-check**
-(3.1 and 3.3 — a quoted-phrase query whose string is not a phrase of the
-corpus cannot be adjudicated as a quoted-phrase query; rewording is what
-makes it a valid instance of its category; §3.2's claim was rejected, so
-its query stands as written) **and two were reworded by the operator's
-rulings** (selected in chat 2026-10-22, carried in the 2026-10-23 gate
+(3.1 — whose quoted string occurs nowhere in the corpus (0 `LIKE`, 0 FTS
+phrase hits), so rewording to the corpus's own phrase is what makes it a
+valid instance of its category; 3.3 — whose string does occur (3 FTS
+phrase hits) but whose expectation was under-specified for its own query,
+so the ruling broadened the expectation to those three provisions and
+reworded the query to the corpus's phrase; §3.2's claim was rejected, so
+its query stands as written) **and two
+were reworded by the operator's rulings** (selected in chat 2026-10-22,
+carried in the 2026-10-23 gate
 commit): burial allowance →
 eligibility and Purple Heart → copayment exemption (§5.1 and §4.1).
 
@@ -379,7 +383,7 @@ against the copied index.
 - Branch `feat/m3-fresh-final`, commit `3388e26` on top of `2228085`. A byte-identical uncommitted copy sits in worktree `.opencode-worktrees/sf-m3-reviewed` (branch `sf/m3-fresh-final-reviewed`); leave it alone.
 - Local gate: `npm run ci` exit 0, 709 passed, 1 skipped (run with a disclosed `node_modules` symlink, removed after).
 - Independent review of `3388e26`: APPROVE, no P0/P1, four P2 doc fixes. Those fixes were amended into the same commit (unpublished at the time), so the final SHA needs its own review.
-- Open, not in this change: dev quoted-phrase re-measure (patch saved outside the repo at `$TMPDIR/opencode/dev-quoted-phrase-edits.md`) — closed in the 2026-10-24 round, which applied the policy to the dev set and re-measured the dev baseline; stale counts at `ROADMAP.md:355` and `docs/research/retrieval-residuals-2026-10-21.md:12-17`.
+- Open, not in this change: dev quoted-phrase re-measure (patch saved outside the repo at `$TMPDIR/opencode/dev-quoted-phrase-edits.md`) — closed in the 2026-10-24 round, which applied the policy to the dev set and re-measured the dev baseline; stale counts at `ROADMAP.md:355` and `docs/research/retrieval-residuals-2026-10-21.md:12-17` — corrected in the `chore/docs-m3-baseline` round (PR #142; see the housekeeping note in the 2026-10-23 section below).
 - Repo context: PR #139 (`chore/agents-fleet-standard`) is open and CLEAN; it would replace the agent-file contract this round followed. Main CI is green at `2228085`.
 - Limit: the runner checks only the top 5 (`run.ts`, `topHitExpected` and `recallAt5`). Expected provisions ranked below 5 are never checked, so the gate cannot detect a missing result beyond rank 5.
 - Scope: `test/fixtures/retrieval/queries.dev.ts` is NOT changed by this round. The dev quoted-phrase realignment landed in its own round (2026-10-24): expectations aligned to the FTS totals and the dev baseline re-measured, recorded in `docs/research/retrieval-residuals-2026-10-21.md`.

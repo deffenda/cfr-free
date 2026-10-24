@@ -66,8 +66,10 @@ re-labelled.
 On 2026-10-21 a two-member committee adjudicated the 39 expectations this
 document recorded as `provisional`. The two members' rulings were
 cross-checked against each other and against the corpus, the disagreements
-were resolved, and the consolidated decisions are what the frozen sets now
-carry. The record — the proposals, the cross-checks, the rulings — is
+were resolved, and the consolidated decisions were what the frozen sets
+carried as of that date (later operator rulings have since amended parts of
+the dev set — see the note below the table). The record — the proposals,
+the cross-checks, the rulings — is
 `docs/research/expectation-adjudication-2026-10-21.md`. Three things changed,
 and only one of them is a number.
 
@@ -83,6 +85,14 @@ the ORDER of every set are unchanged; the MEMBERS are:
 | dev     | `"schedule of ratings"`                            | `4.130`             | all sixteen sections whose heading begins "Schedule of ratings" |
 | holdout | `veteran with a mental disorder rating`            | `4.130`             | `4.130, 4.126`                                                  |
 | holdout | `"aid and attendance"`                             | `3.504`             | `3.504, 3.352, 3.350`                                           |
+
+> **Superseded in part (2026-10-24):** the dev `"schedule of ratings"` row
+> above (sixteen heading sections) was superseded by the operator's
+> all-match ruling (`OPERATOR DECISION 2026-10-23`, recorded on issue
+> #135): applied to the dev set on 2026-10-24, the phrase now expects all
+> 18 product-FTS matches, and the dev baseline was re-measured unchanged
+> (`docs/research/retrieval-residuals-2026-10-21.md` §2026-10-24). The
+> holdout rows are the burned regression set and stay byte-frozen.
 
 The four no-answer entries (`tricare enrollment forms`, `BVA`, `NVL`,
 `sf-8 form`) keep their empty expected sets, and seven further sibling

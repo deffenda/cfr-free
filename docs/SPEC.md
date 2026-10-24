@@ -187,9 +187,11 @@ latency with machine/runtime/corpus provenance. Run it against an isolated
 copy of an index:
 `CFR_INDEX_PATH=/tmp/eval-index.sqlite npx tsx test/fixtures/retrieval/run.ts dev`.
 The baseline report is `docs/research/retrieval-baseline-2026-10-20.md`. The
-set's expectations were adjudicated by a two-member committee on 2026-10-21 and
-cross-checked against each other and against the corpus — the record is
-`docs/research/expectation-adjudication-2026-10-21.md`, and an expert remains
+set's expectations were adjudicated by a two-member committee on 2026-10-21
+and cross-checked against each other and against the corpus — the record is
+`docs/research/expectation-adjudication-2026-10-21.md` — and later amended
+by operator decisions recorded on issue #135 (2026-10-22, e.g. the
+quoted-phrase all-match policy); an expert remains
 the authority. A change to the set is a change to the benchmark and must be
 visible in the diff. The holdout set is not tuned on.
 
