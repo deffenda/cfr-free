@@ -63,17 +63,18 @@ export function hashContent(text: string, heading: string): string {
 }
 
 /**
- * sha256 over the corpus's per-provision content hashes — the corpus receipt.
+ * sha256 over the corpus's per-provision (citation, content-hash) pairs —
+ * the corpus receipt.
  *
- * The per-provision hashes are reduced to ONE value that identifies the
- * content a rebuild produced: the pairs are sorted by citation, so the
- * receipt depends on that CONTENT (text + heading) and on nothing else — not
- * on the order the parser emitted the provisions, not on the sync time, not
- * on the machine. Two rebuilds of the same corpus therefore carry the same
- * receipt, and one amended text or heading character changes it.
+ * The pairs are sorted by citation and hashed as `citation\0hash\n`, so the
+ * ONE value identifies the provisions a rebuild produced AND binds each
+ * content hash to its citation — independent of the order the parser emitted
+ * the provisions, the sync time, and the machine. Two rebuilds of the same
+ * corpus therefore carry the same receipt; one amended text or heading
+ * character (or a citation renamed) changes it.
  *
- * The input is the same content hash the change diff uses (text + heading),
- * so a receipt covers exactly what a provision amendment changes.
+ * Each per-provision hash is the same content hash the change diff uses
+ * (text + heading), so the receipt moves whenever a provision amendment does.
  */
 export function corpusHash(hashes: ReadonlyMap<string, string>): string {
   const digest = createHash('sha256');

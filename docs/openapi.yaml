@@ -575,7 +575,7 @@ components:
         structureDrift: { type: [boolean, 'null'], description: Null on older indexes. }
         corpusHash:
           type: [string, 'null']
-          description: 'Sha256 over the sorted per-provision content hashes (text + heading) at rebuild time; null on indexes built before the receipt existed.'
+          description: 'Sha256 over the sorted per-provision (citation, content-hash) pairs — content is text + heading; null on indexes built before the receipt existed.'
         diskFree:
           type: integer
           description: 'Bytes available to unprivileged users (bavail × bsize), as of boot or the last refresh round; omitted when no snapshot exists.'

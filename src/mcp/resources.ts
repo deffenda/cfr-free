@@ -38,7 +38,7 @@ export function registerResources(server: McpServer, service: CFRService, logger
       title: 'Local index freshness',
       description:
         'JSON freshness report for the local Title 38 index: eCFR issue date, last sync, ' +
-        'row counts, staleness and structure-drift flag.',
+        'row counts, staleness, structure-drift flag and the corpus receipt hash.',
       mimeType: 'application/json',
     },
     async (uri) => {
