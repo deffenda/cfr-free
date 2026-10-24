@@ -353,9 +353,13 @@ expert adjudication before it gates anything, and read exactly once.
 
 **The fresh holdout is WRITTEN, ADJUDICATED, RATIFIED and GATED (PR #141,
 `6f459ec`, 2026-10-23).** `test/fixtures/retrieval/queries.fresh.ts` carries
-41 queries (33 answerable, 8 no-answer), written on 2026-10-21 before any
-retriever run; two of the original 43 were removed on 2026-10-23 because
-their query text duplicated burned-holdout entries, so they were not unseen
+41 queries (33 answerable, 8 no-answer). The original 43 were written on
+2026-10-21 before any retriever run, but two surviving queries were later
+rewritten on corpus evidence (the cross-check, §3.1/§3.3 of the
+adjudication record) and two were reworded by operator ruling (burial
+allowance, Purple Heart); two of the 43 were removed on 2026-10-23
+because their query text duplicated burned-holdout entries, so they were
+not unseen
 (`"aid and attendance"`, `"special monthly compensation"`). Two committee
 members adjudicated every entry against the corpus, blind to the
 retriever's output, and the rulings were cross-checked against each other
@@ -383,11 +387,14 @@ result for the phrase. The Purple Heart rewording (§4.1 — the corpus
 settled the dispute, the operator owned the final wording) was recorded
 the same way: the query asks the copayment exemption the corpus actually
 holds (17.108). That last rule is FRESH-SET-ONLY for now: issue #135's
-AC require the same policy on the dev set too, and that dev realignment
-is the issue's one open AC — the dev set's committed quoted-phrase
-expectations are heading-based — 16 provisions for `"schedule of
-ratings"`, 1 for `"evaluation of hearing impairment"` — where the
-product FTS totals are 18 and 2, so the aligning re-measure is still
+AC require the same policy on the dev set too, and two of the issue's AC
+remain open — that dev realignment, and the AC requiring the offline
+runner to exercise the fresh set in CI (no CI test evaluates the fresh
+set today; `test/retrieval-eval.test.ts` asserts its structure only).
+The dev set's committed quoted-phrase expectations are heading-based —
+16 provisions for `"schedule of ratings"`, 1 for
+`"evaluation of hearing impairment"` — where the product FTS totals are
+18 and 2, so the aligning re-measure is still
 uncommitted and recorded in the adjudication record's handoff. The dev set and the burned
 holdout keep their own expectations byte-for-byte as committed (the
 burned holdout's curated quoted-phrase expectations remain a frozen

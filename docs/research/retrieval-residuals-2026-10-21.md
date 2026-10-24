@@ -13,7 +13,9 @@ burned 2026-10-16 holdout remains a regression set only.
 ## Fresh holdout
 
 `test/fixtures/retrieval/queries.fresh.ts` was written before running the
-retriever; it is separate from `queries.dev.ts` and `queries.holdout.ts`.
+retriever (two queries were later rewritten on corpus evidence and two
+reworded by operator ruling — see the adjudication record); it is
+separate from `queries.dev.ts` and `queries.holdout.ts`.
 **2026-10-21 snapshot:** 43 queries — 35 answerable and 8
 proposed no-answer cases — all marked `adjudication: 'provisional'`, with
 a category tally of 6 bare citations + 5 display citations + 7

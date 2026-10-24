@@ -92,7 +92,9 @@ order is not the phrase's.
 
 **Ruling:** the query stands as written and the expectation (§ 4.16) was
 already right. A proposal that the corpus contradicts does not become a
-ruling, and the cross-check is where it is caught.
+ruling, and the cross-check is where it is caught. (The expectation
+itself was later superseded by the 2026-10-23 all-match ruling — the
+entry now carries the full 11-provision FTS set, §5.4.)
 
 ### 3.3 `"special monthly compensation rate"` — under-specified
 
@@ -121,7 +123,9 @@ question are **4.85** (Evaluation of hearing impairment), **4.86**
 original expectation listed 4.85 and 4.86 (git receipt: `expected:
 ['4.85', '4.86']` at `1de9b90`); 4.87 was the missing one.
 
-**Ruling:** amended to all three.
+**Ruling:** amended to all three. (Later superseded by the 2026-10-23
+all-match ruling: the entry now carries the full 16-provision FTS set,
+§5.4.)
 
 ### 3.5 `traumatic brain injury residuals` — the wrong object
 
@@ -314,8 +318,10 @@ sets no threshold).
    2026-10-22, recorded on issue #135, see §5.**
 2. Ratification, which is what makes the set gate-worthy. **Done for the
    fresh set — selected in chat 2026-10-22, recorded on issue #135
-   (opened 2026-10-23); the issue stays OPEN until its dev realignment
-   AC lands** (see the 2026-10-23 sections below).
+   (opened 2026-10-23); the issue stays OPEN until its two remaining AC
+   land — the dev realignment, and the AC requiring the offline runner
+   to exercise the fresh set in CI (no CI test evaluates the fresh set
+   today)** (see the 2026-10-23 sections below).
 3. Whether to replace `NSC` with a stronger near-miss. **Open** — the
    ruling kept the entry broad, which leaves the weak-test observation
    (§5.3) standing.
@@ -337,7 +343,8 @@ without `node_modules` (installs are forbidden there). The hermetic path
 is vitest — a devDependency — under the repo's standard disclosed
 `node_modules` symlink from a checkout at the same commit:
 `npx vitest run test/retrieval-eval.test.ts`. The per-category table
-above was re-derived that way, through a one-off probe over `evaluateSet`
+in the measured-baseline section below was re-derived that way, through
+a one-off probe over `evaluateSet`
 in `test/fixtures/retrieval/run.ts`, not through `tsx`.
 
 The two member findings are recorded verbatim in the review record for
@@ -408,8 +415,12 @@ issue date 2026-10-16; 41 adjudicated entries, 0 provisional.
 Housekeeping for the docs round that records this (`chore/docs-m3-baseline`):
 the stale counts the handoff names at `ROADMAP.md:355` and
 `docs/research/retrieval-residuals-2026-10-21.md:12-17` are corrected
-there, and the handoff's "final SHA needs its own review" was satisfied at
-`f4b7228` (APPROVE, 0 P0/P1) before the merge. Still open and NOT part of
+there. The handoff's "final SHA needs its own review" was reported
+satisfied at merge time (APPROVE at `f4b7228`), but no canonical artifact
+of that review exists — PR #141's body records the review of `05d34a3`
+and says a fresh review was required at `f4b7228`, and the journal has no
+entry — so an audit should treat it as an unverified claim, recorded here
+as a process gap. Still open and NOT part of
 this measurement: the dev quoted-phrase re-measure saved outside the repo
 (`$TMPDIR/opencode/dev-quoted-phrase-edits.md`) — it needs its own
 re-measure and record before it can land.
