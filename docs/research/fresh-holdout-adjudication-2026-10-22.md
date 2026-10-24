@@ -263,11 +263,11 @@ note in the same form.
    **There is no settled precedent to follow, because the two existing sets
    already answer it differently:**
 
-   | set     | query                            | expectation                                                                  | reading                                                                                                                                                                                                      |
-   | ------- | -------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-   | dev     | `"schedule of ratings"`          | **16** provisions — every section whose heading begins "Schedule of ratings" | the FULL set, and the dev rationale records the committee ruling that "a single-section expectation for a phrase with no subject is a weak ground truth, so the honest answer is the set" (`queries.dev.ts`) |
-   | holdout | `"aid and attendance"`           | **3** provisions (3.504, 3.352, 3.350)                                       | a CURATED set                                                                                                                                                                                                |
-   | holdout | `"special monthly compensation"` | **1** provision (3.350)                                                      | the CANONICAL provision                                                                                                                                                                                      |
+   | set     | query                            | expectation                                                                                                                                                          | reading                                                                                                                                                                                                                                                                        |
+   | ------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+   | dev     | `"schedule of ratings"`          | **16** provisions — every section whose heading begins "Schedule of ratings" (the state when this question was settled; now 18 under the all-match rule — see below) | the FULL set; the rationale then on record in `queries.dev.ts` read "a single-section expectation for a phrase with no subject is a weak ground truth, so the committee ruled that the honest answer is the set" — replaced by the all-match rationale in the 2026-10-24 round |
+   | holdout | `"aid and attendance"`           | **3** provisions (3.504, 3.352, 3.350)                                                                                                                               | a CURATED set                                                                                                                                                                                                                                                                  |
+   | holdout | `"special monthly compensation"` | **1** provision (3.350)                                                                                                                                              | the CANONICAL provision                                                                                                                                                                                                                                                        |
 
    B flagged this as a policy question; it is the operator's, and the
    disagreement above is the reason it is the operator's rather than the
@@ -279,12 +279,13 @@ note in the same form.
    provisions; the fresh entry expected one). **RESOLVED — selected by
    the operator in chat on 2026-10-22, recorded on issue #135 (opened
    2026-10-22): a fresh quoted-phrase expectation is EVERY product FTS
-   result for the phrase.** This is a FRESH-SET rule,
-   not a description of the dev set: dev's committed quoted-phrase
-   expectations are heading-based (16 provisions for
-   `"schedule of ratings"`, 1 for `"evaluation of hearing impairment"`),
-   where the product FTS totals are 18 and 2 — aligning dev to the rule
-   is the still-uncommitted re-measure noted in the handoff below. The
+   result for the phrase.** This was a FRESH-SET rule at the time of the
+   fresh set's adjudication; it reached the dev set in the 2026-10-24
+   round, where the dev set's then-heading-based quoted-phrase
+   expectations (16 provisions for `"schedule of ratings"`, 1 for
+   `"evaluation of hearing impairment"` — the product FTS totals are 18
+   and 2) were aligned to the rule and the dev baseline re-measured
+   (recorded in `docs/research/retrieval-residuals-2026-10-21.md`). The
    surviving entries carry the full sets (225 / 11 / 16 provisions for
    `"service connection"`, `"individual unemployability"` and
    `"hearing impairment"`); the holdout's curated expectations in the
@@ -321,10 +322,12 @@ sets no threshold).
    2026-10-22, recorded on issue #135, see §5.**
 2. Ratification, which is what makes the set gate-worthy. **Done for the
    fresh set — selected in chat 2026-10-22, recorded on issue #135
-   (opened 2026-10-22); the issue stays OPEN until its one remaining AC
-   lands — the dev realignment. The runner AC landed: CI now exercises
-   the fresh set through the runner against the hermetic seeded corpus**
-   (see the 2026-10-23 sections below).
+   (opened 2026-10-22). The runner AC landed (CI now exercises the fresh
+   set through the runner against the hermetic seeded corpus), and the
+   dev realignment landed in the 2026-10-24 round, so every #135 AC is
+   satisfied and the issue closes on that round's merge** (see the
+   2026-10-23 sections below and the 2026-10-24 section in
+   `docs/research/retrieval-residuals-2026-10-21.md`).
 3. Whether to replace `NSC` with a stronger near-miss. **Open** — the
    ruling kept the entry broad, which leaves the weak-test observation
    (§5.3) standing.
@@ -368,7 +371,7 @@ against the copied index.
 - Removed two fresh entries, `"aid and attendance"` and `"special monthly compensation"`. Their query text is identical to burned holdout entries, so they were not unseen. Answerable count 35 → 33; total 43 → 41.
 - Caveat on quoted-phrase entries (ratified by the committee, 2026-10-23): under the all-match policy every quoted-phrase expectation equals the full FTS result set for that phrase. Those entries cannot discriminate ranking quality. Scoring is inclusion-based (`run.ts`), so a quoted entry fails only when none of its top 5 is in the expected set. Dropping one expected citation from a long list is not detected.
 - Disjointness is exact-string only. Near-duplicates are not caught. Example: fresh `"hearing impairment"` is a substring of dev `"evaluation of hearing impairment"`.
-- Changes carried in from earlier work, recorded here for the first time: the two rewrites (3.1, 3.3), whose entries were later removed as burned-holdout duplicates (so no cross-check rewrite survives in the set); the two operator rewordings that do survive (burial allowance → eligibility, Purple Heart → copayment exemption); and the quoted-phrase expectation sets for `"service connection"`, `"individual unemployability"`, and `"hearing impairment"` expanded to the full FTS set. The expansions are the operator's 2026-10-22/23 all-match ruling; it is a FRESH-SET rule — the dev set's heading-based quoted-phrase expectations (16 for `"schedule of ratings"`, 1 for `"evaluation of hearing impairment"`) are unchanged, and their alignment to the FTS totals (18 and 2) is the pending re-measure. The quoted `"special monthly compensation"` entry was also removed (see the first bullet of this section).
+- Changes carried in from earlier work, recorded here for the first time: the two rewrites (3.1, 3.3), whose entries were later removed as burned-holdout duplicates (so no cross-check rewrite survives in the set); the two operator rewordings that do survive (burial allowance → eligibility, Purple Heart → copayment exemption); and the quoted-phrase expectation sets for `"service connection"`, `"individual unemployability"`, and `"hearing impairment"` expanded to the full FTS set. The expansions are the operator's 2026-10-22/23 all-match ruling; it has since reached the dev set — the dev set's heading-based quoted-phrase expectations (16 for `"schedule of ratings"`, 1 for `"evaluation of hearing impairment"`) were aligned to the FTS totals (18 and 2) when the policy reached the dev set (2026-10-24 round; re-measured dev baseline in `docs/research/retrieval-residuals-2026-10-21.md`). The quoted `"special monthly compensation"` entry was also removed (see the first bullet of this section).
 - Expected lists in the quoted-phrase entries are string-sorted, not numerically sorted. Scoring is set-based, so this has no runtime effect.
 
 ### Handoff state (2026-10-23)
@@ -376,10 +379,10 @@ against the copied index.
 - Branch `feat/m3-fresh-final`, commit `3388e26` on top of `2228085`. A byte-identical uncommitted copy sits in worktree `.opencode-worktrees/sf-m3-reviewed` (branch `sf/m3-fresh-final-reviewed`); leave it alone.
 - Local gate: `npm run ci` exit 0, 709 passed, 1 skipped (run with a disclosed `node_modules` symlink, removed after).
 - Independent review of `3388e26`: APPROVE, no P0/P1, four P2 doc fixes. Those fixes were amended into the same commit (unpublished at the time), so the final SHA needs its own review.
-- Open, not in this change: dev quoted-phrase re-measure (patch saved outside the repo at `$TMPDIR/opencode/dev-quoted-phrase-edits.md`); stale counts at `ROADMAP.md:355` and `docs/research/retrieval-residuals-2026-10-21.md:12-17`.
+- Open, not in this change: dev quoted-phrase re-measure (patch saved outside the repo at `$TMPDIR/opencode/dev-quoted-phrase-edits.md`) — closed in the 2026-10-24 round, which applied the policy to the dev set and re-measured the dev baseline; stale counts at `ROADMAP.md:355` and `docs/research/retrieval-residuals-2026-10-21.md:12-17`.
 - Repo context: PR #139 (`chore/agents-fleet-standard`) is open and CLEAN; it would replace the agent-file contract this round followed. Main CI is green at `2228085`.
 - Limit: the runner checks only the top 5 (`run.ts`, `topHitExpected` and `recallAt5`). Expected provisions ranked below 5 are never checked, so the gate cannot detect a missing result beyond rank 5.
-- Scope: `test/fixtures/retrieval/queries.dev.ts` is NOT changed by this round. The uncommitted dev edits (quoted-phrase expectations for `"schedule of ratings"` and `"evaluation of hearing impairment"`) are saved outside the repo and change the published dev baseline. They need their own re-measure and record before they can land.
+- Scope: `test/fixtures/retrieval/queries.dev.ts` is NOT changed by this round. The dev quoted-phrase realignment landed in its own round (2026-10-24): expectations aligned to the FTS totals and the dev baseline re-measured, recorded in `docs/research/retrieval-residuals-2026-10-21.md`.
 - `adjudicated` in `queries.fresh.ts` now means settled by the corpus or by an operator ruling of 2026-10-22/23. Seven entries that were operator-decided are marked this way.
 
 ## 2026-10-23 — measured baseline of the gated set
@@ -429,7 +432,10 @@ there. The handoff's "final SHA needs its own review" was reported
 satisfied at merge time, but no canonical artifact of that review exists —
 PR #141's body records the review of `05d34a3` and says a fresh review was
 required at `f4b7228`, and the journal has no entry — so an audit should
-treat it as an unverified claim, recorded here as a process gap. Still open and NOT part of
-this measurement: the dev quoted-phrase re-measure saved outside the repo
-(`$TMPDIR/opencode/dev-quoted-phrase-edits.md`) — it needs its own
-re-measure and record before it can land.
+treat it as an unverified claim, recorded here as a process gap. Also
+open at the time of that measurement, since closed: the dev
+quoted-phrase re-measure saved outside the repo
+(`$TMPDIR/opencode/dev-quoted-phrase-edits.md`) — it landed in its own
+round (2026-10-24): expectations aligned to the FTS totals, dev
+baseline re-measured, recorded in
+`docs/research/retrieval-residuals-2026-10-21.md`.

@@ -387,20 +387,32 @@ stays broad (3.303/3.309); and a quoted phrase expects EVERY product FTS
 result for the phrase. The Purple Heart rewording (§4.1 — the corpus
 settled the dispute, the operator owned the final wording) was recorded
 the same way: the query asks the copayment exemption the corpus actually
-holds (17.108). That last rule is FRESH-SET-ONLY for now: issue #135's
-AC require the same policy on the dev set too, and one of the issue's AC
-remains open — that dev realignment. The other AC (the offline runner
+holds (17.108). That last rule was FRESH-SET-ONLY and now reaches the dev
+set too: issue #135's AC require the same policy on the dev set, and the
+dev realignment landed in this round (2026-10-24) — every #135 AC is
+satisfied and the issue closes on merge. The other AC (the offline runner
 exercising the fresh set in CI) landed: `test/retrieval-eval.test.ts`
 pushes all 41 entries through the runner against the hermetic seeded
 corpus, with no numeric threshold.
-The dev set's committed quoted-phrase expectations are heading-based —
-16 provisions for `"schedule of ratings"`, 1 for
-`"evaluation of hearing impairment"` — where the product FTS totals are
-18 and 2, so the aligning re-measure is still
-uncommitted and recorded in the adjudication record's handoff. The dev set and the burned
-holdout keep their own expectations byte-for-byte as committed (the
+The dev set's quoted-phrase expectations now follow the operator's
+all-match rule, the same rule the fresh set carries: `"schedule of
+ratings"` moves from 16 provisions to 18 and `"evaluation of hearing
+impairment"` from 1 to 2, matching the product FTS totals (18 and 2)
+exactly. The dev set was re-measured afterwards against the 2026-10-16
+index — exact-citation 22/29, recall@5 28/29, MRR 0.8448, no-answer
+violations 1/1 — the same numbers as before the realignment. Both queries
+were already exact-citation successes (top hit expected, MRR contribution
+1.0), and adding expectations is monotone — it can only turn a scoring
+boolean on or lower the first expected hit's rank, never the reverse — so
+a saturated pair cannot move. For `"schedule of ratings"` the two added
+citations also rank outside the runner's top-five window entirely
+(`4.87a, 4.87, 4.130, 4.150, 4.116`); for `"evaluation of hearing
+impairment"` the added `3.383` sits inside it at rank 2 but was not the
+first expected hit, so it changed no metric. The burned
+holdout keeps its own expectations byte-for-byte as committed (the
 burned holdout's curated quoted-phrase expectations remain a frozen
-regression set, not a policy carrier). With that ratification the set became a
+regression set, not a policy carrier) and is untouched by this change.
+With that ratification the set became a
 **structural gate**: `test/retrieval-eval.test.ts` asserts every entry
 `adjudicated`, unique by exact query text, disjoint from the dev and
 burned sets, and the 33/8 answerable split — and it sets **NO numeric
