@@ -1,4 +1,10 @@
-import { CHANGE_LIST_CAP, diffHashes, hashContent, type SyncChanges } from './changes.js';
+import {
+  CHANGE_LIST_CAP,
+  corpusHash,
+  diffHashes,
+  hashContent,
+  type SyncChanges,
+} from './changes.js';
 import type { Logger } from '../logger.js';
 import type { EcfrApi } from './ecfr.js';
 import { countNodes, parseStructure, type StructureNode } from './structure.js';
@@ -40,6 +46,14 @@ export interface SyncReport {
    * textual coverage.
    */
   readonly imageContentSections: number;
+  /**
+   * The corpus receipt: sha256 over every provision's (citation,
+   * content-hash) pair — content = text + heading, the change-diff unit
+   * (SPEC §4). Together with the issue date it identifies the provisions
+   * the index was rebuilt from, so two retrieval runs are comparable only
+   * when their receipts agree.
+   */
+  readonly corpusHash: string;
 }
 
 /**
@@ -186,6 +200,15 @@ export async function syncIndex(deps: SyncDeps): Promise<SyncReport> {
     // upserts run — so it still rides the SAME rebuild COMMIT.
   };
 
+  // The corpus receipt (SPEC §4): a sha256 over the whole corpus's
+  // per-provision content hashes. It is set on the SAME meta object the
+  // rebuild upserts, so the receipt rides the rebuild's COMMIT — this
+  // rebuild path cannot commit rows without the receipt that describes
+  // them. Residual risk outside this path: meta keys it does not write
+  // are left as they are, so a rebuild performed by a binary that
+  // predates the receipt would leave a stale one behind, undetected.
+  meta.corpus_hash = corpusHash(newHashes);
+
   // The baseline snapshot (previous issue date, previous parser, outgoing
   // text hashes) is taken INSIDE the rebuild transaction by the callback:
   // between a pre-transaction snapshot and BEGIN IMMEDIATE a second
@@ -216,6 +239,7 @@ export async function syncIndex(deps: SyncDeps): Promise<SyncReport> {
     durationMs: Date.now() - startedAt,
     changes: { changed: changes.changed, added: changes.added, removed: changes.removed },
     imageContentSections,
+    corpusHash: meta.corpus_hash,
   };
   logger.info('index rebuilt', { ...report });
   return report;

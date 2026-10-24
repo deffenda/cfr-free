@@ -51,7 +51,8 @@ export function hashText(text: string): string {
  * corpus: exactly one such heading-only amendment per ~2,921 provisions
  * per year, and it is invisible to a text-only comparison.
  *
- * The separator keeps the two fields unambiguous (no collision between a
+ * Framing (SPEC section 4): text, then the NUL character, then heading —
+ * the separator keeps the two fields unambiguous (no collision between a
  * text/heading pair and a different pair with the same concatenation).
  */
 export function hashContent(text: string, heading: string): string {
@@ -60,6 +61,35 @@ export function hashContent(text: string, heading: string): string {
     .update('\u0000', 'utf8')
     .update(heading, 'utf8')
     .digest('hex');
+}
+
+/**
+ * sha256 over the corpus's per-provision (citation, content-hash) pairs —
+ * the corpus receipt.
+ *
+ * The pairs are sorted by citation and hashed as `citation\0hash\n`, so the
+ * ONE value identifies the provisions a rebuild produced AND binds each
+ * content hash to its citation — independent of the order the parser emitted
+ * the provisions, the sync time, and the machine. Two rebuilds of the same
+ * corpus therefore carry the same receipt; one amended text or heading
+ * character (or a citation renamed) changes it.
+ *
+ * Each per-provision hash is the same content hash the change diff uses
+ * (text + heading), so the receipt moves whenever a provision amendment does.
+ */
+export function corpusHash(hashes: ReadonlyMap<string, string>): string {
+  const digest = createHash('sha256');
+  // Sorted by citation, then hashed as `citation\0hash\n` pairs. The pairs
+  // are taken from the map's own entries, so a key always carries its hash
+  // (no lookup that could miss).
+  const pairs = [...hashes.entries()].sort(([left], [right]) => {
+    if (left === right) return 0;
+    return left < right ? -1 : 1;
+  });
+  for (const [citation, hash] of pairs) {
+    digest.update(`${citation}\0${hash}\n`, 'utf8');
+  }
+  return digest.digest('hex');
 }
 
 /** Citation-level diff of two hash snapshots; result lists are sorted. */

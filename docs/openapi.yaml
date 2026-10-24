@@ -116,7 +116,7 @@ paths:
       summary: Index freshness report
       responses:
         '200':
-          description: '{ status: "ok", ...service.status() } — issue date, counts, staleness, drift, last sync changes; diskFree/diskTotal present when the platform exposes fs.statfs (as of boot or last refresh round). Cache-Control: no-store.'
+          description: '{ status: "ok", ...service.status() } — issue date, counts, staleness, drift, last sync changes, corpus receipt hash (null on pre-receipt indexes); diskFree/diskTotal present when the platform exposes fs.statfs (as of boot or last refresh round). Cache-Control: no-store.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Health' }
@@ -562,6 +562,7 @@ components:
         - parserVersion
         - structureDrift
         - lastChanges
+        - corpusHash
       properties:
         status: { type: string, enum: [ok] }
         issueDate: { type: [string, 'null'] }
@@ -572,6 +573,9 @@ components:
         maxAgeDays: { type: integer }
         parserVersion: { type: [string, 'null'] }
         structureDrift: { type: [boolean, 'null'], description: Null on older indexes. }
+        corpusHash:
+          type: [string, 'null']
+          description: 'Sha256 over the sorted per-provision (citation, content-hash) pairs — content is text + heading; null on indexes built before the receipt existed.'
         diskFree:
           type: integer
           description: 'Bytes available to unprivileged users (bavail × bsize), as of boot or the last refresh round; omitted when no snapshot exists.'

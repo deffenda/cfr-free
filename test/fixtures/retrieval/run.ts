@@ -54,6 +54,12 @@ export interface EvaluationReport {
     readonly cpus: number;
     readonly totalMemMb: number;
     readonly indexIssueDate: string;
+    /**
+     * The index's corpus receipt (SPEC §4): sha256 over the whole corpus at
+     * rebuild time. Two runs are comparable only when their receipts agree;
+     * 'unknown' marks an index built before the receipt existed.
+     */
+    readonly indexCorpusHash: string;
     readonly adjudicatedExpectations: number;
     readonly provisionalExpectations: number;
   };
@@ -140,6 +146,11 @@ export function evaluateSet(service: CFRService, set: EvaluationSet): Evaluation
     byCategory[outcome.category] = bucket;
   }
   const sum = (values: readonly number[]): number => values.reduce((a, b) => a + b, 0);
+  // One status read keeps issue date and receipt drawn from the same call —
+  // NOT a guaranteed single snapshot (status() reads meta per-key); the SPEC
+  // directs evaluation at an isolated copy, so a concurrent sync cannot
+  // interleave here in the supported workflow.
+  const status = service.status();
   return {
     set,
     provenance: {
@@ -148,7 +159,8 @@ export function evaluateSet(service: CFRService, set: EvaluationSet): Evaluation
       node: process.version,
       cpus: cpus().length,
       totalMemMb: Math.round(totalmem() / 1024 / 1024),
-      indexIssueDate: service.status().issueDate ?? 'unknown',
+      indexIssueDate: status.issueDate ?? 'unknown',
+      indexCorpusHash: status.corpusHash ?? 'unknown',
       adjudicatedExpectations: entries.filter((e) => e.adjudication === 'adjudicated').length,
       provisionalExpectations: entries.filter((e) => e.adjudication === 'provisional').length,
     },
@@ -175,7 +187,8 @@ export function renderReport(report: EvaluationReport): string {
   lines.push(`retrieval evaluation — ${report.set} set`);
   lines.push(
     `  provenance: ${report.provenance.platform} ${report.provenance.arch}, node ${report.provenance.node}, ` +
-      `${report.provenance.cpus} cpus, ${report.provenance.totalMemMb} MB, index issue date ${report.provenance.indexIssueDate}`,
+      `${report.provenance.cpus} cpus, ${report.provenance.totalMemMb} MB, index issue date ${report.provenance.indexIssueDate}, ` +
+      `corpus hash ${report.provenance.indexCorpusHash}`,
   );
   lines.push(
     `  expectations: ${report.provenance.adjudicatedExpectations} adjudicated, ` +

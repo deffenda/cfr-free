@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { diffHashes, hashContent, hashText } from '../src/core/changes.js';
+import { corpusHash, diffHashes, hashContent, hashText } from '../src/core/changes.js';
 
 describe('hashText', () => {
   it('is stable for identical text and distinct for different text', () => {
@@ -48,5 +48,94 @@ describe('diffHashes', () => {
   it('reports an empty diff for identical snapshots', () => {
     const hashes = new Map([['4.1', hashText('a')]]);
     expect(diffHashes(hashes, hashes)).toEqual({ changed: [], added: [], removed: [] });
+  });
+});
+
+describe('corpusHash', () => {
+  const base = new Map([
+    ['4.125', hashContent('body of 4.125', 'Heading of 4.125.')],
+    ['4.130', hashContent('body of 4.130', 'Heading of 4.130.')],
+  ]);
+
+  it('is stable for the same corpus and a 64-char hex digest', () => {
+    expect(corpusHash(base)).toBe(corpusHash(new Map(base)));
+    expect(corpusHash(base)).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('changes when one provision changes', () => {
+    const amended = new Map(base);
+    amended.set('4.125', hashContent('body of 4.125, amended', 'Heading of 4.125.'));
+    expect(corpusHash(amended)).not.toBe(corpusHash(base));
+  });
+
+  it('changes when the set of provisions changes', () => {
+    const added = new Map(base);
+    added.set('17.15', hashContent('body of 17.15', 'Heading of 17.15.'));
+    expect(corpusHash(added)).not.toBe(corpusHash(base));
+    const removed = new Map(base);
+    removed.delete('4.130');
+    expect(corpusHash(removed)).not.toBe(corpusHash(base));
+  });
+
+  it('does not depend on the order the keys were inserted in', () => {
+    const reversed = new Map([...base].reverse());
+    expect([...reversed.keys()]).not.toEqual([...base.keys()]);
+    expect(corpusHash(reversed)).toBe(corpusHash(base));
+  });
+
+  it('matches a known-answer constant and binds each hash to its citation', () => {
+    // The SPEC §4 contract: pairs framed `citation\0hash\n`, sorted by
+    // citation, sha256. These constants were computed ONCE from that framing;
+    // if the framing (separator, sort, fields inside the digest) ever changes,
+    // they must change — that is the point of pinning them.
+    const h1 = '0'.repeat(63) + '1';
+    const h2 = 'f'.repeat(64);
+    expect(
+      corpusHash(
+        new Map([
+          ['4.1', h1],
+          ['4.2', h2],
+        ]),
+      ),
+    ).toBe('76939bbef43de65a8648b61663996024a024d3afdeb76d991683884e8b502e8c');
+    // Same two content hashes swapped between the two citations MUST change
+    // the receipt: dropping the citation from the digest (or the citation
+    // binding anywhere else) fails here.
+    expect(
+      corpusHash(
+        new Map([
+          ['4.1', h2],
+          ['4.2', h1],
+        ]),
+      ),
+    ).toBe('9ff58a42f2b5f4aa26c2bcbc961e9eecd2595694040becdea0410d144a53879c');
+    // Collation: citations compare by UTF-16 code unit, so '4.10' sorts
+    // BEFORE '4.9' (catches a numeric-aware comparator) and '4.71B' sorts
+    // before '4.71a' (catches a locale-aware one, which would put the
+    // lowercase first). Either "cleanup" changes a constant and fails here.
+    expect(
+      corpusHash(
+        new Map([
+          ['4.9', h1],
+          ['4.10', h2],
+        ]),
+      ),
+    ).toBe('2501d82b439ff2632f7da7f7f1db1426bbae62502e462f09f71c958276e66b27');
+    expect(
+      corpusHash(
+        new Map([
+          ['4.71B', h1],
+          ['4.71a', h2],
+        ]),
+      ),
+    ).toBe('ddfbb3d7da44fd60195e230c7acf6996031e61db8035bbbfd082780412af0ab5');
+  });
+
+  it('pins hashContent itself: text, NUL, heading — a known-answer constant', () => {
+    // SPEC §4 makes hashContent's framing contractual; this constant fails
+    // if the separator, the field order or the field set ever changes.
+    expect(
+      hashContent('Diagnosis of mental disorders.', '4.125 Diagnosis of mental disorders.'),
+    ).toBe('cad4974f374f2e126d1d16a167656d2f984931d8c7ac8c08afcc61e62876020d');
   });
 });

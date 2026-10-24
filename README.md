@@ -222,7 +222,7 @@ node dist/cli.js version                  # -> 0.2.1
 # 2. network: build the index (~2-3 MB, ~5 s)
 node dist/cli.js sync
 # -> synced 2953 sections + 17 appendices (issue date 2026-10-16; ...
-#    9 provisions contain image content not included; 2134 ms)
+#    9 provisions contain image content not included; 2134 ms; corpus hash ...)
 
 # 3. HTTP read (no network from here on)
 CFR_PORT=8791 node dist/cli.js serve & SERVER_PID=$!
@@ -302,7 +302,7 @@ disorders?"_ or _"Search Title 38 for traumatic brain injury compensation."_
 | `search_regulations` | `query`, `page?`, `per_page?`, `part?`            | Ranked hits: citation (+ `38 C.F.R. §` display form, ecfr.gov link), heading, snippet, score, matches — with exact-citation pinning, `"quoted phrase"` search, and claims-acronym expansion (PTSD, TDIU, SMC, …). Each response also carries `matchedTerms`/`unmatchedTerms`: the query's content words the returned hits did and did not answer |
 | `get_section`        | `citation` (e.g. `38 CFR 4.125`)                  | Full section text as markdown + ecfr.gov link + cross-references with availability flags                                                                                                                                                                                                                                                         |
 | `browse_title38`     | `chapter?`, `part?`, `subpart?`, `subject_group?` | Children of the requested hierarchy level (a `subject_group` holds the sections of one regulatory subject)                                                                                                                                                                                                                                       |
-| `index_status`       | —                                                 | Issue date, last sync, row counts, staleness, drift flag, and what the last sync amended/added/removed                                                                                                                                                                                                                                           |
+| `index_status`       | —                                                 | Issue date, last sync, row counts, staleness, drift flag, corpus receipt hash, and what the last sync amended/added/removed                                                                                                                                                                                                                      |
 | `list_parts`         | —                                                 | Parts in the index with titles and section/appendix counts                                                                                                                                                                                                                                                                                       |
 | `health`             | —                                                 | One-call readiness verdict: `ready`, `stale`, `degraded` (structure drift), or `empty`                                                                                                                                                                                                                                                           |
 | `diff_issues`        | `from_date`, `to_date`                            | Provision-level diff between two eCFR issue dates: changed/added/removed citations (capped, with a truncation flag)                                                                                                                                                                                                                              |
@@ -316,7 +316,7 @@ aged out) so a client can never unknowingly quote a lapsed version.
 
 Beyond tools, the server exposes three MCP **resources** that clients can read
 directly — `cfr://index/status` (freshness JSON: issue date, last sync, row
-counts, staleness, drift), `cfr://title38/parts` (parts with titles and
+counts, staleness, drift, corpus receipt hash), `cfr://title38/parts` (parts with titles and
 counts), and `cfr://title38/definitions` (§ 3.1 master definitions section
 detail) — plus two **prompts**: `cfr_research` (`topic`, `part?`), which walks
 a model through the search → read → cite workflow, and

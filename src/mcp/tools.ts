@@ -101,6 +101,7 @@ const statusOutputSchema = z.object({
   maxAgeDays: z.number(),
   parserVersion: z.string().nullable(),
   structureDrift: z.boolean().nullable(),
+  corpusHash: z.string().nullable(),
   lastChanges: z
     .object({
       fromIssueDate: z.string().nullable(),
@@ -432,7 +433,9 @@ export function registerTools(
     {
       title: 'Local index freshness',
       description:
-        'Report how current the local Title 38 index is: eCFR issue date, last sync time, row counts and ' +
+        'Report how current the local Title 38 index is: eCFR issue date, last sync time, row counts, the ' +
+        'corpus receipt hash (a sha256 over the sorted per-provision (citation, text+heading) pairs at ' +
+        'rebuild time, null on older indexes) and ' +
         'whether the index is stale relative to CFR_MAX_AGE_DAYS. Check this before relying on search results.',
       outputSchema: statusOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,

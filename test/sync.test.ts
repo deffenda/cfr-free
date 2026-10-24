@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+import { corpusHash, hashContent } from '../src/core/changes.js';
 import { HttpClient } from '../src/core/http-client.js';
 import { EcfrApi } from '../src/core/ecfr.js';
 import { syncIndex, SyncError, PARSER_VERSION } from '../src/core/sync.js';
 import { Store, StoreError } from '../src/core/store.js';
+import { parseTitleXml } from '../src/core/xml.js';
 import { createTestLogger, FIXTURE_STRUCTURE, FIXTURE_SECTIONS, openTempStore } from './helpers.js';
 import type { FetchLike } from '../src/core/http-client.js';
 
@@ -650,6 +652,88 @@ describe('Store.replaceAllWithBaseline', () => {
       const report = await syncIndex(deps);
       expect(report.imageContentSections).toBe(0);
       expect(deps.store.getMeta('image_content_sections')).toBe('0');
+    } finally {
+      deps.temp.cleanup();
+    }
+  });
+});
+
+describe('syncIndex corpus receipt', () => {
+  it('records the receipt as a 64-char hex hash describing the corpus', async () => {
+    const deps = makeDeps(makeFetch());
+    try {
+      const report = await syncIndex(deps);
+      const stored = deps.store.getMeta('corpus_hash');
+      expect(stored).toMatch(/^[0-9a-f]{64}$/);
+      expect(report.corpusHash).toBe(stored);
+      // The receipt is the hash of THIS corpus: recomputed independently
+      // from the parsed XML, it must match what the rebuild recorded.
+      const expected = corpusHash(
+        new Map(
+          parseTitleXml(FULL_XML).map((section) => [
+            section.citation,
+            hashContent(section.text, section.heading),
+          ]),
+        ),
+      );
+      expect(stored).toBe(expected);
+    } finally {
+      deps.temp.cleanup();
+    }
+  });
+
+  it('is identical for two rebuilds of the same corpus and differs for an amended body', async () => {
+    const temp = openTempStore({ seed: false });
+    const logger = createTestLogger();
+    try {
+      await syncIndex({ ecfr: makeEcfr(makeFetch()), store: temp.store, logger });
+      const first = temp.store.getMeta('corpus_hash');
+      expect(first).toMatch(/^[0-9a-f]{64}$/);
+
+      // The same corpus again: the receipt must not move (it depends on the
+      // content, not on the sync time or the rebuild).
+      await syncIndex({ ecfr: makeEcfr(makeFetch()), store: temp.store, logger });
+      expect(temp.store.getMeta('corpus_hash')).toBe(first);
+
+      // One amended character in one provision: the receipt must move.
+      const amendedXml = FULL_XML.replace('<P>Body text.</P>', '<P>Body text, amended.</P>');
+      const report = await syncIndex({
+        ecfr: makeEcfr(makeFetch({ xml: amendedXml })),
+        store: temp.store,
+        logger,
+      });
+      expect(report.corpusHash).not.toBe(first);
+      expect(temp.store.getMeta('corpus_hash')).toBe(report.corpusHash);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('commits the receipt inside the rebuild transaction, not as a second write', async () => {
+    const deps = makeDeps(makeFetch());
+    try {
+      const replace = vi.spyOn(deps.store, 'replaceAllWithBaseline');
+      const setMeta = vi.spyOn(deps.store, 'setMeta');
+      await syncIndex(deps);
+      expect(replace).toHaveBeenCalledTimes(1);
+      // The receipt is a field of the SAME meta object the rebuild commits.
+      const meta = replace.mock.calls[0]?.[2] ?? {};
+      expect(Object.keys(meta)).toContain('corpus_hash');
+      expect(meta.corpus_hash).toBe(deps.store.getMeta('corpus_hash'));
+      // No separate post-commit write could orphan it from the new index.
+      expect(setMeta.mock.calls.some(([key]) => key === 'corpus_hash')).toBe(false);
+      replace.mockRestore();
+      setMeta.mockRestore();
+    } finally {
+      deps.temp.cleanup();
+    }
+  });
+
+  it('leaves no receipt behind when the rebuild rolls back', async () => {
+    const deps = makeDeps(makeFetch({ issueDate: '2026-10-16', xml: DUPLICATE_CITATION_XML }));
+    try {
+      await expect(syncIndex(deps)).rejects.toThrow(/UNIQUE constraint failed/i);
+      expect(deps.store.getMeta('corpus_hash')).toBeNull();
     } finally {
       deps.temp.cleanup();
     }

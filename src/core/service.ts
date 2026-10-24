@@ -217,6 +217,12 @@ export interface IndexStatus {
   readonly structureDrift: boolean | null;
   /** What the most recent sync changed at the provision level; null before any sync. */
   readonly lastChanges: SyncChanges | null;
+  /**
+   * The corpus receipt (SPEC §4): sha256 over the whole corpus's
+   * per-provision content hashes at rebuild time. Null on indexes built
+   * before the receipt existed.
+   */
+  readonly corpusHash: string | null;
 }
 
 /** Coarse readiness enum for MCP clients gating queries on one call. */
@@ -579,6 +585,7 @@ export class CFRService {
       parserVersion: this.store.getMeta('parser_version'),
       structureDrift: this.structureDrift(sections),
       lastChanges: this.lastChanges(),
+      corpusHash: this.store.getMeta('corpus_hash'),
     };
   }
 
