@@ -85,10 +85,10 @@ establish the privacy properties of a separately chosen AI client.
    needs a contract-bound run (see AGENTS.md), and agent-configuration
    files (`AGENTS.md`, `CLAUDE.md`) are ordinary change requests, not
    SureForge contracts. A merge needs an independent fresh-context review
-   of the exact head SHA with no unresolved P0 or P1 findings; a new commit
-   requires a fresh review — except a clean automatic merge of the base
-   branch, which keeps the review — including for roadmap completion
-   edits.
+   of the exact head SHA with no unresolved P0 or P1 findings; a new
+   commit — including a roadmap completion edit — requires a fresh review,
+   except a clean automatic merge of the base branch, which keeps the
+   review.
 5. Authentication, schema migrations, CI/release changes and changes to the
    merge rule itself need the operator's sign-off before merge; the first
    three are AGENTS.md's merge floor, and merging follows the merge rule
@@ -420,8 +420,9 @@ first expected hit, so it changed no metric. The burned
 holdout keeps its own expectations byte-for-byte as committed (the
 burned holdout's curated quoted-phrase expectations remain a frozen
 regression set, not a policy carrier) and is untouched by this change.
-With the operator's ratification (selected in chat 2026-10-22, recorded
-on issue #135) the fresh set became a
+With the operator's ratification of decisions selected in chat 2026-10-22
+(recorded on issue #135), effective with the 2026-10-23 gate commit, the
+fresh set became a
 **structural gate**: `test/retrieval-eval.test.ts` asserts every entry
 `adjudicated`, unique by exact query text, disjoint from the dev and
 burned sets, and the 33/8 answerable split — and, since PR #143, pushes
@@ -437,9 +438,10 @@ adjudication record.
 adjudicate the 39 provisional expectations — INCLUDING their ORDER. **DONE
 2026-10-21 by committee** (the content and the order were both adjudicated and
 cross-checked against the corpus); what remains is the operator's expert
-ratification of the dev set's 39-entry result — the 2026-10-22 operator
+ratification of that result — the 39 provisional entries are 25 dev + 14
+holdout across the two 50-entry frozen sets, and the 2026-10-22 operator
 decisions recorded on issue #135 ratified the FRESH set as a gate after
-review, not the dev set's result. The
+review, not this result. The
 order matters more than it looks: measured on the frozen 50, 42 answerable
 queries have their expected provision in the top five, but only 29 have it
 FIRST (the runner's measure: the top hit is one of the expected citations),

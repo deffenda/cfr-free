@@ -297,11 +297,13 @@ note in the same form.
 `test/fixtures/retrieval/queries.fresh.ts` — the expectations and
 rationales of the entries above, and the `adjudication` markers. **Four
 entries' query text changed in all. Two were rewritten by the cross-check**
-(3.1 — whose quoted string occurs nowhere in the corpus, so no corpus
-result could ground it as a quoted-phrase query; 3.3 — whose string does
-occur but under-specified the entry for its own expectation; in both,
-rewording is what makes the entry a valid instance of its category;
-§3.2's claim was rejected, so its query stands as written) **and two
+(3.1 — whose quoted string occurs nowhere in the corpus (0 `LIKE`, 0 FTS
+phrase hits), so rewording to the corpus's own phrase is what makes it a
+valid instance of its category; 3.3 — whose string does occur (3 FTS
+phrase hits) but whose expectation was under-specified for its own query,
+so the ruling broadened the expectation to those three provisions and
+reworded the query to the corpus's phrase; §3.2's claim was rejected, so
+its query stands as written) **and two
 were reworded by the operator's rulings** (selected in chat 2026-10-22,
 carried in the 2026-10-23 gate
 commit): burial allowance →
