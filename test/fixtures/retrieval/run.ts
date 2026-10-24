@@ -146,8 +146,10 @@ export function evaluateSet(service: CFRService, set: EvaluationSet): Evaluation
     byCategory[outcome.category] = bucket;
   }
   const sum = (values: readonly number[]): number => values.reduce((a, b) => a + b, 0);
-  // One status read: the issue date and the corpus receipt come from the
-  // same snapshot of the index.
+  // One status read keeps issue date and receipt drawn from the same call —
+  // NOT a guaranteed single snapshot (status() reads meta per-key); the SPEC
+  // directs evaluation at an isolated copy, so a concurrent sync cannot
+  // interleave here in the supported workflow.
   const status = service.status();
   return {
     set,

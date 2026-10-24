@@ -197,12 +197,15 @@ visible in the diff. The holdout set is not tuned on.
 
 **Index receipt:** every rebuild records a corpus receipt in `meta`: the eCFR
 issue date plus `corpus_hash`, a sha256 over the sorted per-provision content
-hashes (text + heading). `index_status` (MCP and HTTP) surfaces it and the
-retrieval runner prints it. Any change round that touches index-affecting
+hashes (text + heading — rendering and structure metadata are outside the
+digest). `index_status` (MCP and HTTP) surfaces it and the retrieval runner
+prints it. Any change round that touches index-affecting
 code (parsing, sync, schema, ranking inputs) must re-record the receipt
 against a rebuilt index and cite (issue date, corpus hash) in the change
 request; retrieval results are only comparable when their provenance carries
-the same receipt.
+the same receipt. The digest definition is part of the contract: changing
+`hashContent` or the reduction changes every future receipt, so such a change
+must be stated in the change request alongside the receipt it replaces.
 
 ### 4.1 The candidate set and the ranking order
 
@@ -295,7 +298,7 @@ Machine-readable contract: [`docs/openapi.yaml`](openapi.yaml) (OpenAPI 3.1, der
 
 2. `get_section(citation)` → accepts `4.125`, `§ 4.125`, `38 CFR 4.125` and the dotted legal form the product itself displays (`38 C.F.R. § 4.125` — a pasted citation must resolve to the provision it was copied from; P1-03); returns markdown text, heading, path, issue date, eCFR source URL, and `references[]` (every `§`/`38 CFR` cross-cite in the text with a local-availability flag). A citation that misses the index returns actionable guidance instead of a bare 404: reserved/removed/outside-Title-38 possibilities, the eCFR verify link, and indexed sections that mention it. Stale-index notices also link the eCFR point-in-time form (`/on/<date>/title-38/section-<citation>`) for date-of-claim/CUE analysis.
 3. `browse_title38(chapter?, part?, subpart?, subject_group?)` → structure children at that level.
-4. `index_status()` → freshness (issue date, synced at, staleness vs. `CFR_MAX_AGE_DAYS`, structure-drift flag) plus `lastChanges`: what the most recent sync amended/added/removed at the provision level (per-citation sha256 diff across the wholesale rebuild, capped lists, `baseline` flag on first sync, `parserChanged` guard against re-extraction noise).
+4. `index_status()` → freshness (issue date, synced at, staleness vs. `CFR_MAX_AGE_DAYS`, structure-drift flag, corpus receipt hash — SPEC §4 "Index receipt") plus `lastChanges`: what the most recent sync amended/added/removed at the provision level (per-citation sha256 diff across the wholesale rebuild, capped lists, `baseline` flag on first sync, `parserChanged` guard against re-extraction noise).
 5. `list_parts()` → every part present in the index with its structure-tree title and section/appendix counts.
 6. `health()` → one-call readiness verdict: `ready` | `stale` | `degraded` (structure drift — provisions may be missing; precedence empty → degraded → stale → ready) | `empty` (plus issue date and last sync) for clients gating queries.
 7. `diff_issues(from_date, to_date)` → provision-level diff of Title 38 between two eCFR issue dates: `changed`/`added`/`removed` citation lists (each capped at 100 with `truncated: true` when any list was cut), plus both issue dates echoed back and a `notice` stating the limit on what the two dates mean (selectors, not a stamp of the revision served). Both dates are **required** (no default-`to` — the CLI's `cfr-free diff <from>` keeps that convenience); identical or impossible dates (`2026-13-01`) are rejected as `invalid_input` before any fetch. Statelessness costs a network round-trip per call: both dates' full-title XML is fetched from eCFR and hashed per citation on the fly (no cache, no local index), so these are the two tools that are **not** offline — both are registered only when an eCFR client is injected (`serve`/`mcp` do; a client-less server keeps the six local-index tools).

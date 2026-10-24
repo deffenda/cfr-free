@@ -434,7 +434,8 @@ export function registerTools(
       title: 'Local index freshness',
       description:
         'Report how current the local Title 38 index is: eCFR issue date, last sync time, row counts, the ' +
-        'corpus receipt hash (a sha256 over the whole corpus at rebuild time, null on older indexes) and ' +
+        "corpus receipt hash (a sha256 over every provision's text and heading at rebuild time, null on " +
+        'older indexes) and ' +
         'whether the index is stale relative to CFR_MAX_AGE_DAYS. Check this before relying on search results.',
       outputSchema: statusOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,

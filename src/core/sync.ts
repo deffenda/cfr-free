@@ -47,8 +47,9 @@ export interface SyncReport {
    */
   readonly imageContentSections: number;
   /**
-   * The corpus receipt: sha256 over the whole corpus's per-provision content
-   * hashes (SPEC §4). Together with the issue date it pins the index, so two
+   * The corpus receipt: sha256 over every provision's content hash — text
+   * and heading, the change-diff unit (SPEC §4). Together with the issue
+   * date it identifies the provisions the index was rebuilt from, so two
    * retrieval runs are comparable only when their receipts agree.
    */
   readonly corpusHash: string;
