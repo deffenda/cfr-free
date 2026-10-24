@@ -300,7 +300,8 @@ entries' query text changed in all. Two were rewritten by the cross-check**
 corpus cannot be adjudicated as a quoted-phrase query; rewording is what
 makes it a valid instance of its category; §3.2's claim was rejected, so
 its query stands as written) **and two were reworded by the operator's
-2026-10-23 rulings**, carried in the gate commit: burial allowance →
+rulings** (selected in chat 2026-10-22, carried in the 2026-10-23 gate
+commit): burial allowance →
 eligibility and Purple Heart → copayment exemption (§5.1 and §4.1).
 
 **As written on 2026-10-22, the set was not a gate.** It became a
@@ -381,8 +382,8 @@ against the copied index.
 
 ## 2026-10-23 — measured baseline of the gated set
 
-The first measurement of the gated 41-entry set, taken after the gate
-merged (`6f459ec`, PR #141). (An earlier preliminary run on the original
+The first measurement of the gated 41-entry set, taken against the state
+at `6f459ec` (PR #141). (An earlier preliminary run on the original
 43-entry set is recorded in `docs/research/retrieval-residuals-2026-10-21.md`;
 the two are different sets and not comparable.) It sets no threshold —
 that would need separate operator ratification — and no ranking or scoring

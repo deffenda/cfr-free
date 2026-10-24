@@ -13,9 +13,10 @@ burned 2026-10-16 holdout remains a regression set only.
 ## Fresh holdout
 
 `test/fixtures/retrieval/queries.fresh.ts` was written before running the
-retriever (two queries were later rewritten on corpus evidence and two
-reworded by operator ruling — see the adjudication record); it is
-separate from `queries.dev.ts` and `queries.holdout.ts`.
+retriever (two queries were later rewritten on corpus evidence — both
+rewritten entries were then removed at `6f459ec` — and two reworded by
+operator ruling; see the adjudication record); it is separate from
+`queries.dev.ts` and `queries.holdout.ts`.
 **2026-10-21 snapshot:** 43 queries — 35 answerable and 8
 proposed no-answer cases — all marked `adjudication: 'provisional'`, with
 a category tally of 6 bare citations + 5 display citations + 7
@@ -40,8 +41,10 @@ could gate anything, an expert had to:
 **Status of the four (2026-10-23):** items 1 and 2 are done — the record
 is `docs/research/fresh-holdout-adjudication-2026-10-22.md`. Item 3 was
 done with recorded DEVIATIONS: query wording WAS changed — two entries
-rewritten by the cross-check (§3.1 and §3.3) and two reworded by operator
-ruling (§4.1 and §5.1), all recorded in the adjudication record. Item 4 has
+rewritten by the cross-check (§3.1 and §3.3), both removed at `6f459ec`
+so only the operator rewordings survive in the gated 41, and two
+reworded by operator ruling (§4.1 and §5.1), all recorded in the
+adjudication record. Item 4 has
 NOT happened: no threshold-bearing evaluation has run, and the
 2026-10-23 baseline is explicitly non-threshold. How the "read exactly
 once" discipline counts non-threshold baseline reads is not stated
