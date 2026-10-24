@@ -1,7 +1,7 @@
 # Fresh-holdout expectation adjudication — the 43 provisional entries
 
 **Date:** 2026-10-22. **Status:** the 43 entries are adjudicated as recorded
-below; the file is still **not a gate** until the operator ratifies it (see
+below; **as of 2026-10-23 the set is a structural gate** (see the 2026-10-23 section at the end) with no numeric threshold. The rulings below were the state on 2026-10-22; the file was **not a gate** until the operator ratified it (see
 "What the operator still owns").
 
 **This records one thing and changes one thing.** It records the
@@ -243,7 +243,7 @@ because a quoted-phrase query whose string is not a phrase of the corpus
 cannot be adjudicated as a quoted-phrase query; rewording is what makes it
 a valid instance of its category.
 
-**The set is still not a gate.** It becomes one when the operator
+**As written on 2026-10-22, the set was not a gate.** It became a structural gate on 2026-10-23 (see the section at the end). Originally: it becomes one when the operator
 ratifies the four §5 decisions, at which point the `adjudication`
 markers can move from `provisional` to `adjudicated` and the set can
 gate a threshold-bearing round.
@@ -252,7 +252,7 @@ gate a threshold-bearing round.
 
 1. The four §5 content decisions (burial-allowance wording, MST scope,
    NSC scope, and the quoted-phrase policy).
-2. Ratification, which is what makes the set gate-worthy.
+2. Ratification, which is what makes the set gate-worthy. Ratified 2026-10-23 on issue #135 (see the 2026-10-23 section below).
 3. Whether to replace `NSC` with a stronger near-miss.
 
 The subject-index reopen condition (ROADMAP §M3) is **unaffected**: it
@@ -270,3 +270,23 @@ The two member findings are recorded verbatim in the review record for
 this round; the corpus receipts quoted above (the 0-hit probes, the FTS
 phrase hits, and the heading checks) are reproducible with `node:sqlite`
 against the copied index.
+
+## 2026-10-23 — gate wiring and two removed duplicates
+
+- Gate: `test/retrieval-eval.test.ts` now asserts the fresh set structurally (41 entries, all adjudicated, unique, disjoint from dev and the burned holdout, 33 answerable / 8 no-answer). No numeric threshold is set.
+- Removed two fresh entries, `"aid and attendance"` and `"special monthly compensation"`. Their query text is identical to burned holdout entries, so they were not unseen. Answerable count 35 → 33; total 43 → 41.
+- Caveat on quoted-phrase entries (ratified by the committee, 2026-10-23): under the all-match policy every quoted-phrase expectation equals the full FTS result set for that phrase. Those entries cannot discriminate ranking quality. Scoring is inclusion-based (`run.ts`), so a quoted entry fails only when none of its top 5 is in the expected set. Dropping one expected citation from a long list is not detected.
+- Disjointness is exact-string only. Near-duplicates are not caught. Example: fresh `"hearing impairment"` is a substring of dev `"evaluation of hearing impairment"`.
+- Changes carried in from earlier work, recorded here for the first time: the three rewrites (3.1, 3.2, 3.3) in the fresh set, the rewording of two fresh entries, and the quoted-phrase expectation sets for `"service connection"`, `"individual unemployability"`, and `"hearing impairment"` expanded to the full FTS set. The expansions are the operator's 2026-10-22/23 all-match ruling. The quoted `"special monthly compensation"` entry was also removed (see the first bullet of this section).
+- Expected lists in the quoted-phrase entries are string-sorted, not numerically sorted. Scoring is set-based, so this has no runtime effect.
+
+### Handoff state (2026-10-23)
+
+- Branch `feat/m3-fresh-final`, commit `3388e26` on top of `2228085`. A byte-identical uncommitted copy sits in worktree `.opencode-worktrees/sf-m3-reviewed` (branch `sf/m3-fresh-final-reviewed`); leave it alone.
+- Local gate: `npm run ci` exit 0, 709 passed, 1 skipped (run with a disclosed `node_modules` symlink, removed after).
+- Independent review of `3388e26`: APPROVE, no P0/P1, four P2 doc fixes. Those fixes were amended into the same commit (unpublished at the time), so the final SHA needs its own review.
+- Open, not in this change: dev quoted-phrase re-measure (patch saved outside the repo at `$TMPDIR/opencode/dev-quoted-phrase-edits.md`); stale counts at `ROADMAP.md:355` and `docs/research/retrieval-residuals-2026-10-21.md:12-17`.
+- Repo context: PR #139 (`chore/agents-fleet-standard`) is open and CLEAN; it would replace the agent-file contract this round followed. Main CI is green at `2228085`.
+- Limit: the runner checks only the top 5 (`run.ts`, `topHitExpected` and `recallAt5`). Expected provisions ranked below 5 are never checked, so the gate cannot detect a missing result beyond rank 5.
+- Scope: `test/fixtures/retrieval/queries.dev.ts` is NOT changed by this round. The uncommitted dev edits (quoted-phrase expectations for `"schedule of ratings"` and `"evaluation of hearing impairment"`) are saved outside the repo and change the published dev baseline. They need their own re-measure and record before they can land.
+- `adjudicated` in `queries.fresh.ts` now means settled by the corpus or by an operator ruling of 2026-10-22/23. Seven entries that were operator-decided are marked this way.
