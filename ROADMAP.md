@@ -351,32 +351,63 @@ least 40 queries written without looking at the retriever's output, at least
 8–10 genuinely out-of-corpus cases each carrying a corpus-grep receipt, full
 expert adjudication before it gates anything, and read exactly once.
 
-**The fresh holdout is WRITTEN and ADJUDICATED (2026-10-22), but it is
-still not a gate.** `test/fixtures/retrieval/queries.fresh.ts` carries 43
-queries (35 answerable, 8 no-answer), written on 2026-10-21 before any
-retriever run. Two committee members adjudicated every entry against the
-corpus, blind to the retriever's output, and the rulings were cross-checked
-against each other and against the corpus
+**The fresh holdout is WRITTEN, ADJUDICATED, RATIFIED and GATED (PR #141,
+`6f459ec`, 2026-10-23).** `test/fixtures/retrieval/queries.fresh.ts` carries
+41 queries (33 answerable, 8 no-answer). The original 43 were written on
+2026-10-21 before any retriever run. The cross-check rewrote two queries
+(§3.1/§3.3 of the adjudication record) and both entries were later removed
+on 2026-10-23 as burned-holdout duplicates — their query text duplicated
+burned-holdout entries, so they were not unseen
+(`"aid and attendance"`, `"special monthly compensation"`). The only
+query-text changes the surviving 41 carry are two operator rewordings
+(burial allowance, Purple Heart). Two committee
+members adjudicated every entry against the corpus, blind to the
+retriever's output, and the rulings were cross-checked against each other
+and against the corpus
 (`docs/research/fresh-holdout-adjudication-2026-10-22.md`). The
-cross-check found six wrong-or-incomplete expectations and one quoted-phrase
-query whose string occurs nowhere in the corpus; it also **overrode a
+cross-check landed seven expectation amendments — an eighth ruling (§3.3
+of the record) was recorded but never applied — and rewrote two
+quoted-phrase queries: one whose string occurs nowhere in the corpus,
+one whose string made the entry under-specified for its own expectation;
+it also **overrode a
 member** on one point (the corpus showed the disputed phrase IS exact), and
 both members were wrong on another (there is no "Purple Heart benefits"
 provision in Title 38 — all four Purple Heart mentions are eligibility
 carve-outs). All eight no-answer candidates were confirmed out of corpus
 with per-token receipts and positive controls.
 
-**NINE entries stay `provisional`, deliberately**: four content questions
-the corpus cannot settle (burial-allowance wording, MST scope, NSC scope,
-the Purple Heart wording) and all five quoted-phrase entries, because the
-quoted-phrase POLICY is unsettled **and the repo's own two frozen sets
-already disagree on it** — the dev set expects the FULL set for a phrase
-with no subject (16 provisions, on the committee ruling that a single
-section is weak ground truth) while the holdout expects a curated three
-for the same phrase family. The set becomes a gate when the operator
-ratifies those decisions; it must not gate a threshold-bearing round
-before that. It changes no metric: the dev set and the burned holdout are
-byte-for-byte as committed.
+**No entry stays `provisional`.** The four content questions the corpus
+cannot settle (burial-allowance wording, MST scope, NSC scope, and the
+quoted-phrase POLICY — §5 of the adjudication record) were selected by
+the operator in chat on 2026-10-22 and recorded on issue #135 (opened
+2026-10-22), each as an `OPERATOR DECISION 2026-10-23` note in the
+entry's rationale: burial allowance is eligibility, not a rate
+(3.1704/3.1705); MST is read as service connection (3.304/3.309); NSC
+stays broad (3.303/3.309); and a quoted phrase expects EVERY product FTS
+result for the phrase. The Purple Heart rewording (§4.1 — the corpus
+settled the dispute, the operator owned the final wording) was recorded
+the same way: the query asks the copayment exemption the corpus actually
+holds (17.108). That last rule is FRESH-SET-ONLY for now: issue #135's
+AC require the same policy on the dev set too, and two of the issue's AC
+remain open — that dev realignment, and the AC requiring the offline
+runner to exercise the fresh set in CI (no CI test evaluates the fresh
+set today; `test/retrieval-eval.test.ts` asserts its structure only).
+The dev set's committed quoted-phrase expectations are heading-based —
+16 provisions for `"schedule of ratings"`, 1 for
+`"evaluation of hearing impairment"` — where the product FTS totals are
+18 and 2, so the aligning re-measure is still
+uncommitted and recorded in the adjudication record's handoff. The dev set and the burned
+holdout keep their own expectations byte-for-byte as committed (the
+burned holdout's curated quoted-phrase expectations remain a frozen
+regression set, not a policy carrier). With that ratification the set became a
+**structural gate**: `test/retrieval-eval.test.ts` asserts every entry
+`adjudicated`, unique by exact query text, disjoint from the dev and
+burned sets, and the 33/8 answerable split — and it sets **NO numeric
+threshold**, which needs its own operator ratification; the fresh set must
+not be used to select thresholds or tune ranking. The measured baseline
+(exact-citation 17/33, recall@5 23/33, MRR 0.596, no-answer violations
+0/8, against the 2026-10-16 index) and its provenance are recorded in the
+adjudication record.
 
 **The operator's irreducible action (the one input no tooling replaces):**
 adjudicate the 39 provisional expectations — INCLUDING their ORDER. **DONE

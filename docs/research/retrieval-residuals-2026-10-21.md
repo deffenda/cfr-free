@@ -2,23 +2,32 @@
 
 ## Status
 
-This is a measurement artifact for M3 items 2 and 3. The fresh set is **not
-adjudicated and is not a quality gate**. Its expectations must be reviewed by
-an expert before any threshold, ranking change, or release claim uses it. The
+This is a measurement artifact for M3 items 2 and 3, written 2026-10-21.
+**Updated 2026-10-23:** the fresh set is adjudicated and is a structural
+gate (no numeric threshold) since `6f459ec` — 41 entries, 33 answerable and
+8 no-answer, all `adjudicated`. The counts below marked "2026-10-21
+snapshot" are the set as it then stood and are kept as written; the current
+record is `docs/research/fresh-holdout-adjudication-2026-10-22.md`. The
 burned 2026-10-16 holdout remains a regression set only.
 
 ## Fresh holdout
 
-`test/fixtures/retrieval/queries.fresh.ts` contains 43 queries written before
-running the retriever: 35 answerable queries and 8 proposed no-answer cases.
-It is separate from `queries.dev.ts` and `queries.holdout.ts`. All 43 entries
-are marked `adjudication: 'provisional'`. The category tally is 6 bare
-citations + 5 display citations + 7 abbreviations + 12 natural-phrasing + 5
-quoted-phrase + 8 no-answer = 43.
+`test/fixtures/retrieval/queries.fresh.ts` was written before running the
+retriever (two queries were later rewritten on corpus evidence — both
+rewritten entries were then removed at `6f459ec` — and two reworded by
+operator ruling; see the adjudication record); it is separate from
+`queries.dev.ts` and `queries.holdout.ts`.
+**2026-10-21 snapshot:** 43 queries — 35 answerable and 8
+proposed no-answer cases — all marked `adjudication: 'provisional'`, with
+a category tally of 6 bare citations + 5 display citations + 7
+abbreviations + 12 natural-phrasing + 5 quoted-phrase + 8 no-answer = 43.
+**Current (2026-10-23):** 41 queries — 33 answerable and 8 no-answer, all
+`adjudicated`; two quoted-phrase entries were removed because their query
+text duplicated burned-holdout entries, so the quoted-phrase tally is now 3.
 
 The set intentionally includes bare and display citations, abbreviations,
-natural phrasing, quoted phrases, and out-of-corpus candidates. Before it can
-gate anything, an expert must:
+natural phrasing, quoted phrases, and out-of-corpus candidates. Before it
+could gate anything, an expert had to:
 
 1. verify each expected provision against the provision heading and the
    question asked;
@@ -29,8 +38,23 @@ gate anything, an expert must:
 4. read the adjudicated set exactly once as the first threshold-bearing
    evaluation.
 
+**Status of the four (2026-10-23):** items 1 and 2 are done — the record
+is `docs/research/fresh-holdout-adjudication-2026-10-22.md`. Item 3 was
+done with recorded DEVIATIONS: query wording WAS changed — two entries
+rewritten by the cross-check (§3.1 and §3.3), both removed at `6f459ec`
+so only the operator rewordings survive in the gated 41, and two
+reworded by operator ruling (§4.1 and §5.1), all recorded in the
+adjudication record. Item 4 has
+NOT happened: no threshold-bearing evaluation has run, and the
+2026-10-23 baseline is explicitly non-threshold. How the "read exactly
+once" discipline counts non-threshold baseline reads is not stated
+in-repo and is the operator's to rule when the first threshold-bearing
+round opens.
+
 The preliminary run against the 2026-10-16 local index produced 18/35 exact
-citations, 21/35 recall@5, MRR 0.5524, and 0/8 no-answer violations. A corpus
+citations, 21/35 recall@5, MRR 0.5524, and 0/8 no-answer violations (on the
+original 43-entry set; the gated 41-entry set's baseline is 17/33, 23/33,
+MRR 0.596, 0/8 — recorded in the adjudication record). A corpus
 grep over both `sections.text` and `sections.markdown` returned zero matches
 for every token in the eight proposed no-answer cases:
 
@@ -42,8 +66,9 @@ for every token in the eight proposed no-answer cases:
 | `paleontology stratigraphy ammonite`; `meteorology baroclinic cyclone forecast` | 0 for all 6 tokens  |
 
 This is a reproducible corpus-receipt candidate, not expert adjudication: the
-terms are intentionally out-of-domain and must still be accepted or rejected
-by the adjudicator before they gate anything.
+terms are intentionally out-of-domain and had to be accepted or rejected by
+the adjudicator before they could gate anything (all eight were confirmed
+out of corpus and adjudicated 2026-10-22/23).
 
 The receipt was produced against a copied index with this exact query (one
 row per token, searching both rendered columns without FTS stemming):
@@ -88,7 +113,8 @@ score is insufficient.
 
 No implementation change to ranking, synonym expansion, or abstention is
 authorized by this artifact. The evidence currently supports context and
-measurement, not another lexical rule. The next engineering decision requires
-both an expert-adjudicated fresh set and the M6 observation of whether users
+measurement, not another lexical rule. The next engineering decision
+requires both an expert-adjudicated fresh set (met 2026-10-23) and the M6
+observation of whether users
 recover from a non-first result by reading its heading/snippet or browsing the
 structure.
