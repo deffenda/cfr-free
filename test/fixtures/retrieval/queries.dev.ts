@@ -17,6 +17,11 @@
  *
  * Expectations are grounded in the 2026-10-16 Title 38 corpus (issue
  * date recorded in the runner's report).
+ *
+ * QUOTED-PHRASE EXPECTATIONS follow the operator's all-match policy
+ * (selected in chat 2026-10-22, recorded on issue #135): a quoted phrase
+ * expects EVERY product FTS result for the phrase — the same rule the
+ * fresh set carries.
  */
 
 export type QueryCategory =
@@ -242,6 +247,7 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
     query: '"schedule of ratings"',
     category: 'quoted-phrase',
     expected: [
+      '3.321',
       '4.104',
       '4.114',
       '4.116',
@@ -258,17 +264,19 @@ export const DEV_QUERIES: readonly RetrievalQuery[] = [
       '4.87a',
       '4.88b',
       '4.97',
+      'Appendix A to Part 4',
     ],
     rationale:
-      'the literal heading phrase names SIXTEEN schedules - every section whose heading begins "Schedule of ratings"; a single-section expectation for a phrase with no subject is a weak ground truth, so the committee ruled that the honest answer is the set',
+      'the all-match set for the phrase: every section whose text carries "schedule of ratings" (18 by product FTS, 18 by LIKE); OPERATOR DECISION 2026-10-24 — all-match policy selected in chat 2026-10-22, recorded on issue #135, applied to the dev set in this round',
     sourceDate: SOURCE_DATE,
     adjudication: 'adjudicated',
   },
   {
     query: '"evaluation of hearing impairment"',
     category: 'quoted-phrase',
-    expected: ['4.85'],
-    rationale: 'the literal heading phrase of § 4.85',
+    expected: ['3.383', '4.85'],
+    rationale:
+      'the all-match set for the phrase (2 by product FTS, 2 by LIKE); OPERATOR DECISION 2026-10-24 — all-match policy selected in chat 2026-10-22, recorded on issue #135, applied to the dev set in this round',
     sourceDate: SOURCE_DATE,
     adjudication: 'adjudicated',
   },

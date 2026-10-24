@@ -118,3 +118,67 @@ requires both an expert-adjudicated fresh set (met 2026-10-23) and the M6
 observation of whether users
 recover from a non-first result by reading its heading/snippet or browsing the
 structure.
+
+## 2026-10-24 — dev quoted-phrase realignment and re-measure
+
+The operator's quoted-phrase policy reached the dev set: a quoted phrase
+expects EVERY product FTS result for the phrase. The policy was selected in
+chat on 2026-10-22 and recorded on issue #135; it was applied to the dev set
+in this round (2026-10-24). The dev set's two quoted-phrase entries were
+heading-based; they now carry the all-match sets.
+
+**Expectation changes** — the only edits to `test/fixtures/retrieval/queries.dev.ts`:
+
+| query                                | before | after | added                           |
+| ------------------------------------ | ------ | ----- | ------------------------------- |
+| `"schedule of ratings"`              | 16     | 18    | `3.321`, `Appendix A to Part 4` |
+| `"evaluation of hearing impairment"` | 1      | 2     | `3.383`                         |
+
+**Verification.** Each set was checked two ways against a COPY of the
+2026-10-16 index (`~/.cfr-free/index.sqlite` copied; the live index was never
+opened):
+
+1. Product FTS — the phrase query `toFtsQuery` builds for a quoted span
+   (`src/core/store.ts`), `"<phrase>"*`, over the `sections_fts` table
+   (tokenizer `porter unicode61`):
+   `SELECT citation FROM sections_fts WHERE sections_fts MATCH '"schedule of ratings"*'`
+   → 18 rows — the 16 committed citations plus `3.321` and
+   `Appendix A to Part 4`; and the same query for
+   `"evaluation of hearing impairment"` → 2 rows, `3.383` and `4.85`.
+2. LIKE substring over the SAME surface the FTS indexes (`citation`,
+   `heading` and `text`):
+   `SELECT citation FROM sections WHERE lower(citation || ' ' || heading || ' ' || text) LIKE '%schedule of ratings%'`
+   → 18 rows, the identical set; the same query for
+   `evaluation of hearing impairment` → 2 rows, the identical set.
+
+   The surface matters: a LIKE over the body `text` column alone returns 4
+   and 1, and a LIKE over the heading alone returns exactly the OLD 16 and 1
+   — the 16 heading-based citations match the HEADING, while `3.321`,
+   `3.383` and `Appendix A to Part 4` carry the phrase in the body. Only the
+   three-column surface is comparable to the product's FTS hit set.
+
+**Re-measured dev baseline** (the runner, `test/fixtures/retrieval/run.ts`,
+against the 2026-10-16 index copy): 30 queries, 29 answerable, 1 no-answer —
+exact-citation **22/29**, recall@5 **28/29**, MRR **0.8448**, no-answer
+violations **1/1**. Provenance: darwin 25.6.0 (arm64), node v26.12.1, 8 cpus,
+24576 MB, index issue date 2026-10-16; 30 adjudicated expectations, 0
+provisional.
+
+**The numbers did not move.** The same probe over the PRE-realignment fixture
+on the same index copy reports the identical 22/29, 28/29, 0.8448 and 1/1. The
+reason is the runner's top-five cut: `"schedule of ratings"` returns
+`4.87a, 4.87, 4.130, 4.150, 4.116` and `"evaluation of hearing impairment"`
+returns `4.85, 3.383`, so every hit the runner sees was already inside the old
+expectation set, and the added provisions rank outside the window. The same
+limitation is recorded for the fresh set in
+`docs/research/fresh-holdout-adjudication-2026-10-22.md` (expected provisions
+ranked below 5 are never checked). The dev baseline published in
+`docs/research/retrieval-baseline-2026-10-20.md` (22/29, 28/29, MRR 0.8448,
+1/1, after the 2026-10-21 exception-demotion round) therefore still stands
+unchanged.
+
+**Scope.** This touches the DEV set only. The fresh set's gated baseline
+(17/33 exact-citation, 23/33 recall@5, MRR 0.596, 0/8 no-answer violations)
+is unaffected — its quoted-phrase entries were already all-match. The burned
+holdout remains untouched and unchanged: its curated quoted-phrase expectations
+stay a frozen regression set, not a policy carrier.
