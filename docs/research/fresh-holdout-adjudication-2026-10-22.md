@@ -1,8 +1,12 @@
-# Fresh-holdout expectation adjudication — the 43 provisional entries
+# Fresh-holdout expectation adjudication — 41 adjudicated entries
 
-**Date:** 2026-10-22. **Status:** the 43 entries are adjudicated as recorded
-below; **as of 2026-10-23 the set is a structural gate** (see the 2026-10-23 section at the end) with no numeric threshold. The rulings below were the state on 2026-10-22; the file was **not a gate** until the operator ratified it (see
-"What the operator still owns").
+**Date:** 2026-10-22. **Status:** the entries are adjudicated as recorded
+below; **as of 2026-10-23 the set is a structural gate** (see the 2026-10-23
+sections at the end) with no numeric threshold: 41 entries (33 answerable,
+8 no-answer), all `adjudicated`, after two burned-holdout duplicates were
+removed (43 → 41 on 2026-10-23). The rulings below were the state on
+2026-10-22; the file was **not a gate** until the operator ratified it on
+2026-10-23 on issue #135 (see "What the operator still owns").
 
 **This records one thing and changes one thing.** It records the
 adjudication of the expectations in `test/fixtures/retrieval/queries.fresh.ts`
@@ -180,8 +184,17 @@ rule; 19.2 is legacy-appeal-specific.
 
 ## 5. The entries the corpus cannot settle (operator decisions)
 
-These stay **provisional**. The corpus does not decide them, and the repo's
-precedent keeps content questions with the operator.
+These stayed **provisional** as written on 2026-10-22. The corpus does not
+decide them, and the repo's precedent keeps content questions with the
+operator. **All were ruled by the operator on 2026-10-23 (issue #135)**;
+each entry's rationale in `test/fixtures/retrieval/queries.fresh.ts`
+carries its ruling as an `OPERATOR DECISION 2026-10-23` note: burial
+allowance is eligibility, not a rate (3.1704/3.1705), MST is read as
+service connection (3.304/3.309), NSC stays broad (3.303/3.309), the
+Purple Heart query asks the copayment exemption the corpus holds
+(17.108), and a quoted-phrase expectation is every product FTS result for
+the phrase (item 4 below — the readings for `"service connection"` (225),
+`"individual unemployability"` (11) and `"hearing impairment"` (16)).
 
 1. **`burial allowance rates`** — the corpus has **no rate**. § 3.1704
    and § 3.1705 authorize "the maximum burial allowance specified in
@@ -251,9 +264,13 @@ gate a threshold-bearing round.
 ## 7. What the operator still owns
 
 1. The four §5 content decisions (burial-allowance wording, MST scope,
-   NSC scope, and the quoted-phrase policy).
-2. Ratification, which is what makes the set gate-worthy. Ratified 2026-10-23 on issue #135 (see the 2026-10-23 section below).
-3. Whether to replace `NSC` with a stronger near-miss.
+   NSC scope, and the quoted-phrase policy). **Done — ruled 2026-10-23,
+   see §5.**
+2. Ratification, which is what makes the set gate-worthy. **Done —
+   ratified 2026-10-23 on issue #135** (see the 2026-10-23 sections below).
+3. Whether to replace `NSC` with a stronger near-miss. **Open** — the
+   ruling kept the entry broad, which leaves the weak-test observation
+   (§5.3) standing.
 
 The subject-index reopen condition (ROADMAP §M3) is **unaffected**: it
 turns on the pilot's `E3` count, not on this set. This adjudication
@@ -290,3 +307,37 @@ against the copied index.
 - Limit: the runner checks only the top 5 (`run.ts`, `topHitExpected` and `recallAt5`). Expected provisions ranked below 5 are never checked, so the gate cannot detect a missing result beyond rank 5.
 - Scope: `test/fixtures/retrieval/queries.dev.ts` is NOT changed by this round. The uncommitted dev edits (quoted-phrase expectations for `"schedule of ratings"` and `"evaluation of hearing impairment"`) are saved outside the repo and change the published dev baseline. They need their own re-measure and record before they can land.
 - `adjudicated` in `queries.fresh.ts` now means settled by the corpus or by an operator ruling of 2026-10-22/23. Seven entries that were operator-decided are marked this way.
+
+## 2026-10-23 — measured baseline of the gated set
+
+The first measurement of the gated 41-entry set, taken after the gate
+merged (`6f459ec`, PR #141). (An earlier preliminary run on the original
+43-entry set is recorded in `docs/research/retrieval-residuals-2026-10-21.md`;
+the two are different sets and not comparable.) It sets no threshold —
+that would need separate operator ratification — and no ranking or scoring
+change accompanies it. Runner: `test/fixtures/retrieval/run.ts fresh`
+against the local index with `CFR_INDEX_PATH` override (top-5-only limit
+as in the handoff above), index issue date 2026-10-16:
+
+| metric               | value |
+| -------------------- | ----- |
+| exact-citation       | 17/33 |
+| recall@5             | 23/33 |
+| MRR                  | 0.596 |
+| no-answer violations | 0/8   |
+
+By category (exact-citation; no-answer counted as violations):
+bare-citation 6/6, display-citation 5/5, quoted-phrase 3/3,
+natural-phrasing 8/12, abbreviation 1/7, no-answer 0/8.
+
+Provenance: darwin 25.6.0 arm64, node v26.12.1, 8 cpus, 24576 MB; index
+issue date 2026-10-16; 41 adjudicated entries, 0 provisional.
+
+Housekeeping for the docs round that records this (`chore/docs-m3-baseline`):
+the stale counts the handoff names at `ROADMAP.md:355` and
+`docs/research/retrieval-residuals-2026-10-21.md:12-17` are corrected
+there, and the handoff's "final SHA needs its own review" was satisfied at
+`f4b7228` (APPROVE, 0 P0/P1) before the merge. Still open and NOT part of
+this measurement: the dev quoted-phrase re-measure saved outside the repo
+(`$TMPDIR/opencode/dev-quoted-phrase-edits.md`) — it needs its own
+re-measure and record before it can land.

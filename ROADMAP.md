@@ -351,12 +351,15 @@ least 40 queries written without looking at the retriever's output, at least
 8–10 genuinely out-of-corpus cases each carrying a corpus-grep receipt, full
 expert adjudication before it gates anything, and read exactly once.
 
-**The fresh holdout is WRITTEN and ADJUDICATED (2026-10-22), but it is
-still not a gate.** `test/fixtures/retrieval/queries.fresh.ts` carries 43
-queries (35 answerable, 8 no-answer), written on 2026-10-21 before any
-retriever run. Two committee members adjudicated every entry against the
-corpus, blind to the retriever's output, and the rulings were cross-checked
-against each other and against the corpus
+**The fresh holdout is WRITTEN, ADJUDICATED, RATIFIED and GATED (PR #141,
+`6f459ec`, 2026-10-23).** `test/fixtures/retrieval/queries.fresh.ts` carries
+41 queries (33 answerable, 8 no-answer), written on 2026-10-21 before any
+retriever run; two of the original 43 were removed on 2026-10-23 because
+their query text duplicated burned-holdout entries, so they were not unseen
+(`"aid and attendance"`, `"special monthly compensation"`). Two committee
+members adjudicated every entry against the corpus, blind to the
+retriever's output, and the rulings were cross-checked against each other
+and against the corpus
 (`docs/research/fresh-holdout-adjudication-2026-10-22.md`). The
 cross-check found six wrong-or-incomplete expectations and one quoted-phrase
 query whose string occurs nowhere in the corpus; it also **overrode a
@@ -366,17 +369,27 @@ provision in Title 38 — all four Purple Heart mentions are eligibility
 carve-outs). All eight no-answer candidates were confirmed out of corpus
 with per-token receipts and positive controls.
 
-**NINE entries stay `provisional`, deliberately**: four content questions
-the corpus cannot settle (burial-allowance wording, MST scope, NSC scope,
-the Purple Heart wording) and all five quoted-phrase entries, because the
-quoted-phrase POLICY is unsettled **and the repo's own two frozen sets
-already disagree on it** — the dev set expects the FULL set for a phrase
-with no subject (16 provisions, on the committee ruling that a single
-section is weak ground truth) while the holdout expects a curated three
-for the same phrase family. The set becomes a gate when the operator
-ratifies those decisions; it must not gate a threshold-bearing round
-before that. It changes no metric: the dev set and the burned holdout are
-byte-for-byte as committed.
+**No entry stays `provisional`.** The four content questions the corpus
+cannot settle (burial-allowance wording, MST scope, NSC scope, the Purple
+Heart wording) and the quoted-phrase POLICY were ruled by the operator on
+2026-10-23 (issue #135), each recorded as an `OPERATOR DECISION 2026-10-23`
+note in the entry's rationale: burial allowance is eligibility, not a rate
+(3.1704/3.1705); MST is read as service connection (3.304/3.309); NSC
+stays broad (3.303/3.309); the Purple Heart query asks the copayment
+exemption the corpus actually holds (17.108); and a quoted phrase expects
+EVERY product FTS result for it — the reading the dev set already used, so
+the fresh set follows one settled rule. The dev set and the burned holdout
+keep their own expectations byte-for-byte as committed (the burned
+holdout's curated quoted-phrase expectations remain a frozen regression
+set, not a policy carrier). With that ratification the set became a
+**structural gate**: `test/retrieval-eval.test.ts` asserts every entry
+`adjudicated`, unique by exact query text, disjoint from the dev and
+burned sets, and the 33/8 answerable split — and it sets **NO numeric
+threshold**, which needs its own operator ratification; the fresh set must
+not be used to select thresholds or tune ranking. The measured baseline
+(exact-citation 17/33, recall@5 23/33, MRR 0.596, no-answer violations
+0/8, against the 2026-10-16 index) and its provenance are recorded in the
+adjudication record.
 
 **The operator's irreducible action (the one input no tooling replaces):**
 adjudicate the 39 provisional expectations — INCLUDING their ORDER. **DONE
