@@ -13,6 +13,11 @@
  *   npx tsx test/fixtures/retrieval/run.ts fresh
  *   CFR_INDEX_PATH=/tmp/some-index.sqlite npx tsx test/fixtures/retrieval/run.ts dev
  *
+ * A caller may also hand `evaluateSet` its OWN query list — the SYNTHETIC
+ * path. The array bypasses `queriesFor` and is evaluated verbatim, and the
+ * report is labelled 'synthetic': it is not one of the three frozen sets
+ * and must not borrow a set's name.
+ *
  * Deterministic: sorted keys, no timestamps in the compared output. The
  * latency numbers are measurements, not part of the pass/fail surface.
  */
@@ -47,7 +52,7 @@ export interface QueryOutcome {
 }
 
 export interface EvaluationReport {
-  readonly set: 'dev' | 'holdout' | 'fresh';
+  readonly set: ReportSet;
   readonly provenance: {
     readonly platform: string;
     readonly arch: string;
@@ -79,6 +84,22 @@ export interface EvaluationReport {
 }
 
 export type EvaluationSet = 'dev' | 'holdout' | 'fresh';
+
+/**
+ * The label a SYNTHETIC run carries. A caller-supplied query list is not
+ * one of the three frozen sets, so its report says 'synthetic' instead of
+ * borrowing a set's name.
+ */
+export type SyntheticSet = 'synthetic';
+
+/** Every label an {@link EvaluationReport} may carry. */
+export type ReportSet = EvaluationSet | SyntheticSet;
+
+/**
+ * The SYNTHETIC label as a value: ONE definition, so the label a report
+ * carries and the label the renderer prints cannot drift apart.
+ */
+export const SYNTHETIC_SET: SyntheticSet = 'synthetic';
 
 export function queriesFor(set: EvaluationSet): readonly RetrievalQuery[] {
   if (set === 'holdout') return HOLDOUT_QUERIES;
@@ -127,9 +148,32 @@ export function evaluateQuery(service: CFRService, entry: RetrievalQuery): Query
   };
 }
 
-/** Evaluate a whole set and aggregate it. Deterministic (sorted keys). */
-export function evaluateSet(service: CFRService, set: EvaluationSet): EvaluationReport {
-  const entries = queriesFor(set);
+/** Whether the caller named a frozen set rather than passing its queries. */
+function isEvaluationSet(value: EvaluationSet | readonly RetrievalQuery[]): value is EvaluationSet {
+  return typeof value === 'string';
+}
+
+/**
+ * Evaluate a whole set and aggregate it. Deterministic (sorted keys).
+ *
+ * A NAMED set ('dev' | 'holdout' | 'fresh') is resolved through
+ * `queriesFor`, exactly as before. A caller-supplied query ARRAY is the
+ * SYNTHETIC path: it bypasses `queriesFor` and evaluates exactly the
+ * queries given, and its report is labelled 'synthetic'.
+ */
+export function evaluateSet(service: CFRService, set: EvaluationSet): EvaluationReport;
+export function evaluateSet(
+  service: CFRService,
+  entries: readonly RetrievalQuery[],
+): EvaluationReport;
+export function evaluateSet(
+  service: CFRService,
+  setOrEntries: EvaluationSet | readonly RetrievalQuery[],
+): EvaluationReport {
+  const set: ReportSet = isEvaluationSet(setOrEntries) ? setOrEntries : SYNTHETIC_SET;
+  const entries: readonly RetrievalQuery[] = isEvaluationSet(setOrEntries)
+    ? queriesFor(setOrEntries)
+    : setOrEntries;
   const outcomes = entries.map((entry) => evaluateQuery(service, entry));
   // A query is a NO-ANSWER case when its EXPECTATION is empty — not when its
   // category label says so. (A category is a label; the expectation is the
@@ -182,18 +226,33 @@ export function evaluateSet(service: CFRService, set: EvaluationSet): Evaluation
   };
 }
 
-/** Render a report as deterministic text. */
+/**
+ * Render a report as deterministic text.
+ *
+ * Every number comes from the REPORT, never from a lookup by set name: the
+ * report carries the adjudication counts of the entries THIS run evaluated.
+ * That is what lets a SYNTHETIC run render honestly. It has no frozen set
+ * to resolve, so a renderer that asked `queriesFor(report.set)` for the
+ * counts would answer with a DIFFERENT set's numbers ('synthetic' is not a
+ * set name `queriesFor` knows at all).
+ */
 export function renderReport(report: EvaluationReport): string {
   const lines: string[] = [];
+  // The label is the set's own name: a synthetic run says 'synthetic' and
+  // never borrows a frozen set's name.
   lines.push(`retrieval evaluation — ${report.set} set`);
   lines.push(
     `  provenance: ${report.provenance.platform} ${report.provenance.arch}, node ${report.provenance.node}, ` +
       `${report.provenance.cpus} cpus, ${report.provenance.totalMemMb} MB, index issue date ${report.provenance.indexIssueDate}, ` +
       `corpus hash ${report.provenance.indexCorpusHash}`,
   );
+  // The counts are the REPORT's own: the adjudication statuses of the
+  // entries this run evaluated, whatever set (or no set) they came from.
+  const adjudicated = report.provenance.adjudicatedExpectations;
+  const provisional = report.provenance.provisionalExpectations;
   lines.push(
-    `  expectations: ${report.provenance.adjudicatedExpectations} adjudicated, ` +
-      `${report.provenance.provisionalExpectations} provisional (provisional = orchestrator's assumption, not legal ground truth)`,
+    `  expectations: ${adjudicated} adjudicated, ` +
+      `${provisional} provisional (provisional = orchestrator's assumption, not legal ground truth)`,
   );
   const t = report.totals;
   lines.push('');

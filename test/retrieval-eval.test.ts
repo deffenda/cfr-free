@@ -96,6 +96,148 @@ const NO_ANSWER: RetrievalQuery = {
   adjudication: 'provisional',
 };
 
+/**
+ * A SYNTHETIC set: queries a caller hands to `evaluateSet` directly. The
+ * runner evaluates them verbatim — they never touch `queriesFor` — and the
+ * report they produce is labelled 'synthetic'.
+ *
+ * The frozen sets are measured against a real index, so every aggregate
+ * they produce HERE is zero; this set exists to make the runner's
+ * aggregation arithmetic observable against NONZERO, KNOWN numbers. Every
+ * expectation is engineered against the seeded CORPUS above:
+ *
+ * - 'alpha widget' matches only § 1.100, so the top hit IS the expected
+ *   provision: exact-citation success with a reciprocal rank of 1.
+ * - 'rating payable' names a term from EACH seeded provision, so both are
+ *   candidates. § 1.100 carries 'rating' in its heading AND its body (the
+ *   weighted bm25 term frequency 5 + 1), § 2.200 carries 'payable' in its
+ *   body alone (1), so § 1.100 ranks first and the expected § 2.200 lands
+ *   at rank 2: a recall@5 hit with a KNOWN reciprocal rank of 0.5, and no
+ *   exact-citation success.
+ * - 'beta gadget' matches § 2.200, but the expectation is EMPTY, so the
+ *   runner must flag the no-answer violation (it decides from the RESULT,
+ *   never from the query text).
+ * - 'zzzz nonexistent' matches nothing: a no-answer case WITHOUT a
+ *   violation, so the violation count is 1 of 2 no-answer cases — not
+ *   merely the number of no-answer cases.
+ */
+const SYNTHETIC_QUERIES: readonly RetrievalQuery[] = [
+  {
+    query: 'alpha widget',
+    category: 'natural-phrasing',
+    expected: ['1.100'],
+    rationale: 'the seeded corpus holds the alpha widget provision',
+    sourceDate: '2026-10-16',
+    adjudication: 'provisional',
+  },
+  {
+    query: 'rating payable',
+    category: 'ambiguous',
+    expected: ['2.200'],
+    rationale: 'both seeded provisions answer it; the stronger match ranks first',
+    sourceDate: '2026-10-16',
+    adjudication: 'provisional',
+  },
+  {
+    query: 'beta gadget',
+    category: 'no-answer',
+    expected: [],
+    rationale: 'no expectation, yet the seeded corpus answers it — a violation',
+    sourceDate: '2026-10-16',
+    adjudication: 'provisional',
+  },
+  {
+    query: 'zzzz nonexistent',
+    category: 'no-answer',
+    expected: [],
+    rationale: 'nothing in the seeded corpus matches',
+    sourceDate: '2026-10-16',
+    adjudication: 'provisional',
+  },
+];
+
+/**
+ * A second SYNTHETIC set whose entries carry BOTH adjudication statuses.
+ *
+ * The status is DATA for the runner here, not a claim about a real ruling:
+ * the point is that the rendered expectation counts must follow the queries
+ * GIVEN. A renderer that resolved the counts by set name could not tell
+ * this set from the frozen ones, and would print a frozen set's numbers.
+ */
+const MIXED_ADJUDICATION_QUERIES: readonly RetrievalQuery[] = [
+  {
+    query: 'alpha widget',
+    category: 'natural-phrasing',
+    expected: ['1.100'],
+    rationale: 'the seeded corpus holds the alpha widget provision',
+    sourceDate: '2026-10-16',
+    adjudication: 'adjudicated',
+  },
+  {
+    query: 'zzzz nonexistent',
+    category: 'no-answer',
+    expected: [],
+    rationale: 'nothing in the seeded corpus matches',
+    sourceDate: '2026-10-16',
+    adjudication: 'provisional',
+  },
+];
+
+/**
+ * What each synthetic query MUST produce against the seeded corpus. The
+ * test recomputes the aggregates from THIS table — never from the report's
+ * own rows — so a regression in the runner's arithmetic fails against
+ * known values instead of comparing zero to zero.
+ */
+interface SyntheticExpectation {
+  readonly query: string;
+  readonly category: string;
+  readonly answerable: boolean;
+  readonly topHitExpected: boolean;
+  readonly recallAt5: boolean;
+  readonly reciprocalRank: number;
+  readonly noAnswerViolation: boolean;
+}
+
+const SYNTHETIC_EXPECTATIONS: readonly SyntheticExpectation[] = [
+  {
+    query: 'alpha widget',
+    category: 'natural-phrasing',
+    answerable: true,
+    topHitExpected: true,
+    recallAt5: true,
+    reciprocalRank: 1,
+    noAnswerViolation: false,
+  },
+  {
+    query: 'rating payable',
+    category: 'ambiguous',
+    answerable: true,
+    topHitExpected: false,
+    recallAt5: true,
+    reciprocalRank: 0.5,
+    noAnswerViolation: false,
+  },
+  {
+    query: 'beta gadget',
+    category: 'no-answer',
+    answerable: false,
+    topHitExpected: false,
+    recallAt5: false,
+    reciprocalRank: 0,
+    noAnswerViolation: true,
+  },
+  {
+    query: 'zzzz nonexistent',
+    category: 'no-answer',
+    answerable: false,
+    topHitExpected: false,
+    recallAt5: false,
+    reciprocalRank: 0,
+    noAnswerViolation: false,
+  },
+];
+
 describe('retrieval evaluation runner (M3)', () => {
   it('finds a present provision and reports its rank', () => {
     withService((service) => {
@@ -332,6 +474,138 @@ describe('retrieval evaluation runner (M3)', () => {
         (outcome) => outcome.category === 'natural-phrasing' && outcome.expected.length === 0,
       );
       expect(mislabelled).toBeUndefined();
+    });
+  });
+
+  it('aggregates a synthetic set against known, nonzero numbers', () => {
+    // Issue #149 (the #143 review's P2-1): the runner's aggregation was
+    // only ever CI-exercised with ZERO aggregates — every frozen set
+    // measured against the seeded corpus returns no successes, so a
+    // regression in the arithmetic (a wrong divisor, a dropped row, a
+    // counter that always answers 0) passed unnoticed. The synthetic set
+    // gives the aggregation NONZERO, KNOWN numbers to be wrong about.
+    //
+    // These are the runner's own numbers, not a quality bar: no threshold
+    // is asserted anywhere, and the seeded corpus says nothing about how
+    // the retriever performs against the real Title 38 corpus.
+    withService((service) => {
+      const report = evaluateSet(service, SYNTHETIC_QUERIES);
+
+      // The synthetic run names itself: it is not one of the three frozen
+      // sets and must not borrow a set's name.
+      expect(report.set).toBe('synthetic');
+      // A synthetic run is not one of the three frozen sets, and it must
+      // not borrow one's name.
+      expect(['dev', 'holdout', 'fresh']).not.toContain(report.set);
+      expect(report.outcomes.map((outcome) => outcome.query)).toEqual(
+        SYNTHETIC_EXPECTATIONS.map((expected) => expected.query),
+      );
+
+      // Every row is what the table above says it must be.
+      report.outcomes.forEach((outcome, index) => {
+        const expected = SYNTHETIC_EXPECTATIONS[index];
+        if (expected === undefined) throw new Error(`no expectation for ${outcome.query}`);
+        expect(outcome.category).toBe(expected.category);
+        expect(outcome.topHitExpected).toBe(expected.topHitExpected);
+        expect(outcome.recallAt5).toBe(expected.recallAt5);
+        expect(outcome.reciprocalRank).toBe(expected.reciprocalRank);
+        expect(outcome.noAnswerViolation).toBe(expected.noAnswerViolation);
+      });
+
+      // The aggregates are recounts of the table's own numbers — computed
+      // here, independently of the report's rows.
+      const answerable = SYNTHETIC_EXPECTATIONS.filter((expected) => expected.answerable);
+      const noAnswer = SYNTHETIC_EXPECTATIONS.filter((expected) => !expected.answerable);
+      const sum = (values: readonly number[]): number =>
+        values.reduce((total, value) => total + value, 0);
+      const exactSuccesses = answerable.filter((expected) => expected.topHitExpected).length;
+      const recalls = answerable.filter((expected) => expected.recallAt5).length;
+      const violations = noAnswer.filter((expected) => expected.noAnswerViolation).length;
+      const reciprocalTotal = sum(answerable.map((expected) => expected.reciprocalRank));
+      const meanReciprocalRank = Number((reciprocalTotal / answerable.length).toFixed(4));
+      expect(report.totals.queries).toBe(SYNTHETIC_EXPECTATIONS.length);
+      expect(report.totals.answerable).toBe(answerable.length);
+      expect(report.totals.noAnswerCases).toBe(noAnswer.length);
+      expect(report.totals.exactCitationSuccess).toBe(exactSuccesses);
+      expect(report.totals.recallAt5).toBe(recalls);
+      expect(report.totals.meanReciprocalRank).toBe(meanReciprocalRank);
+      expect(report.totals.noAnswerViolations).toBe(violations);
+
+      // The known numbers themselves — every one of them NONZERO, so a
+      // regression in the aggregation arithmetic fails here instead of
+      // comparing zero to zero.
+      expect(report.totals.answerable).toBe(2);
+      expect(report.totals.noAnswerCases).toBe(2);
+      expect(report.totals.exactCitationSuccess).toBe(1);
+      expect(report.totals.recallAt5).toBe(2);
+      expect(report.totals.meanReciprocalRank).toBe(0.75);
+      expect(report.totals.noAnswerViolations).toBe(1);
+
+      // Every category the synthetic set declares reaches the breakdown,
+      // and each bucket recounts that category's own rows.
+      const categories = [...new Set(SYNTHETIC_EXPECTATIONS.map((row) => row.category))].sort();
+      expect(Object.keys(report.byCategory).sort()).toEqual(categories);
+      for (const category of categories) {
+        const rows = SYNTHETIC_EXPECTATIONS.filter((row) => row.category === category);
+        expect(report.byCategory[category]).toEqual({
+          queries: rows.length,
+          recallAt5: rows.filter((row) => row.recallAt5).length,
+        });
+      }
+      expect(report.byCategory).toEqual({
+        ambiguous: { queries: 1, recallAt5: 1 },
+        'natural-phrasing': { queries: 1, recallAt5: 1 },
+        'no-answer': { queries: 2, recallAt5: 0 },
+      });
+
+      // The rendered report names the synthetic run, carries the same
+      // numbers, and its expectation counts come from the queries given —
+      // not from a frozen set.
+      const statuses = SYNTHETIC_QUERIES.map((query) => query.adjudication);
+      const adjudicated = statuses.filter((status) => status === 'adjudicated').length;
+      const provisional = statuses.filter((status) => status === 'provisional').length;
+      // The KNOWN expectation counts of this set: every entry carries the
+      // orchestrator's working assumption, none is adjudicated.
+      expect(adjudicated).toBe(0);
+      expect(provisional).toBe(4);
+      // The REPORT carries those counts, and the renderer reads the report:
+      // a synthetic run can never borrow a frozen set's numbers.
+      expect(report.provenance.adjudicatedExpectations).toBe(adjudicated);
+      expect(report.provenance.provisionalExpectations).toBe(provisional);
+      const rendered = renderReport(report);
+      expect(rendered).toContain('retrieval evaluation — synthetic set');
+      expect(rendered).toContain(
+        `expectations: ${adjudicated} adjudicated, ${provisional} provisional`,
+      );
+      expect(rendered).toContain('queries 4 (answerable 2, no-answer 2)');
+      expect(rendered).toContain('exact-citation success 1/2');
+      expect(rendered).toContain('recall@5 2/2');
+      expect(rendered).toContain('mean reciprocal rank 0.75');
+      expect(rendered).toContain('no-answer violations 1/2');
+      expect(rendered).toMatch(/^ +ambiguous +1\/1$/m);
+      expect(rendered).toMatch(/^ +natural-phrasing +1\/1$/m);
+      expect(rendered).toMatch(/^ +no-answer +0\/2$/m);
+
+      // The frozen dev set's expectation line must NOT appear in a
+      // synthetic report: a renderer that resolved the counts by set name
+      // would print the dev set's numbers here.
+      const dev = queriesFor('dev');
+      const devAdjudicated = dev.filter((query) => query.adjudication === 'adjudicated').length;
+      const devProvisional = dev.length - devAdjudicated;
+      const devLine = `expectations: ${devAdjudicated} adjudicated, ${devProvisional} provisional`;
+      expect(rendered).not.toContain(devLine);
+
+      // A synthetic run whose entries carry BOTH statuses must render its
+      // OWN counts: the renderer reads the report, never a set name.
+      const mixed = renderReport(evaluateSet(service, MIXED_ADJUDICATION_QUERIES));
+      expect(mixed).toContain('synthetic set');
+      expect(mixed).toContain('expectations: 1 adjudicated, 1 provisional');
+      expect(mixed).not.toContain(devLine);
+
+      // Two runs of the same synthetic set render identically (the latency
+      // figures are measurements, so they are stripped before comparing).
+      const again = renderReport(evaluateSet(service, SYNTHETIC_QUERIES));
+      expect(stripLatencyLines(rendered)).toBe(stripLatencyLines(again));
     });
   });
 });
