@@ -627,6 +627,47 @@ describe('Store.replaceAllWithBaseline', () => {
       temp.cleanup();
     }
   });
+
+  it('keeps a stale receipt behind when the rebuild writes no receipt (SPEC §4)', () => {
+    // Seeded with a SUBSET of the fixture corpus, so the rebuild that writes
+    // the full set visibly moves the rows instead of rewriting them in place.
+    const temp = openTempStore({ sections: FIXTURE_SECTIONS.slice(0, 2) });
+    try {
+      const countBefore = temp.store.countSections();
+      // A receipt from an earlier, receipt-bearing rebuild.
+      const priorCorpusHash = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+      temp.store.setMeta('corpus_hash', priorCorpusHash);
+      const prior = temp.store.getMeta('corpus_hash');
+      expect(prior).toBe(priorCorpusHash);
+
+      // A build that predates the receipt: it writes only the meta keys it
+      // knows, and corpus_hash is not one of them.
+      const outgoing = temp.store.replaceAllWithBaseline(
+        FIXTURE_SECTIONS,
+        '2026-10-16',
+        { issue_date: '2026-10-16', synced_at: 'later' },
+        (snapshot) => {
+          // The baseline of that build describes the outgoing rows and knows
+          // nothing about a corpus hash.
+          return snapshot.countSections();
+        },
+      );
+      expect(outgoing).toBe(countBefore);
+
+      // The rows moved on...
+      expect(temp.store.countSections()).toBe(FIXTURE_SECTIONS.length);
+      expect(temp.store.countSections()).not.toBe(countBefore);
+      expect(temp.store.getMeta('issue_date')).toBe('2026-10-16');
+      expect(temp.store.getSection('4.125', 'section')?.issueDate).toBe('2026-10-16');
+      // ...but the stale receipt stayed behind (SPEC §4): the rebuild does
+      // not clear the meta keys it does not know, so the previous receipt
+      // survives until a receipt-bearing build re-syncs.
+      expect(temp.store.getMeta('corpus_hash')).toBe(prior);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
   it('reports provisions whose image content is not included (P1-01)', async () => {
     // A corpus whose provisions carry eCFR graphics: the count must be
     // derived from the parsed corpus, and persisted, so a fresh index never
