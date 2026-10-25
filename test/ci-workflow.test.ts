@@ -128,15 +128,26 @@ function pullRequestNodes(text: string): string[] {
 }
 
 /**
- * The `uses:` lines of a workflow, in file order: the action reference and
+ * The `uses:` keys of a workflow, in file order: the action reference and
  * the whole line, so a failure can name the line that is wrong.
+ *
+ * The key is matched wherever it sits on the line — a block step
+ * (`- uses: …`), a flow mapping (`- { uses: … }`) or a quoted key
+ * (`"uses": …`) — so a step spelled any of those ways cannot slip past
+ * the pin guard.
  */
 function usesLines(text: string): { reference: string; line: string }[] {
-  return text.split('\n').flatMap((line) => {
-    // A step is `- uses: …` or `uses: …`; the dash is stripped first, so
-    // no repetition nests inside another and the regex stays safe.
-    const match = /^\s*uses:\s*(\S+)/.exec(line.replace(/^\s*-\s+/, ''));
-    return match === null ? [] : [{ reference: match[1] ?? '', line: line.trim() }];
+  return text.split('\n').flatMap((raw) => {
+    const line = raw.trim();
+    // `uses`, optionally quoted, a colon, then the reference token. The
+    // leading `(?:^|[^\w-])` keeps `reuses:` and `sub-uses:` out, and the
+    // token stops at whitespace, a comma or a closing brace, so a flow
+    // mapping yields the reference and not `…}`.
+    const pattern = /(?:^|[^\w-])["']?uses["']?\s*:\s*([^\s,}\]]+)/g;
+    return [...line.matchAll(pattern)].map((match) => ({
+      reference: (match[1] ?? '').replace(/^["']|["']$/g, ''),
+      line,
+    }));
   });
 }
 
@@ -150,7 +161,10 @@ function jobBlock(text: string, jobName: string): string {
   const start = lines.findIndex((line) => line === `  ${jobName}:`);
   if (start === -1) return '';
   const rest = lines.slice(start + 1);
-  const end = rest.findIndex((line) => /^ {2}\S/.test(line));
+  // The next job starts at a two-space line whose third character is
+  // neither whitespace (content of this job, deeper than the key) nor
+  // `#` (a comment, which is not a key and therefore ends nothing).
+  const end = rest.findIndex((line) => /^ {2}[^\s#]/.test(line));
   return (end === -1 ? rest : rest.slice(0, end)).join('\n');
 }
 
@@ -247,6 +261,35 @@ describe('the workflow files — what the merge gate runs', () => {
     }
   });
 
+  it('catches an unpinned action however the step is spelled', () => {
+    // Silent failure this prevents: a step written as a flow mapping or
+    // with a quoted key is still a step, and an unpinned action in it
+    // runs whatever the upstream repository points at that day. The
+    // guard reads the key wherever it sits on the line, so none of these
+    // spellings escapes it.
+    const unpinned = 'actions/checkout@v4';
+    const spellings = [
+      '      - uses: actions/checkout@v4',
+      '      - { uses: actions/checkout@v4 }',
+      '      - {uses: actions/checkout@v4}',
+      '      - "uses": actions/checkout@v4',
+      "      - 'uses': actions/checkout@v4",
+    ];
+    for (const step of spellings) {
+      // The entries the pin guard above fails on.
+      const caught = usesLines(step).filter((entry) => !PINNED_ACTION.test(entry.reference));
+      expect(
+        caught.map((entry) => entry.reference),
+        `the pin guard does not see this step: ${step}`,
+      ).toEqual([unpinned]);
+    }
+    // The same spelling with a pinned reference stays clean: a broader
+    // match must not turn every flow mapping into a failure.
+    const pinned = '      - { uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 }';
+    const flagged = usesLines(pinned).filter((entry) => !PINNED_ACTION.test(entry.reference));
+    expect(flagged, 'a pinned flow-mapping step is flagged').toEqual([]);
+  });
+
   it('keeps gitleaks and osv-scanner in the security job', () => {
     // Silent failure this prevents: the `security` job losing one of its
     // two scanners. The check still reports, still passes, and branch
@@ -259,5 +302,30 @@ describe('the workflow files — what the merge gate runs', () => {
     expect(security, 'ci.yml has no `security` job').not.toBe('');
     expect(steps.join('\n'), 'the security job no longer runs gitleaks').toContain(gitleaks);
     expect(steps.join('\n'), 'the security job no longer runs osv-scanner').toContain(osv);
+  });
+
+  it('keeps a comment inside the security job from ending the block', () => {
+    // A comment at the same indent as the job key is not a key: it ends
+    // nothing. Ending the block there would drop the scanners below it
+    // and fail the guard for a workflow that still runs both.
+    const text = [
+      'jobs:',
+      '  security:',
+      '  # the two scanners branch protection waits on',
+      '    steps:',
+      '      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e',
+      '      - uses: google/osv-scanner-action/osv-scanner-action@b1d267aea5211fa648d9d442fa64b90dbdcbdd36',
+      '  other:',
+      '    steps:',
+      '      - run: npm test',
+    ].join('\n');
+    const security = jobBlock(text, 'security');
+    const gitleaks = 'gitleaks/gitleaks-action';
+    const osv = 'google/osv-scanner-action';
+    const steps = usesLines(security).map((entry) => entry.reference);
+    expect(security, 'no `security` job found').not.toBe('');
+    expect(steps.join('\n'), 'the security job no longer runs gitleaks').toContain(gitleaks);
+    expect(steps.join('\n'), 'the security job no longer runs osv-scanner').toContain(osv);
+    expect(security, 'the block ran on into the next job').not.toContain('npm test');
   });
 });
