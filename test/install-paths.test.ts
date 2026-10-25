@@ -152,6 +152,12 @@ describe('the prepare script', () => {
 });
 
 describe('the container build', () => {
+  // A sha256 digest is EXACTLY 64 hex characters (32 bytes). The pattern
+  // demands all 64 of them and requires whitespace or the end of the line
+  // after them, so a truncated digest, a partly-pasted one and an
+  // over-long run are all rejected.
+  const SHA256_DIGEST_PIN = /@sha256:[0-9a-f]{64}(?=\s|$)/;
+
   it('installs without running prepare, because it copies src afterwards', () => {
     // The Docker build copies the manifest, installs, and only THEN copies
     // `src/`. If the install ran `prepare`, the TypeScript build would run
@@ -180,10 +186,11 @@ describe('the container build', () => {
     // failure says WHICH base image lost its pin rather than only that
     // some pin is missing.
     //
-    // On the digest LENGTH: a sha256 digest is 64 hex characters, so the
-    // floor is 40 rather than an exact count — 40 rejects a truncated or
-    // partly-pasted digest, and the ceiling rejects a longer run that no
-    // registry would ever issue.
+    // On the digest LENGTH: a sha256 digest is exactly 64 hex characters
+    // (32 bytes), and SHA256_DIGEST_PIN demands all 64 of them followed by
+    // whitespace or the end of the line. A truncated digest, a
+    // partly-pasted one and an over-long run therefore all fail this
+    // guard.
     const dockerfile = readRepoFile('Dockerfile');
     const fromLines = dockerfile
       .split('\n')
@@ -195,9 +202,20 @@ describe('the container build', () => {
     for (const line of fromLines) {
       expect(
         line,
-        `"${line}" must pin its base image with an @sha256: digest of 40 to 64 hex characters`,
-      ).toMatch(/@sha256:[0-9a-f]{40,64}(?![0-9a-f])/);
+        `"${line}" must pin its base image with an @sha256: digest of exactly 64 hex characters`,
+      ).toMatch(SHA256_DIGEST_PIN);
     }
+  });
+
+  it('rejects a digest that is not exactly 64 hex characters', () => {
+    // A guard that lets a truncated digest through is not a guard. The
+    // pattern this replaces accepted every truncation down to 40 hex
+    // characters, and a truncated digest resolves to no image at all.
+    const pin = (hex: string): string => `node:22-alpine@sha256:${hex}`;
+    expect(SHA256_DIGEST_PIN.test(pin('a'.repeat(64)))).toBe(true);
+    expect(SHA256_DIGEST_PIN.test(pin('a'.repeat(63)))).toBe(false);
+    expect(SHA256_DIGEST_PIN.test(pin('a'.repeat(65)))).toBe(false);
+    expect(SHA256_DIGEST_PIN.test(pin('a'.repeat(64) + 'g'))).toBe(false);
   });
 });
 
