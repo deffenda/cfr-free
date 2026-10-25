@@ -324,7 +324,7 @@ All return MCP `structuredContent` + text content. The six index-backed tools ar
 - **Deps:** runtime deps limited to `@modelcontextprotocol/sdk`, `zod`, `fast-xml-parser`; lockfile committed; `npm audit --audit-level=high` runs in the quality job, and `npm run scan` adds osv-scanner, gitleaks, trivy, semgrep locally. No hosted scanner service: the operator withdrew hosted code-scanning gates permanently (2026-10-18), so these local gates are the security floor.
 - **Code (quality):** `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`; ESLint (recommended, `no-explicit-any=error`, `no-console` allow-only-`error`, `complexity ≤ 10`, `eqeqeq`); no regex without linear guarantees; no `eval`/`Function`/`child_process`; no secrets (none needed); all error paths return sanitized messages (no stack traces to clients).
 - **Coverage:** vitest + v8 ≥ 90 % branches/lines/functions/statements (fail-under thresholds in `vitest.config.ts`); mocked-fetch tests (no live network in PR CI).
-- **CI:** GitHub Actions — quality job (lint, typecheck, test, build, audit) + security job (gitleaks, osv-scanner) + docker job + actionlint job (workflow lint); no hosted-scanner job exists.
+- **CI:** GitHub Actions — quality job (format, lint, typecheck, test, build, audit) + security job (gitleaks, osv-scanner) + docker job + actionlint job (workflow lint); no hosted-scanner job exists.
 
 ## 8. Test plan
 
@@ -359,7 +359,7 @@ Unit: citation parser, FTS sanitizer (incl. injection attempts `" OR 1=1--`), XM
 - Public repo `deffenda/cfr-free`, **MIT** license.
 - Trunk-based flow: bootstrap `main` (docs/license only) → feature branch → **PR** → CI green → **squash merge** + branch delete.
 - Branch protection on `main`: PR required, strict up-to-date, required checks `quality (22)` + `quality (24)` + `security` (the `security` context is required per the live protection config; `docker` runs in CI as gate evidence but is not itself required). Review process: **an independent fresh-context review of the exact head is required for every PR** — see [`AGENTS.md`](../AGENTS.md) (the historical "no mandatory review (solo maintainer)" posture is superseded; solo-maintainer practice was documented in CONTRIBUTING).
-- Repo settings: squash merge only, auto-delete head branches, Dependabot (npm + actions weekly), all workflow Actions **SHA-pinned** (Dependabot re-pins on updates), minimal `GITHUB_TOKEN` permissions (`contents: read`).
+- Repo settings: squash merge only, auto-delete head branches, Dependabot (npm, actions and docker weekly), all workflow Actions **SHA-pinned** (Dependabot re-pins on updates), minimal `GITHUB_TOKEN` permissions (`contents: read`).
 - Local pre-push gates: `npm run ci` + `npm run scan` (npm audit, osv-scanner, gitleaks, trivy, semgrep).
 - Container (v0.5): multi-stage `Dockerfile` (node:22-alpine, non-root, index in `/data` volume); CI `docker` job builds the image and runs a hermetic offline smoke (no eCFR in PR CI). `release.yml` on `v*` tags runs the full CI gate + a live container e2e (real sync, HTTP surface, MCP `list_parts` handshake), then publishes multi-arch (`linux/amd64` + `linux/arm64`) `ghcr.io/deffenda/cfr-free:{version,major.minor,latest}` with SLSA provenance attestation — built-in `GITHUB_TOKEN` only, no secrets.
 - Live E2E: `.github/workflows/live-e2e.yml` runs `LIVE_TESTS=1` against real eCFR on a weekly cron and on `workflow_dispatch` (format-drift tripwire); PR CI stays hermetic.
