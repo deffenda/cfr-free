@@ -152,6 +152,12 @@ describe('the prepare script', () => {
 });
 
 describe('the container build', () => {
+  // A sha256 digest is EXACTLY 64 hex characters (32 bytes). The pattern
+  // demands all 64 of them and requires whitespace or the end of the line
+  // after them, so a truncated digest, a partly-pasted one and an
+  // over-long run are all rejected.
+  const SHA256_DIGEST_PIN = /@sha256:[0-9a-f]{64}(?=\s|$)/;
+
   it('installs without running prepare, because it copies src afterwards', () => {
     // The Docker build copies the manifest, installs, and only THEN copies
     // `src/`. If the install ran `prepare`, the TypeScript build would run
@@ -164,6 +170,61 @@ describe('the container build', () => {
     const copyIndex = dockerfile.indexOf('COPY src');
     expect(installIndex).toBeGreaterThan(-1);
     expect(copyIndex).toBeGreaterThan(installIndex);
+  });
+
+  it('pins every base image by digest, so a tag cannot move under a build', () => {
+    // A TAG IS A MOVING TARGET: `node:22-alpine` can point at different
+    // bytes tomorrow, and every build that follows it then silently ships
+    // whatever the tag points at THEN — no failed step, no visible diff,
+    // just a base image that changed under a repository whose source did
+    // not. That is the failure this guard prevents, and it is silent by
+    // construction: nothing in the build reports it. Pinning the digest
+    // makes the base image part of the source; the tag stays in the
+    // reference so the image remains readable to a human.
+    //
+    // The assertion is per FROM line and names the offending line, so the
+    // failure says WHICH base image lost its pin rather than only that
+    // some pin is missing.
+    //
+    // On the digest LENGTH: a sha256 digest is exactly 64 hex characters
+    // (32 bytes), and SHA256_DIGEST_PIN demands all 64 of them followed by
+    // whitespace or the end of the line. A truncated digest, a
+    // partly-pasted one and an over-long run therefore all fail this
+    // guard.
+    const dockerfile = readRepoFile('Dockerfile');
+    const fromLines = dockerfile
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => /^FROM\s/i.test(line));
+
+    expect(fromLines.length, 'the Dockerfile must declare a FROM line').toBeGreaterThan(0);
+
+    for (const line of fromLines) {
+      expect(
+        line,
+        `"${line}" must pin its base image with an @sha256: digest of exactly 64 hex characters`,
+      ).toMatch(SHA256_DIGEST_PIN);
+    }
+  });
+
+  it('rejects a digest that is not exactly 64 hex characters', () => {
+    // A guard that lets a truncated digest through is not a guard. The
+    // pattern this replaces accepted every truncation down to 40 hex
+    // characters, and a truncated digest resolves to no image at all.
+    const pin = (hex: string): string => `node:22-alpine@sha256:${hex}`;
+    expect(SHA256_DIGEST_PIN.test(pin('a'.repeat(64)))).toBe(true);
+    expect(SHA256_DIGEST_PIN.test(pin('a'.repeat(63)))).toBe(false);
+    expect(SHA256_DIGEST_PIN.test(pin('a'.repeat(65)))).toBe(false);
+    expect(SHA256_DIGEST_PIN.test(pin('a'.repeat(64) + 'g'))).toBe(false);
+  });
+
+  it('accepts a digest followed by whitespace, so a stage alias still matches', () => {
+    // The boundary accepts on the whitespace side as well as on the
+    // end-of-the-line side: the build stage's FROM line puts an alias
+    // after its digest, so a digest followed by a space must still match —
+    // the space is a boundary, never part of the digest.
+    const digest = 'a'.repeat(64);
+    expect(SHA256_DIGEST_PIN.test(`node:22-alpine@sha256:${digest} AS build`)).toBe(true);
   });
 });
 
