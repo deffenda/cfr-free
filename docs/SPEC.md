@@ -324,7 +324,7 @@ All return MCP `structuredContent` + text content. The six index-backed tools ar
 - **Deps:** runtime deps limited to `@modelcontextprotocol/sdk`, `zod`, `fast-xml-parser`; lockfile committed; `npm audit --audit-level=high` runs in the quality job, and `npm run scan` adds osv-scanner, gitleaks, trivy, semgrep locally. No hosted scanner service: the operator withdrew hosted code-scanning gates permanently (2026-10-18), so these local gates are the security floor.
 - **Code (quality):** `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`; ESLint (recommended, `no-explicit-any=error`, `no-console` allow-only-`error`, `complexity ≤ 10`, `eqeqeq`); no regex without linear guarantees; no `eval`/`Function`/`child_process`; no secrets (none needed); all error paths return sanitized messages (no stack traces to clients).
 - **Coverage:** vitest + v8 ≥ 90 % branches/lines/functions/statements (fail-under thresholds in `vitest.config.ts`); mocked-fetch tests (no live network in PR CI).
-- **CI:** GitHub Actions — quality job (lint, typecheck, test, build, audit) + security job (gitleaks, osv-scanner) + docker job; no hosted-scanner job exists.
+- **CI:** GitHub Actions — quality job (lint, typecheck, test, build, audit) + security job (gitleaks, osv-scanner) + docker job + actionlint job (workflow lint); no hosted-scanner job exists.
 
 ## 8. Test plan
 
