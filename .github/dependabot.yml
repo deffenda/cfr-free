@@ -38,3 +38,11 @@ updates:
     open-pull-requests-limit: 2
     cooldown:
       default-days: 7
+    # PR #160 proposed the non-LTS node 25 tag; SECURITY.md pins the Node 22
+    # LTS line (supported through April 2027), so ignore versions beyond that
+    # line and keep the weekly digest refreshes within node:22-alpine as the
+    # only docker proposals.
+    ignore:
+      - dependency-name: 'node'
+        versions:
+          - '>=23.0.0'
