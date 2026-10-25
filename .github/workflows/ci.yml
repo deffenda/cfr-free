@@ -81,6 +81,25 @@ jobs:
         with:
           scan-args: --lockfile package-lock.json
 
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # v1.7.12 is the version AGENTS.md blesses for `npm run lint:actions`:
+      # the local gate and this job must lint the same way.
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      # Silent failure this prevents: a workflow that is valid YAML but
+      # invalid to GitHub's expression parser — a job-level `if` reading the
+      # `matrix` context, for instance — yields a failed run with zero jobs,
+      # so no check ever reports and the pull request can never go green.
+      # The path is quoted for the shell, not for YAML: the inner double
+      # quotes keep shellcheck's SC2046 (an unquoted command substitution)
+      # out of the run and keep a GOPATH containing spaces one path.
+      - name: actionlint (workflow lint)
+        run: '"$(go env GOPATH)/bin/actionlint"'
+
   docker:
     name: docker
     runs-on: ubuntu-latest
