@@ -135,10 +135,21 @@ function pullRequestNodes(text: string): string[] {
  * (`- uses: …`), a flow mapping (`- { uses: … }`) or a quoted key
  * (`"uses": …`) — so a step spelled any of those ways cannot slip past
  * the pin guard.
+ *
+ * A comment-only line is not a step: a line whose trimmed text starts
+ * with `#` yields no entries at all, so a commented-out reference (say
+ * `# - uses: actions/checkout@v4`) is documentation and not an action
+ * the workflow runs. Flagging it would fail a workflow whose every real
+ * step is pinned, and the guard's message would name a line that does
+ * nothing. The fail-closed property is kept for actual steps: an
+ * unpinned block step or flow mapping is still caught.
  */
 function usesLines(text: string): { reference: string; line: string }[] {
   return text.split('\n').flatMap((raw) => {
     const line = raw.trim();
+    // A comment-only line: documentation, not a step. The reference in it
+    // is never run, so the pin guard has nothing to say about it.
+    if (line.startsWith('#')) return [];
     // `uses`, optionally quoted, a colon, then the reference token. The
     // leading `(?:^|[^\w-])` keeps `reuses:` and `sub-uses:` out, and the
     // token stops at whitespace, a comma or a closing brace, so a flow
@@ -288,6 +299,54 @@ describe('the workflow files — what the merge gate runs', () => {
     const pinned = '      - { uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 }';
     const flagged = usesLines(pinned).filter((entry) => !PINNED_ACTION.test(entry.reference));
     expect(flagged, 'a pinned flow-mapping step is flagged').toEqual([]);
+    // The failure message names the offending line, so `entry.line` has to
+    // be the trimmed source line — a block step and a flow mapping alike.
+    // Nothing asserted that before: the guard could report an empty or a
+    // mangled line and still pass.
+    const blockStep = '      - uses: actions/checkout@v4';
+    const flowStep = '      - { uses: actions/checkout@v4 }';
+    expect(
+      usesLines(blockStep)[0]?.line,
+      'the reported line is not the trimmed source line (block step)',
+    ).toBe(blockStep.trim());
+    expect(
+      usesLines(flowStep)[0]?.line,
+      'the reported line is not the trimmed source line (flow mapping)',
+    ).toBe(flowStep.trim());
+  });
+
+  it('ignores a commented-out action reference', () => {
+    // A comment is documentation, not a step. A workflow that pins every
+    // action it runs must not fail because a comment mentions an old
+    // unpinned reference, and the guard's message must not name a line
+    // that does nothing.
+    const commented = [
+      '      # - uses: actions/checkout@v4',
+      '      # - { uses: actions/checkout@v4 }',
+      '        # uses: actions/checkout@v4',
+    ].join('\n');
+    expect(usesLines(commented), 'a comment-only line yields entries').toEqual([]);
+    // The fail-closed property is kept for actual steps: the real step
+    // next to the comment is still caught, and only that one.
+    const withRealStep = [
+      '      # - uses: actions/checkout@v4',
+      '      - uses: actions/checkout@v4',
+    ].join('\n');
+    expect(
+      usesLines(withRealStep)
+        .filter((entry) => !PINNED_ACTION.test(entry.reference))
+        .map((entry) => entry.reference),
+      'the real step beside a comment is not caught',
+    ).toEqual(['actions/checkout@v4']);
+    // A comment on a line that also carries a step is still a step: the
+    // comment rule covers comment-only lines, not trailing comments.
+    const trailingComment = '      - uses: actions/checkout@v4 # not pinned';
+    expect(
+      usesLines(trailingComment)
+        .filter((entry) => !PINNED_ACTION.test(entry.reference))
+        .map((entry) => entry.reference),
+      'a step with a trailing comment is not caught',
+    ).toEqual(['actions/checkout@v4']);
   });
 
   it('keeps gitleaks and osv-scanner in the security job', () => {
