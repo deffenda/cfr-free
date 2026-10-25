@@ -13,6 +13,13 @@ updates:
         dependency-type: production
       development-dependencies:
         dependency-type: development
+    # typescript-eslint 8.71.2 rejects TypeScript 7, so a grouped bump fails
+    # npm install in CI (PR #161); take the major once the lint stack
+    # declares support.
+    ignore:
+      - dependency-name: typescript
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: /
