@@ -152,9 +152,9 @@ describe('the prepare script', () => {
 });
 
 describe('the container build', () => {
-  // A sha256 digest is EXACTLY 64 hex characters (32 bytes). The pattern
-  // demands all 64 of them and requires the digest to be the END of the
-  // image reference, so a truncated digest, a partly-pasted one and an
+  // A sha256 digest is EXACTLY 64 LOWERCASE hex characters (32 bytes). The
+  // pattern demands all 64 of them and requires the digest to be the END of
+  // the image reference, so a truncated digest, a partly-pasted one and an
   // over-long run are all rejected.
   //
   // The digest is ANCHORED to the image operand — the token the FROM
@@ -181,19 +181,34 @@ describe('the container build', () => {
   // `from` line that IS pinned is a valid base image and must not be
   // reported as unpinned.
   //
+  // That keyword leniency and the digest's strictness are SEPARATE
+  // properties, and only the keyword has it. An OCI digest reference is
+  // lowercase by specification: the algorithm is `[a-z0-9]+` and a sha256
+  // digest is `[a-f0-9]{64}`. `SHA256:` and uppercase hex therefore name
+  // no image at all — such a reference cannot resolve, and it is only
+  // discovered at pull or build time, long after the guard that should
+  // have caught it. So the digest pattern below is case-STRICT while
+  // FROM_KEYWORD stays case-insensitive; folding case for both at once
+  // accepted references that can never resolve.
+  //
   // The operand is found in two steps rather than by ONE pattern: a
   // pattern that skips the flags needs a repetition inside a repetition,
   // and `security/detect-unsafe-regex` rejects that shape. Splitting it
   // keeps the guard readable and every regex here flat.
-  const SHA256_DIGEST_PIN = /^[^\s@]+@sha256:[0-9a-f]{64}$/i;
+  const SHA256_DIGEST_PIN = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
 
   // A FROM flag: `--name` or `--name=value`, never carrying an `@`, so a
   // digest cannot hide inside one.
   const FROM_FLAG = /^--[^\s@]+$/;
 
-  // The instruction keyword. The stage alias that may follow the
-  // reference needs no pattern of its own: the operand is the FIRST token
-  // that is not a flag, so nothing after it can be read as the image.
+  // The instruction keyword. This is the ONE place in the guard where
+  // case is folded: Dockerfile instruction keywords are case-insensitive,
+  // so `from`, `From` and `FROM` are all the same instruction. The digest
+  // carries no such leniency — see SHA256_DIGEST_PIN above.
+  //
+  // The stage alias that may follow the reference needs no pattern of its
+  // own: the operand is the FIRST token that is not a flag, so nothing
+  // after it can be read as the image.
   const FROM_KEYWORD = /^FROM$/i;
 
   /**
@@ -217,7 +232,7 @@ describe('the container build', () => {
 
   /**
    * True when the line's image operand is pinned by a sha256 digest of
-   * exactly 64 hex characters.
+   * exactly 64 LOWERCASE hex characters.
    */
   function pinsBaseImageByDigest(line: string): boolean {
     const operand = imageOperand(line);
@@ -257,6 +272,12 @@ describe('the container build', () => {
     // of the image reference. A truncated digest, a partly-pasted one and
     // an over-long run therefore all fail this guard.
     //
+    // On the digest CASE: the same 64 characters must be LOWERCASE, and
+    // the algorithm must be written `sha256`. An OCI digest reference is
+    // lowercase by specification, so `SHA256:` or uppercase hex names no
+    // image and cannot resolve — it is caught only at pull or build time
+    // if this guard lets it through.
+    //
     // On the digest POSITION: the digest is checked on the image OPERAND
     // alone, so the digest has to BE the end of the image reference — a
     // digest that only appears elsewhere on the line (a trailing comment,
@@ -276,7 +297,7 @@ describe('the container build', () => {
       expect(operand, `"${line}" must name the base image it pulls`).not.toBe('');
       expect(
         operand,
-        `"${line}" must pin its base image with an @sha256: digest of exactly 64 hex characters on the image reference`,
+        `"${line}" must pin its base image with an @sha256: digest of exactly 64 lowercase hex characters on the image reference`,
       ).toMatch(SHA256_DIGEST_PIN);
     }
   });
@@ -337,9 +358,45 @@ describe('the container build', () => {
     // The guard demands all 64 of them, on the image reference.
     const from = (hex: string): string => `FROM node:22-alpine@sha256:${hex}`;
     expect(pinsBaseImageByDigest(from('a'.repeat(64)))).toBe(true);
+    expect(pinsBaseImageByDigest(from('a'.repeat(40)))).toBe(false);
     expect(pinsBaseImageByDigest(from('a'.repeat(63)))).toBe(false);
     expect(pinsBaseImageByDigest(from('a'.repeat(65)))).toBe(false);
     expect(pinsBaseImageByDigest(from('a'.repeat(64) + 'g'))).toBe(false);
+  });
+
+  it('rejects a digest that is not lowercase, because such a reference cannot resolve', () => {
+    // An OCI digest reference is LOWERCASE by specification: the algorithm
+    // is `[a-z0-9]+` and a sha256 digest is `[a-f0-9]{64}`. A reference
+    // written with an upper-case algorithm or upper-case hex names no
+    // image at all, so it cannot resolve — the only sign that it is wrong
+    // is a failure at pull or build time, long after the guard that
+    // should have caught it. The pattern used to fold case for the digest
+    // and the keyword together, and accepted every one of these.
+    //
+    // Each assertion names the offending line, so a failure says WHICH
+    // reference was wrongly accepted.
+    const digest = 'a'.repeat(64);
+
+    // The algorithm is written in upper case.
+    const upperAlgorithm = `FROM node:22-alpine@SHA256:${digest}`;
+    expect(
+      pinsBaseImageByDigest(upperAlgorithm),
+      `"${upperAlgorithm}" must not be accepted: the digest algorithm is lowercase by spec`,
+    ).toBe(false);
+
+    // The digest hex is written in upper case.
+    const upperHex = `FROM node:22-alpine@sha256:${'A'.repeat(64)}`;
+    expect(
+      pinsBaseImageByDigest(upperHex),
+      `"${upperHex}" must not be accepted: a sha256 digest is lowercase hex by spec`,
+    ).toBe(false);
+
+    // Both at once, on an aliased stage: the alias does not rescue it.
+    const both = `FROM node:22-alpine@SHA256:${'A'.repeat(64)} AS build`;
+    expect(
+      pinsBaseImageByDigest(both),
+      `"${both}" must not be accepted: an OCI digest reference is lowercase by spec`,
+    ).toBe(false);
   });
 
   it('accepts a digest followed by whitespace, so a stage alias still matches', () => {
@@ -359,10 +416,38 @@ describe('the container build', () => {
     // selector that collects the FROM lines matches them that way too. A
     // lowercase `from` whose image IS pinned is a valid base image, so
     // this guard must not report it as unpinned and turn a correct
-    // Dockerfile red over its capitalisation.
+    // Dockerfile red over its capitalisation. The digest on those lines
+    // is lowercase, as it must be: the keyword's leniency is not the
+    // digest's.
     const digest = 'a'.repeat(64);
     expect(pinsBaseImageByDigest(`from node:22-alpine@sha256:${digest}`)).toBe(true);
     expect(pinsBaseImageByDigest(`from node:22-alpine@sha256:${digest} as build`)).toBe(true);
+  });
+
+  it('keeps the keyword case-insensitive without making the digest case-insensitive', () => {
+    // The keyword's leniency and the digest's strictness are SEPARATE
+    // properties, and the guard has to keep them separate. Dockerfile
+    // instruction keywords are case-insensitive, so `from` and `From` are
+    // the same instruction and their pinned images are valid base images.
+    // The digest carries none of that leniency — it is lowercase by
+    // specification. Folding case for both at once reported a lowercase
+    // `from` with an upper-case digest as pinned, which is a reference
+    // that can never resolve.
+    const digest = 'a'.repeat(64);
+    const upperDigest = 'A'.repeat(64);
+
+    // A lowercase keyword with a valid lowercase digest passes, with and
+    // without a stage alias.
+    expect(pinsBaseImageByDigest(`from node:22-alpine@sha256:${digest}`)).toBe(true);
+    expect(pinsBaseImageByDigest(`from node:22-alpine@sha256:${digest} as build`)).toBe(true);
+
+    // A mixed-case keyword is the same instruction, and still passes.
+    expect(pinsBaseImageByDigest(`From node:22-alpine@sha256:${digest}`)).toBe(true);
+
+    // The same lowercase keyword with an upper-case digest does not, with
+    // or without a stage alias.
+    expect(pinsBaseImageByDigest(`from node:22-alpine@sha256:${upperDigest}`)).toBe(false);
+    expect(pinsBaseImageByDigest(`from node:22-alpine@sha256:${upperDigest} as build`)).toBe(false);
   });
 
   it('accepts a FROM flag before a pinned image, because a multi-arch build may add one', () => {
