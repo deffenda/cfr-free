@@ -53,7 +53,8 @@ Design choices that keep the attack surface small:
   stays in the reference so the line stays readable, but the digest is what
   the build resolves. GitHub Actions pins use commit SHAs. Base-image
   freshness is Dependabot's job: its `docker` ecosystem opens weekly pull
-  requests that bump the base image (tag and digest together). The Dependabot
+  requests that refresh the digest of the same pinned tag — the ignore in
+  the config is what suppresses a proposal for a new tag. The Dependabot
   config ignores versions beyond the pinned Node 22 LTS line (supported
   through April 2027), so the refreshes that remain are the ones within that
   line.
