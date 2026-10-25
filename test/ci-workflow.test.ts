@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -40,6 +41,7 @@ import { describe, expect, it } from 'vitest';
  */
 
 const WORKFLOW_PATH = fileURLToPath(new URL('../.github/workflows/ci.yml', import.meta.url));
+const WORKFLOWS_DIR = fileURLToPath(new URL('../.github/workflows/', import.meta.url));
 const PACKAGE_PATH = fileURLToPath(new URL('../package.json', import.meta.url));
 
 /** The checks branch protection on `main` requires. Keep in step with it. */
@@ -49,6 +51,19 @@ const workflow = readFileSync(WORKFLOW_PATH, 'utf8');
 const manifest = JSON.parse(readFileSync(PACKAGE_PATH, 'utf8')) as {
   scripts: Record<string, string>;
 };
+
+/** Every workflow file in `.github/workflows`, in a stable order. */
+const workflowFiles = readdirSync(WORKFLOWS_DIR)
+  .filter((name) => name.endsWith('.yml') || name.endsWith('.yaml'))
+  .sort()
+  .map((name) => ({ name, path: join(WORKFLOWS_DIR, name) }));
+
+/**
+ * An action reference pinned to a full commit SHA: `owner/repo@<40 hex>`.
+ * The path may carry extra segments for an action that lives in a
+ * subdirectory (`google/osv-scanner-action/osv-scanner-action`).
+ */
+const PINNED_ACTION = /^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/;
 
 /** The `npm run …` steps of `npm run ci`, in order. */
 function localGateCommands(script: string): string[] {
@@ -112,6 +127,33 @@ function pullRequestNodes(text: string): string[] {
   return matrixArms(text)[0] ?? [];
 }
 
+/**
+ * The `uses:` lines of a workflow, in file order: the action reference and
+ * the whole line, so a failure can name the line that is wrong.
+ */
+function usesLines(text: string): { reference: string; line: string }[] {
+  return text.split('\n').flatMap((line) => {
+    // A step is `- uses: …` or `uses: …`; the dash is stripped first, so
+    // no repetition nests inside another and the regex stays safe.
+    const match = /^\s*uses:\s*(\S+)/.exec(line.replace(/^\s*-\s+/, ''));
+    return match === null ? [] : [{ reference: match[1] ?? '', line: line.trim() }];
+  });
+}
+
+/**
+ * The text of one job of a workflow: from `  <name>:` up to the next job.
+ * Empty when the job is not there, so a caller that needs the job fails
+ * loudly instead of matching nothing.
+ */
+function jobBlock(text: string, jobName: string): string {
+  const lines = text.split('\n');
+  const start = lines.findIndex((line) => line === `  ${jobName}:`);
+  if (start === -1) return '';
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => /^ {2}\S/.test(line));
+  return (end === -1 ? rest : rest.slice(0, end)).join('\n');
+}
+
 describe('ci.yml — the workflow the merge gate depends on', () => {
   it('runs the local gate commands verbatim, in order, one step each', () => {
     const script = manifest.scripts.ci;
@@ -172,5 +214,50 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
         "        node: ${{ github.event_name == 'pull_request' && fromJSON('[22, 24]') }}\n",
       ),
     ).toEqual([['22', '24']]);
+  });
+});
+
+/**
+ * Two more silent failures, of the same kind as the three above:
+ *
+ *  - An action pinned to a tag or a branch runs whatever the upstream
+ *    repository points at that day. The workflow file reads the same and
+ *    the run is still green, so the unpinned step stays invisible until
+ *    the upstream moves.
+ *  - The `security` job can lose one of its two scanners. The check still
+ *    reports, still passes, and branch protection still sees a green
+ *    `security` — while secrets or dependency advisories go unscanned.
+ */
+describe('the workflow files — what the merge gate runs', () => {
+  it('pins every action to a full commit SHA', () => {
+    // Silent failure this prevents: an action pinned to a tag or a branch
+    // runs whatever the upstream repository points at that day. The
+    // workflow still reads the same and the run is still green, so the
+    // unpinned step stays invisible until the upstream moves.
+    const uses: { name: string; reference: string; line: string }[] = [];
+    for (const workflowFile of workflowFiles) {
+      for (const entry of usesLines(readFileSync(workflowFile.path, 'utf8'))) {
+        uses.push({ name: workflowFile.name, ...entry });
+      }
+    }
+    expect(uses.length, 'no `uses:` line found — this guard passes on nothing').toBeGreaterThan(0);
+    for (const use of uses) {
+      const message = `${use.name}: action not pinned to a full 40-hex commit SHA — ${use.line}`;
+      expect(PINNED_ACTION.test(use.reference), message).toBe(true);
+    }
+  });
+
+  it('keeps gitleaks and osv-scanner in the security job', () => {
+    // Silent failure this prevents: the `security` job losing one of its
+    // two scanners. The check still reports, still passes, and branch
+    // protection still sees a green `security` — while secrets or
+    // dependency advisories go unscanned.
+    const security = jobBlock(workflow, 'security');
+    const gitleaks = 'gitleaks/gitleaks-action';
+    const osv = 'google/osv-scanner-action';
+    const steps = usesLines(security).map((entry) => entry.reference);
+    expect(security, 'ci.yml has no `security` job').not.toBe('');
+    expect(steps.join('\n'), 'the security job no longer runs gitleaks').toContain(gitleaks);
+    expect(steps.join('\n'), 'the security job no longer runs osv-scanner').toContain(osv);
   });
 });
