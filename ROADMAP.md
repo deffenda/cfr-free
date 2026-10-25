@@ -438,7 +438,7 @@ adjudication record.
 adjudicate the 39 provisional expectations — INCLUDING their ORDER. **DONE
 2026-10-21 by committee** (the content and the order were both adjudicated and
 cross-checked against the corpus); what remains is the operator's expert
-ratification of that result — the 39 provisional entries are 25 dev + 14
+ratification of that result — the 39 provisional entries were 25 dev + 14
 holdout across the 50-entry frozen benchmark (30 dev + 20 holdout), and
 the 2026-10-22 operator
 decisions recorded on issue #135 ratified the FRESH set as a gate after

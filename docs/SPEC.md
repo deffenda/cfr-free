@@ -189,11 +189,12 @@ copy of an index:
 The baseline report is `docs/research/retrieval-baseline-2026-10-20.md`. The
 set's expectations were adjudicated by a two-member committee on 2026-10-21
 and cross-checked against each other and against the corpus — the record is
-`docs/research/expectation-adjudication-2026-10-21.md` — and later amended
-by operator decisions recorded on issue #135 (2026-10-22, e.g. the
-quoted-phrase all-match policy); an expert remains
-the authority. A change to the set is a change to the benchmark and must be
-visible in the diff. The holdout set is not tuned on.
+`docs/research/expectation-adjudication-2026-10-21.md` — and the dev set's
+expectations were later amended by operator decisions recorded on issue #135
+(2026-10-22, e.g. the quoted-phrase all-match policy); the holdout set stays
+byte-frozen and is never amended; an expert remains the authority. A change to
+the set is a change to the benchmark and must be visible in the diff. The
+holdout set is not tuned on.
 
 **Index receipt:** every rebuild records a corpus receipt in `meta`: the eCFR
 issue date plus `corpus_hash`, a sha256 over each provision's
