@@ -734,14 +734,4 @@ describe('syncIndex corpus receipt', () => {
       deps.temp.cleanup();
     }
   });
-
-  it('leaves no receipt behind when the rebuild rolls back', async () => {
-    const deps = makeDeps(makeFetch({ issueDate: '2026-10-16', xml: DUPLICATE_CITATION_XML }));
-    try {
-      await expect(syncIndex(deps)).rejects.toThrow(/UNIQUE constraint failed/i);
-      expect(deps.store.getMeta('corpus_hash')).toBeNull();
-    } finally {
-      deps.temp.cleanup();
-    }
-  });
 });

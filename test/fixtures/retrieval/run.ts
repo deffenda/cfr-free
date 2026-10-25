@@ -18,6 +18,7 @@
  */
 
 import { arch, cpus, platform, release, totalmem } from 'node:os';
+import { DatabaseSync } from 'node:sqlite';
 import { CFRService } from '../../../src/core/service.js';
 import { Store } from '../../../src/core/store.js';
 import { DEV_QUERIES, type RetrievalQuery } from './queries.dev.js';
@@ -146,11 +147,11 @@ export function evaluateSet(service: CFRService, set: EvaluationSet): Evaluation
     byCategory[outcome.category] = bucket;
   }
   const sum = (values: readonly number[]): number => values.reduce((a, b) => a + b, 0);
-  // One status read keeps issue date and receipt drawn from the same call —
-  // NOT a guaranteed single snapshot (status() reads meta per-key); the SPEC
-  // directs evaluation at an isolated copy, so a concurrent sync cannot
-  // interleave here in the supported workflow.
-  const status = service.status();
+  // The provenance pair must describe ONE index state, so both fields come
+  // from a SINGLE meta snapshot (one SELECT over the meta table). NOT from
+  // service.status(): that reads meta per key, so its issue date and its
+  // receipt are two reads, not one snapshot.
+  const meta = readMetaSnapshot(indexPathOf(service));
   return {
     set,
     provenance: {
@@ -159,8 +160,8 @@ export function evaluateSet(service: CFRService, set: EvaluationSet): Evaluation
       node: process.version,
       cpus: cpus().length,
       totalMemMb: Math.round(totalmem() / 1024 / 1024),
-      indexIssueDate: status.issueDate ?? 'unknown',
-      indexCorpusHash: status.corpusHash ?? 'unknown',
+      indexIssueDate: meta.get('issue_date') ?? 'unknown',
+      indexCorpusHash: meta.get('corpus_hash') ?? 'unknown',
       adjudicatedExpectations: entries.filter((e) => e.adjudication === 'adjudicated').length,
       provisionalExpectations: entries.filter((e) => e.adjudication === 'provisional').length,
     },
@@ -221,6 +222,36 @@ export function renderReport(report: EvaluationReport): string {
     );
   }
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * The index file behind the service. CFRService keeps its store private and
+ * publishes no path, so the fixture reaches the store the service was built
+ * with — a deliberate, fixture-side peek at a private field — and takes the
+ * file path from the store's PUBLIC `path` getter. No production API change.
+ */
+function indexPathOf(service: CFRService): string {
+  const store = (service as unknown as { readonly store: Store }).store;
+  return store.path;
+}
+
+/**
+ * The index's meta rows as ONE snapshot: a single SELECT over the meta
+ * table, so two fields can never come from two different points in time.
+ * The connection is read-only and short-lived — it reads, it never writes.
+ */
+function readMetaSnapshot(indexPath: string): Map<string, string> {
+  const db = new DatabaseSync(indexPath, { readOnly: true });
+  try {
+    const rows = db.prepare('SELECT key, value FROM meta').all() as Record<string, unknown>[];
+    const meta = new Map<string, string>();
+    for (const row of rows) {
+      meta.set(String(row['key']), String(row['value']));
+    }
+    return meta;
+  } finally {
+    db.close();
+  }
 }
 
 // Human entry point: run a set against the index at CFR_INDEX_PATH.
