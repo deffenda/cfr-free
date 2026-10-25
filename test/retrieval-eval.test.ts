@@ -62,12 +62,26 @@ function withService(body: (service: CFRService) => void, sections = CORPUS): vo
 
 /**
  * The rendered report's latency figures are MEASUREMENTS, not part of the
- * compared surface, so they are stripped before two renderings are compared.
+ * compared surface, so the TRAILING latency token of a line is replaced with
+ * a fixed placeholder before two renderings are compared.
+ *
+ * Only the trailing `<number>ms` is neutralized, and EVERY line is kept.
+ * Every per-query row ends in a latency, so the previous filter (dropping
+ * every line that contained 'ms') dropped the whole per-query block: the
+ * determinism assertions compared nothing but the header, the provenance
+ * line and the totals. Now two renderings must match line-for-line,
+ * per-query rows included.
+ *
+ * The pattern keeps its repetitions FLAT — `\d+`, then an OPTIONAL dot, then
+ * `\d*` — because a repetition nested inside another repetition trips the
+ * repo's own security/detect-unsafe-regex rule, and this token needs no
+ * nesting. It matches the same trailing forms the renderer emits
+ * (`12ms`, `1.2ms`).
  */
 function stripLatencyLines(text: string): string {
   return text
     .split('\n')
-    .filter((line) => !line.includes('ms'))
+    .map((line) => line.replace(/\d+\.?\d*ms$/, '<latency>'))
     .join('\n');
 }
 
@@ -184,6 +198,71 @@ const MIXED_ADJUDICATION_QUERIES: readonly RetrievalQuery[] = [
 ];
 
 /**
+ * A SYNTHETIC set whose CATEGORIES disagree with its EXPECTATIONS.
+ *
+ * Issue #151 (the #143 review's P2-3): the fresh set's classification
+ * assertions could not tell an expectation-based classification from a
+ * label-based one, because every empty-expectation entry there was ALSO the
+ * only 'no-answer'-category entry — the two classifications agreed on every
+ * row. Here they DISAGREE, and the counts are shaped so that a label-based
+ * classification gives DIFFERENT totals:
+ *
+ * - 'alpha widget' carries the 'no-answer' LABEL but a non-empty
+ *   expectation, so it must count as ANSWERABLE. It matches only § 1.100,
+ *   so it is an exact-citation success with a reciprocal rank of 1.
+ * - 'rating payable' carries the 'ambiguous' label AND a non-empty
+ *   expectation: a control row where label and expectation agree.
+ *   It names a term from EACH seeded provision, so § 1.100 ranks first and
+ *   the expected § 2.200 lands at rank 2: a recall@5 hit with a KNOWN
+ *   reciprocal rank of 0.5, and no exact-citation success.
+ * - 'zzzz nonexistent' carries the 'ambiguous' LABEL but an EMPTY
+ *   expectation, so it must count as a NO-ANSWER CASE. It matches nothing,
+ *   so it carries no violation.
+ * - 'beta gadget' carries the same disagreeing label and an empty
+ *   expectation, but the seeded corpus DOES answer it: a no-answer case
+ *   WITH a violation.
+ *
+ * One row is labelled 'no-answer'; two rows have an empty expectation. A
+ * label-based classification would therefore report 3 answerable and 1
+ * no-answer case — and its single no-answer case would be the row that
+ * HAS an expectation. Neither is the answer below.
+ */
+const DISAGREEING_CATEGORY_QUERIES: readonly RetrievalQuery[] = [
+  {
+    query: 'alpha widget',
+    category: 'no-answer',
+    expected: ['1.100'],
+    rationale: 'the seeded corpus holds the alpha widget provision',
+    sourceDate: '2026-10-16',
+    adjudication: 'provisional',
+  },
+  {
+    query: 'rating payable',
+    category: 'ambiguous',
+    expected: ['2.200'],
+    rationale: 'both seeded provisions answer it; the stronger match ranks first',
+    sourceDate: '2026-10-16',
+    adjudication: 'provisional',
+  },
+  {
+    query: 'zzzz nonexistent',
+    category: 'ambiguous',
+    expected: [],
+    rationale: 'nothing in the seeded corpus matches',
+    sourceDate: '2026-10-16',
+    adjudication: 'provisional',
+  },
+  {
+    query: 'beta gadget',
+    category: 'ambiguous',
+    expected: [],
+    rationale: 'no expectation, yet the seeded corpus answers it — a violation',
+    sourceDate: '2026-10-16',
+    adjudication: 'provisional',
+  },
+];
+
+/**
  * What each synthetic query MUST produce against the seeded corpus. The
  * test recomputes the aggregates from THIS table — never from the report's
  * own rows — so a regression in the runner's arithmetic fails against
@@ -235,6 +314,51 @@ const SYNTHETIC_EXPECTATIONS: readonly SyntheticExpectation[] = [
     recallAt5: false,
     reciprocalRank: 0,
     noAnswerViolation: false,
+  },
+];
+
+/**
+ * What each DISAGREEING-category query must produce against the seeded
+ * corpus. The 'answerable' column is the EXPECTATION-based classification:
+ * it disagrees with the category on purpose, and it is the classification
+ * the runner must reach.
+ */
+const DISAGREEING_CATEGORY_EXPECTATIONS: readonly SyntheticExpectation[] = [
+  {
+    query: 'alpha widget',
+    category: 'no-answer',
+    answerable: true,
+    topHitExpected: true,
+    recallAt5: true,
+    reciprocalRank: 1,
+    noAnswerViolation: false,
+  },
+  {
+    query: 'rating payable',
+    category: 'ambiguous',
+    answerable: true,
+    topHitExpected: false,
+    recallAt5: true,
+    reciprocalRank: 0.5,
+    noAnswerViolation: false,
+  },
+  {
+    query: 'zzzz nonexistent',
+    category: 'ambiguous',
+    answerable: false,
+    topHitExpected: false,
+    recallAt5: false,
+    reciprocalRank: 0,
+    noAnswerViolation: false,
+  },
+  {
+    query: 'beta gadget',
+    category: 'ambiguous',
+    answerable: false,
+    topHitExpected: false,
+    recallAt5: false,
+    reciprocalRank: 0,
+    noAnswerViolation: true,
   },
 ];
 
@@ -294,6 +418,17 @@ describe('retrieval evaluation runner (M3)', () => {
       // The report text is deterministic EXCEPT the latency figures,
       // which are measurements; compare the non-latency lines.
       expect(stripLatencyLines(a)).toBe(stripLatencyLines(b));
+      // The comparison must reach the PER-QUERY rows: the helper keeps
+      // every line and neutralizes only the trailing latency token, so one
+      // neutralized latency per query survives it. A helper that dropped
+      // the rows instead would leave the header, the provenance line and
+      // the totals as the whole compared surface — which is what the rows
+      // being invisible once allowed.
+      const stripped = stripLatencyLines(a);
+      expect(stripped).toContain('per query:');
+      expect(stripped.split('\n').filter((line) => line.includes('<latency>')).length).toBe(
+        queriesFor('dev').length,
+      );
       expect(a).toContain('retrieval evaluation — dev set');
       // The report's own provenance line must carry the frozen set's REAL
       // adjudication counts. Asserting only that the word "provisional"
@@ -606,6 +741,67 @@ describe('retrieval evaluation runner (M3)', () => {
       // figures are measurements, so they are stripped before comparing).
       const again = renderReport(evaluateSet(service, SYNTHETIC_QUERIES));
       expect(stripLatencyLines(rendered)).toBe(stripLatencyLines(again));
+    });
+  });
+
+  it('classifies by the expectation when the category label disagrees', () => {
+    // Issue #151 (the #143 review's P2-3): the fresh set's classification
+    // assertions could not distinguish an expectation-based classification
+    // from a label-based one — every empty-expectation entry there was ALSO
+    // the only 'no-answer'-category entry, so both classifications agreed on
+    // every row. This synthetic set makes the label and the expectation
+    // DISAGREE, and asserts the totals the EXPECTATION produces.
+    withService((service) => {
+      const report = evaluateSet(service, DISAGREEING_CATEGORY_QUERIES);
+      const totals = report.totals;
+
+      // The set really does disagree, in BOTH directions: one row is
+      // labelled 'no-answer' and carries an expectation, two rows are NOT
+      // labelled 'no-answer' and carry none.
+      const noAnswerLabelled = report.outcomes.filter((o) => o.category === 'no-answer');
+      expect(noAnswerLabelled).toHaveLength(1);
+      expect(noAnswerLabelled[0]?.expected.length ?? 0).toBeGreaterThan(0);
+      const noAnswerUnlabelled = report.outcomes.filter(
+        (o) => o.category !== 'no-answer' && o.expected.length === 0,
+      );
+      expect(noAnswerUnlabelled).toHaveLength(2);
+
+      // Every row is what the table above says it must be.
+      const expectations = DISAGREEING_CATEGORY_EXPECTATIONS;
+      report.outcomes.forEach((outcome, index) => {
+        const expected = expectations[index];
+        if (expected === undefined) throw new Error(`no expectation for ${outcome.query}`);
+        expect(outcome.category).toBe(expected.category);
+        expect(outcome.topHitExpected).toBe(expected.topHitExpected);
+        expect(outcome.recallAt5).toBe(expected.recallAt5);
+        expect(outcome.reciprocalRank).toBe(expected.reciprocalRank);
+        expect(outcome.noAnswerViolation).toBe(expected.noAnswerViolation);
+      });
+
+      // The aggregates are recounts of the table's own numbers — computed
+      // here, independently of the report's rows.
+      const answerableRows = expectations.filter((expected) => expected.answerable);
+      const noAnswerRows = expectations.filter((expected) => !expected.answerable);
+      const violations = noAnswerRows.filter((expected) => expected.noAnswerViolation);
+      expect(totals.answerable).toBe(answerableRows.length);
+      expect(totals.noAnswerCases).toBe(noAnswerRows.length);
+      expect(totals.noAnswerViolations).toBe(violations.length);
+
+      // The known numbers themselves. The ONE row labelled 'no-answer'
+      // carries an expectation, so it is answerable; the TWO rows labelled
+      // 'ambiguous' carry none, so they are no-answer cases. A label-based
+      // classification would report 3 answerable and 1 no-answer case —
+      // and its single no-answer case would be the row that HAS an
+      // expectation, which is exactly the mistake this set exists to catch.
+      expect(totals.answerable).toBe(2);
+      expect(totals.noAnswerCases).toBe(2);
+      expect(totals.noAnswerViolations).toBe(1);
+      expect(totals.answerable + totals.noAnswerCases).toBe(totals.queries);
+
+      // The rendered report carries the same numbers.
+      const rendered = renderReport(report);
+      expect(rendered).toContain('queries 4 (answerable 2, no-answer 2)');
+      expect(rendered).toContain('no-answer violations 1/2');
     });
   });
 });
