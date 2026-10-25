@@ -217,6 +217,15 @@ describe('the container build', () => {
     expect(SHA256_DIGEST_PIN.test(pin('a'.repeat(65)))).toBe(false);
     expect(SHA256_DIGEST_PIN.test(pin('a'.repeat(64) + 'g'))).toBe(false);
   });
+
+  it('accepts a digest followed by whitespace, so a stage alias still matches', () => {
+    // The boundary accepts on the whitespace side as well as on the
+    // end-of-the-line side: the build stage's FROM line puts an alias
+    // after its digest, so a digest followed by a space must still match —
+    // the space is a boundary, never part of the digest.
+    const digest = 'a'.repeat(64);
+    expect(SHA256_DIGEST_PIN.test(`node:22-alpine@sha256:${digest} AS build`)).toBe(true);
+  });
 });
 
 describe('the workflows', () => {
