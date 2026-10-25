@@ -91,7 +91,8 @@ the ORDER of every set are unchanged; the MEMBERS are:
 > all-match ruling (`OPERATOR DECISION 2026-10-23`, recorded on issue
 > #135): applied to the dev set on 2026-10-24, the phrase now expects all
 > 18 product-FTS matches, and the dev baseline was re-measured unchanged
-> (`docs/research/retrieval-residuals-2026-10-21.md` §2026-10-24). The
+> (exact-citation 22/29, recall@5 28/29, MRR 0.8448, no-answer violations
+> 1/1 — `docs/research/retrieval-residuals-2026-10-21.md` §2026-10-24). The
 > holdout rows are the burned regression set and stay byte-frozen.
 
 The four no-answer entries (`tricare enrollment forms`, `BVA`, `NVL`,
