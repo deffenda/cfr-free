@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # --- build stage: compile TypeScript, keep only production deps -------------
-FROM node:22-alpine AS build
+FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.json tsconfig.build.json ./
 # --ignore-scripts: the package's `prepare` script runs the TypeScript build,
@@ -12,7 +12,7 @@ COPY src ./src
 RUN npm run build && npm prune --omit=dev
 
 # --- runtime stage: minimal image, non-root, index in /data -----------------
-FROM node:22-alpine
+FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
 LABEL org.opencontainers.image.title="cfr-free" \
       org.opencontainers.image.description="Self-hosted Title 38 CFR data service (MCP server + HTTP API over SQLite FTS5)" \
       org.opencontainers.image.licenses="MIT" \

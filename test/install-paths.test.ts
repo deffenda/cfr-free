@@ -165,6 +165,40 @@ describe('the container build', () => {
     expect(installIndex).toBeGreaterThan(-1);
     expect(copyIndex).toBeGreaterThan(installIndex);
   });
+
+  it('pins every base image by digest, so a tag cannot move under a build', () => {
+    // A TAG IS A MOVING TARGET: `node:22-alpine` can point at different
+    // bytes tomorrow, and every build that follows it then silently ships
+    // whatever the tag points at THEN — no failed step, no visible diff,
+    // just a base image that changed under a repository whose source did
+    // not. That is the failure this guard prevents, and it is silent by
+    // construction: nothing in the build reports it. Pinning the digest
+    // makes the base image part of the source; the tag stays in the
+    // reference so the image remains readable to a human.
+    //
+    // The assertion is per FROM line and names the offending line, so the
+    // failure says WHICH base image lost its pin rather than only that
+    // some pin is missing.
+    //
+    // On the digest LENGTH: a sha256 digest is 64 hex characters, so the
+    // floor is 40 rather than an exact count — 40 rejects a truncated or
+    // partly-pasted digest, and the ceiling rejects a longer run that no
+    // registry would ever issue.
+    const dockerfile = readRepoFile('Dockerfile');
+    const fromLines = dockerfile
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => /^FROM\s/i.test(line));
+
+    expect(fromLines.length, 'the Dockerfile must declare a FROM line').toBeGreaterThan(0);
+
+    for (const line of fromLines) {
+      expect(
+        line,
+        `"${line}" must pin its base image with an @sha256: digest of 40 to 64 hex characters`,
+      ).toMatch(/@sha256:[0-9a-f]{40,64}(?![0-9a-f])/);
+    }
+  });
 });
 
 describe('the workflows', () => {
