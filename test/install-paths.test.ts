@@ -153,10 +153,76 @@ describe('the prepare script', () => {
 
 describe('the container build', () => {
   // A sha256 digest is EXACTLY 64 hex characters (32 bytes). The pattern
-  // demands all 64 of them and requires whitespace or the end of the line
-  // after them, so a truncated digest, a partly-pasted one and an
+  // demands all 64 of them and requires the digest to be the END of the
+  // image reference, so a truncated digest, a partly-pasted one and an
   // over-long run are all rejected.
-  const SHA256_DIGEST_PIN = /@sha256:[0-9a-f]{64}(?=\s|$)/;
+  //
+  // The digest is ANCHORED to the image operand — the token the FROM
+  // instruction actually pulls. It has to BE the end of that reference,
+  // and the reference has to be the operand: one token, with the digest on
+  // it. A digest that only appears elsewhere on the line — in a trailing
+  // comment, in a second token after the image, or in a FROM flag — pins
+  // nothing, and the unanchored pattern this replaces accepted it.
+  //
+  // The shape the guard accepts is therefore:
+  //
+  //   FROM [--flag ...] <image>@sha256:<64 hex> [AS <alias>]
+  //
+  // The FROM flags are optional and sit BEFORE the image operand, because
+  // a multi-arch build may add `--platform=...` to an already pinned
+  // stage. They are flags, not the image, so a token that starts with `--`
+  // is never read as the operand. The stage alias is optional and comes
+  // AFTER the reference, so it is not part of the reference and does not
+  // carry the digest: the alias form still matches.
+  //
+  // The keyword is matched case-insensitively, because Dockerfile
+  // instruction keywords are case-insensitive and the selector that
+  // collects the FROM lines matches them that way too: a lowercase
+  // `from` line that IS pinned is a valid base image and must not be
+  // reported as unpinned.
+  //
+  // The operand is found in two steps rather than by ONE pattern: a
+  // pattern that skips the flags needs a repetition inside a repetition,
+  // and `security/detect-unsafe-regex` rejects that shape. Splitting it
+  // keeps the guard readable and every regex here flat.
+  const SHA256_DIGEST_PIN = /^[^\s@]+@sha256:[0-9a-f]{64}$/i;
+
+  // A FROM flag: `--name` or `--name=value`, never carrying an `@`, so a
+  // digest cannot hide inside one.
+  const FROM_FLAG = /^--[^\s@]+$/;
+
+  // The instruction keyword. The stage alias that may follow the
+  // reference needs no pattern of its own: the operand is the FIRST token
+  // that is not a flag, so nothing after it can be read as the image.
+  const FROM_KEYWORD = /^FROM$/i;
+
+  /**
+   * The image OPERAND of a FROM line — the token the instruction actually
+   * pulls — or an empty string when the line names no image.
+   */
+  function imageOperand(line: string): string {
+    const tokens = line.trim().split(/\s+/);
+    if (tokens.length < 2 || !FROM_KEYWORD.test(tokens[0] ?? '')) return '';
+
+    for (const token of tokens.slice(1)) {
+      // Flags sit before the image and are not part of it.
+      if (FROM_FLAG.test(token)) continue;
+      // A token that starts with `--` is a flag, never the image, even
+      // when it carries a digest.
+      return token.startsWith('--') ? '' : token;
+    }
+
+    return '';
+  }
+
+  /**
+   * True when the line's image operand is pinned by a sha256 digest of
+   * exactly 64 hex characters.
+   */
+  function pinsBaseImageByDigest(line: string): boolean {
+    const operand = imageOperand(line);
+    return operand !== '' && SHA256_DIGEST_PIN.test(operand);
+  }
 
   it('installs without running prepare, because it copies src afterwards', () => {
     // The Docker build copies the manifest, installs, and only THEN copies
@@ -187,10 +253,16 @@ describe('the container build', () => {
     // some pin is missing.
     //
     // On the digest LENGTH: a sha256 digest is exactly 64 hex characters
-    // (32 bytes), and SHA256_DIGEST_PIN demands all 64 of them followed by
-    // whitespace or the end of the line. A truncated digest, a
-    // partly-pasted one and an over-long run therefore all fail this
-    // guard.
+    // (32 bytes), and SHA256_DIGEST_PIN demands all 64 of them at the end
+    // of the image reference. A truncated digest, a partly-pasted one and
+    // an over-long run therefore all fail this guard.
+    //
+    // On the digest POSITION: the digest is checked on the image OPERAND
+    // alone, so the digest has to BE the end of the image reference — a
+    // digest that only appears elsewhere on the line (a trailing comment,
+    // a second token) is not a pin. The optional stage alias (` AS build`)
+    // follows the reference and is not part of it, so an aliased FROM line
+    // still matches.
     const dockerfile = readRepoFile('Dockerfile');
     const fromLines = dockerfile
       .split('\n')
@@ -200,22 +272,74 @@ describe('the container build', () => {
     expect(fromLines.length, 'the Dockerfile must declare a FROM line').toBeGreaterThan(0);
 
     for (const line of fromLines) {
+      const operand = imageOperand(line);
+      expect(operand, `"${line}" must name the base image it pulls`).not.toBe('');
       expect(
-        line,
-        `"${line}" must pin its base image with an @sha256: digest of exactly 64 hex characters`,
+        operand,
+        `"${line}" must pin its base image with an @sha256: digest of exactly 64 hex characters on the image reference`,
       ).toMatch(SHA256_DIGEST_PIN);
     }
   });
 
+  it('keeps both stages of the shipped Dockerfile pinned, with and without an alias', () => {
+    // The guard above is only as good as the Dockerfile it reads. The
+    // shipped file uses both FROM shapes — the build stage carries an
+    // alias, the runtime stage does not — and both must keep passing
+    // under the anchored guard.
+    const dockerfile = readRepoFile('Dockerfile');
+    const fromLines = dockerfile
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => /^FROM\s/i.test(line));
+
+    const aliased = fromLines.filter((line) => /\sAS\s+\S+$/i.test(line));
+    const plain = fromLines.filter((line) => !/\sAS\s/i.test(line));
+
+    expect(aliased.length, 'the build stage must carry an alias').toBeGreaterThan(0);
+    expect(plain.length, 'the runtime stage must carry no alias').toBeGreaterThan(0);
+
+    for (const line of fromLines) {
+      const operand = imageOperand(line);
+      expect(operand, `"${line}" must pin its base image by digest`).toMatch(SHA256_DIGEST_PIN);
+    }
+  });
+
+  it('rejects a digest that is not part of the image reference', () => {
+    // A digest that only appears in a comment, or in a token that is not
+    // the image reference, pins NOTHING: the build still pulls a tag that
+    // can move. The unanchored pattern this replaces matched the digest
+    // anywhere on the line and accepted every one of these.
+    const digest = 'a'.repeat(64);
+
+    // The digest sits in a trailing comment.
+    expect(pinsBaseImageByDigest(`FROM node:22-alpine # @sha256:${digest}`)).toBe(false);
+
+    // The digest sits in a second token, after the image.
+    expect(pinsBaseImageByDigest(`FROM node:22-alpine @sha256:${digest}`)).toBe(false);
+    expect(pinsBaseImageByDigest(`FROM node:22-alpine other@sha256:${digest}`)).toBe(false);
+
+    // The digest sits in a FROM flag, where there is no image operand at
+    // all: a flag is not the image, so it cannot carry the pin.
+    expect(pinsBaseImageByDigest(`FROM --platform=@sha256:${digest}`)).toBe(false);
+  });
+
+  it('rejects a tag-only base image, so a pin cannot be lost', () => {
+    // A FROM line with no digest at all is the failure this guard exists
+    // for: the tag is free to move under the next build, silently.
+    expect(pinsBaseImageByDigest('FROM node:22-alpine')).toBe(false);
+    expect(pinsBaseImageByDigest('FROM node:22-alpine AS build')).toBe(false);
+  });
+
   it('rejects a digest that is not exactly 64 hex characters', () => {
-    // A guard that lets a truncated digest through is not a guard. The
-    // pattern this replaces accepted every truncation down to 40 hex
-    // characters, and a truncated digest resolves to no image at all.
-    const pin = (hex: string): string => `node:22-alpine@sha256:${hex}`;
-    expect(SHA256_DIGEST_PIN.test(pin('a'.repeat(64)))).toBe(true);
-    expect(SHA256_DIGEST_PIN.test(pin('a'.repeat(63)))).toBe(false);
-    expect(SHA256_DIGEST_PIN.test(pin('a'.repeat(65)))).toBe(false);
-    expect(SHA256_DIGEST_PIN.test(pin('a'.repeat(64) + 'g'))).toBe(false);
+    // A guard that lets a truncated digest through is not a guard. An
+    // earlier version of this pattern accepted every truncation down to 40
+    // hex characters, and a truncated digest resolves to no image at all.
+    // The guard demands all 64 of them, on the image reference.
+    const from = (hex: string): string => `FROM node:22-alpine@sha256:${hex}`;
+    expect(pinsBaseImageByDigest(from('a'.repeat(64)))).toBe(true);
+    expect(pinsBaseImageByDigest(from('a'.repeat(63)))).toBe(false);
+    expect(pinsBaseImageByDigest(from('a'.repeat(65)))).toBe(false);
+    expect(pinsBaseImageByDigest(from('a'.repeat(64) + 'g'))).toBe(false);
   });
 
   it('accepts a digest followed by whitespace, so a stage alias still matches', () => {
@@ -224,7 +348,34 @@ describe('the container build', () => {
     // after its digest, so a digest followed by a space must still match —
     // the space is a boundary, never part of the digest.
     const digest = 'a'.repeat(64);
-    expect(SHA256_DIGEST_PIN.test(`node:22-alpine@sha256:${digest} AS build`)).toBe(true);
+    expect(pinsBaseImageByDigest(`FROM node:22-alpine@sha256:${digest} AS build`)).toBe(true);
+    // A trailing comment after a pinned image is still a pinned image: the
+    // digest is on the operand, and the space after it is a boundary.
+    expect(pinsBaseImageByDigest(`FROM node:22-alpine@sha256:${digest} # pinned`)).toBe(true);
+  });
+
+  it('accepts a lowercase from, because Dockerfile keywords are case-insensitive', () => {
+    // Dockerfile instruction keywords are case-insensitive, and the
+    // selector that collects the FROM lines matches them that way too. A
+    // lowercase `from` whose image IS pinned is a valid base image, so
+    // this guard must not report it as unpinned and turn a correct
+    // Dockerfile red over its capitalisation.
+    const digest = 'a'.repeat(64);
+    expect(pinsBaseImageByDigest(`from node:22-alpine@sha256:${digest}`)).toBe(true);
+    expect(pinsBaseImageByDigest(`from node:22-alpine@sha256:${digest} as build`)).toBe(true);
+  });
+
+  it('accepts a FROM flag before a pinned image, because a multi-arch build may add one', () => {
+    // `FROM --platform=linux/amd64 node:22-alpine@sha256:<64 hex>` is a
+    // valid, pinned stage: the flag belongs to the FROM instruction, and
+    // the digest still belongs to the image operand. The anchor has to
+    // allow the flag without letting the flag carry the digest itself.
+    const digest = 'a'.repeat(64);
+    const image = `node:22-alpine@sha256:${digest}`;
+    expect(pinsBaseImageByDigest(`FROM --platform=linux/amd64 ${image}`)).toBe(true);
+    expect(pinsBaseImageByDigest(`FROM --platform=linux/amd64 ${image} AS build`)).toBe(true);
+    // A flag does not make an unpinned image acceptable.
+    expect(pinsBaseImageByDigest('FROM --platform=linux/amd64 node:22-alpine')).toBe(false);
   });
 });
 
