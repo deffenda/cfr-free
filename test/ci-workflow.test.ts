@@ -136,6 +136,13 @@ function pullRequestNodes(text: string): string[] {
  * (`"uses": …`) — so a step spelled any of those ways cannot slip past
  * the pin guard.
  *
+ * A key with an empty value is the multi-line plain scalar: YAML reads
+ * the reference from the following, more indented line, and GitHub runs
+ * the step. The guard follows the value across the line break, or an
+ * unpinned action hides behind a line break instead of behind a tag. The
+ * entry then names the continuation line — the line a human has to edit —
+ * and the reference is reported once, never twice.
+ *
  * A comment-only line is not a step: a line whose trimmed text starts
  * with `#` yields no entries at all, so a commented-out reference (say
  * `# - uses: actions/checkout@v4`) is documentation and not an action
@@ -144,22 +151,85 @@ function pullRequestNodes(text: string): string[] {
  * nothing. The fail-closed property is kept for actual steps: an
  * unpinned block step or flow mapping is still caught.
  */
+
+/** A `uses` key with its reference on the same line. */
+const USES_WITH_REFERENCE = /(?:^|[^\w-])["']?uses["']?\s*:\s*([^\s,}\]]+)/g;
+
+/** A `uses` key with an empty value: the reference is on the next line. */
+const USES_EMPTY_VALUE = /(?:^|[^\w-])["']?uses["']?\s*:\s*$/;
+
+/**
+ * The references the `uses` keys on one line name, in the order they sit
+ * on it. Empty when the line carries no `uses` key with a value.
+ *
+ * The leading `(?:^|[^\w-])` keeps `reuses:` and `sub-uses:` out, and the
+ * token stops at whitespace, a comma or a closing brace, so a flow
+ * mapping yields the reference and not `…}`.
+ */
+function usesReferences(line: string): string[] {
+  return [...line.matchAll(USES_WITH_REFERENCE)].map((match) =>
+    (match[1] ?? '').replace(/^["']|["']$/g, ''),
+  );
+}
+
+/** One pair of matching quotes around a token, removed. */
+function stripQuotes(token: string): string {
+  if (token.length < 2) return token;
+  const first = token[0];
+  const last = token[token.length - 1];
+  if ((first === '"' || first === "'") && first === last) {
+    return token.slice(1, -1);
+  }
+  return token;
+}
+
+/**
+ * The entry for a `uses` key whose value sits on the next line: the
+ * reference is the first token of the next line that carries one.
+ *
+ * Empty and comment-only lines are skipped: a comment is documentation
+ * and an empty line carries no reference. When the continuation line
+ * carries a `uses` key of its own, that key reports the reference, so
+ * this returns nothing — the reference is never reported twice.
+ */
+function continuationEntry(
+  lines: string[],
+  from: number,
+): { reference: string; line: string } | undefined {
+  for (let index = from + 1; index < lines.length; index += 1) {
+    const line = (lines[index] ?? '').trim();
+    if (line === '') continue;
+    if (line.startsWith('#')) continue;
+    if (usesReferences(line).length > 0) return undefined;
+    const reference = stripQuotes(line.split(/\s+/)[0] ?? '');
+    if (reference === '') continue;
+    return { reference, line };
+  }
+  return undefined;
+}
+
 function usesLines(text: string): { reference: string; line: string }[] {
-  return text.split('\n').flatMap((raw) => {
+  const lines = text.split('\n');
+  const entries: { reference: string; line: string }[] = [];
+  for (const [index, raw] of lines.entries()) {
     const line = raw.trim();
     // A comment-only line: documentation, not a step. The reference in it
     // is never run, so the pin guard has nothing to say about it.
-    if (line.startsWith('#')) return [];
-    // `uses`, optionally quoted, a colon, then the reference token. The
-    // leading `(?:^|[^\w-])` keeps `reuses:` and `sub-uses:` out, and the
-    // token stops at whitespace, a comma or a closing brace, so a flow
-    // mapping yields the reference and not `…}`.
-    const pattern = /(?:^|[^\w-])["']?uses["']?\s*:\s*([^\s,}\]]+)/g;
-    return [...line.matchAll(pattern)].map((match) => ({
-      reference: (match[1] ?? '').replace(/^["']|["']$/g, ''),
-      line,
-    }));
-  });
+    if (line.startsWith('#')) continue;
+    const references = usesReferences(line);
+    if (references.length > 0) {
+      for (const reference of references) {
+        entries.push({ reference, line });
+      }
+      continue;
+    }
+    // No reference on this line: the key carries an empty value, so the
+    // reference is the first token of the next line that has one.
+    if (!USES_EMPTY_VALUE.test(line)) continue;
+    const continuation = continuationEntry(lines, index);
+    if (continuation !== undefined) entries.push(continuation);
+  }
+  return entries;
 }
 
 /**
@@ -313,6 +383,68 @@ describe('the workflow files — what the merge gate runs', () => {
       usesLines(flowStep)[0]?.line,
       'the reported line is not the trimmed source line (flow mapping)',
     ).toBe(flowStep.trim());
+  });
+
+  it('catches an unpinned action written as a multi-line plain scalar', () => {
+    // Silent failure this prevents: a step whose key carries no value on
+    // its own line. YAML reads the reference from the next, more indented
+    // line and GitHub runs the step, so an unpinned action written this
+    // way is a step that runs — and the guard has to see it.
+    const unpinned = 'actions/checkout@v4';
+    const step = ['      - uses:', '          actions/checkout@v4'].join('\n');
+    const caught = usesLines(step).filter((entry) => !PINNED_ACTION.test(entry.reference));
+    expect(
+      caught.map((entry) => entry.reference),
+      'the pin guard does not see the multi-line step',
+    ).toEqual([unpinned]);
+    // The failure names the line a human has to edit: the line that
+    // carries the reference, not the key that starts it.
+    expect(
+      caught[0]?.line,
+      'the reported line is not the continuation line (multi-line step)',
+    ).toBe('actions/checkout@v4');
+    // The quoted key is the same step: `- "uses":` with an empty value.
+    const quoted = ['      - "uses":', '          actions/checkout@v4'].join('\n');
+    expect(
+      usesLines(quoted).map((entry) => entry.reference),
+      'a quoted key with an empty value is not read',
+    ).toEqual([unpinned]);
+    // The same spelling with a pinned reference stays clean.
+    const pinned = [
+      '      - uses:',
+      '          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
+    ].join('\n');
+    expect(
+      usesLines(pinned).filter((entry) => !PINNED_ACTION.test(entry.reference)),
+      'a pinned multi-line step is flagged',
+    ).toEqual([]);
+  });
+
+  it('reads the reference of a multi-line step past a comment line', () => {
+    // A comment between the key and the reference is documentation, not a
+    // step: the reference is still the next line that carries one, and
+    // the guard must not read the comment as the reference.
+    const step = [
+      '      - uses:',
+      '          # the reference sits on the next line',
+      '          actions/checkout@v4',
+    ].join('\n');
+    const entries = usesLines(step);
+    expect(
+      entries.map((entry) => entry.reference),
+      'the reference behind a comment line is not read',
+    ).toEqual(['actions/checkout@v4']);
+    expect(
+      entries[0]?.line,
+      'the reported line is not the continuation line (behind a comment)',
+    ).toBe('actions/checkout@v4');
+    // A continuation line with a `uses` key of its own reports the
+    // reference once — never twice.
+    const own = ['      - uses:', '          uses: actions/checkout@v4'].join('\n');
+    expect(
+      usesLines(own).map((entry) => entry.reference),
+      'the reference is reported twice',
+    ).toEqual(['actions/checkout@v4']);
   });
 
   it('ignores a commented-out action reference', () => {
