@@ -75,10 +75,11 @@ function withService(body: (service: CFRService) => void, sections = CORPUS): vo
  * The pattern keeps its repetitions FLAT — `\d+`, then an OPTIONAL dot, then
  * `\d*` — because a repetition nested inside another repetition trips the
  * repo's own security/detect-unsafe-regex rule, and this token needs no
- * nesting. It matches the same trailing forms the renderer emits
- * (`12ms`, `1.2ms`).
+ * nesting. The renderer always emits one decimal (`12.0ms`, `1.2ms`); the
+ * flat pattern additionally accepts the no-dot form (`12ms`) and
+ * neutralizes it too.
  */
-function stripLatencyLines(text: string): string {
+function neutralizeLatency(text: string): string {
   return text
     .split('\n')
     .map((line) => line.replace(/\d+\.?\d*ms$/, '<latency>'))
@@ -417,16 +418,16 @@ describe('retrieval evaluation runner (M3)', () => {
       const b = renderReport(evaluateSet(service, 'dev'));
       // The report text is deterministic EXCEPT the latency figures,
       // which are measurements; compare the non-latency lines.
-      expect(stripLatencyLines(a)).toBe(stripLatencyLines(b));
+      expect(neutralizeLatency(a)).toBe(neutralizeLatency(b));
       // The comparison must reach the PER-QUERY rows: the helper keeps
       // every line and neutralizes only the trailing latency token, so one
       // neutralized latency per query survives it. A helper that dropped
       // the rows instead would leave the header, the provenance line and
       // the totals as the whole compared surface — which is what the rows
       // being invisible once allowed.
-      const stripped = stripLatencyLines(a);
-      expect(stripped).toContain('per query:');
-      expect(stripped.split('\n').filter((line) => line.includes('<latency>')).length).toBe(
+      const neutralized = neutralizeLatency(a);
+      expect(neutralized).toContain('per query:');
+      expect(neutralized.split('\n').filter((line) => line.includes('<latency>')).length).toBe(
         queriesFor('dev').length,
       );
       expect(a).toContain('retrieval evaluation — dev set');
@@ -576,7 +577,7 @@ describe('retrieval evaluation runner (M3)', () => {
       const b = renderReport(evaluateSet(service, 'fresh'));
       // Same comparison as the dev report: the latency figures are
       // measurements, everything else must be byte-identical.
-      expect(stripLatencyLines(a)).toBe(stripLatencyLines(b));
+      expect(neutralizeLatency(a)).toBe(neutralizeLatency(b));
       expect(a).toContain('retrieval evaluation — fresh set');
       // The provenance line must carry the fresh set's REAL adjudication
       // counts, derived from the frozen entries themselves.
@@ -738,9 +739,9 @@ describe('retrieval evaluation runner (M3)', () => {
       expect(mixed).not.toContain(devLine);
 
       // Two runs of the same synthetic set render identically (the latency
-      // figures are measurements, so they are stripped before comparing).
+      // figures are measurements, so they are neutralized before comparing).
       const again = renderReport(evaluateSet(service, SYNTHETIC_QUERIES));
-      expect(stripLatencyLines(rendered)).toBe(stripLatencyLines(again));
+      expect(neutralizeLatency(rendered)).toBe(neutralizeLatency(again));
     });
   });
 
