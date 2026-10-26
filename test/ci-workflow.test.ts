@@ -150,6 +150,26 @@ function pullRequestNodes(text: string): string[] {
  * step is pinned, and the guard's message would name a line that does
  * nothing. The fail-closed property is kept for actual steps: an
  * unpinned block step or flow mapping is still caught.
+ *
+ * An inline comment ends the line for matching purposes: everything
+ * from the first `#` that opens a comment is dropped before the
+ * references are extracted and before the empty-value test, so
+ * `- uses: # note` behaves exactly like `- uses:` — no same-line
+ * reference, then the continuation rule above. The strip is
+ * quote-aware, because a `#` inside a quoted scalar is text and not a
+ * comment: in the flow mapping `- { name: "build #1", uses:
+ * some/action@v1 }` the `#` sits inside `"build #1"`, and truncating
+ * there would lose the `uses` key and let an unpinned action escape
+ * the guard. A `#` with no whitespace before it is part of the value
+ * (`org/action@v4#frag` keeps the whole token), and a trailing comment
+ * after a real value keeps reporting the value.
+ *
+ * A `uses` value that is a YAML block-scalar header (`|`, `|-`, `|+`,
+ * `>`, `>-`, with optional chomping and indentation digits) names no
+ * action on its own line: the value sits on the following indented
+ * lines. The header is the empty-value form — no same-line reference,
+ * the continuation rule applies — and the entry names the line that
+ * carries the reference.
  */
 
 /** A `uses` key with its reference on the same line. */
@@ -159,8 +179,66 @@ const USES_WITH_REFERENCE = /(?:^|[^\w-])["']?uses["']?\s*:\s*([^\s,}\]]+)/g;
 const USES_EMPTY_VALUE = /(?:^|[^\w-])["']?uses["']?\s*:\s*$/;
 
 /**
+ * A YAML block-scalar header: `|` or `>` followed by any mix of chomping
+ * (`+`, `-`) and indentation digits. The suffix is deliberately loose —
+ * over-accepting a malformed suffix is safe because the header only
+ * selects the continuation rule, and real YAML validation is not this
+ * test's job. The value sits on the following indented lines, so the
+ * header itself names no action.
+ */
+const BLOCK_SCALAR_HEADER = /^[|>][-+\d]*$/;
+
+/**
+ * The line with its inline comment removed: everything from the first
+ * `#` that opens a comment, or the whole trimmed line when none does.
+ *
+ * A `#` opens a comment only outside every quoted scalar and only at the
+ * start of the line or after whitespace, so `org/action@v4#frag` keeps
+ * its `#frag` while `- uses: # note` strips to `- uses:`. Quote rules:
+ * a `"` or `'` outside any region opens a region of that kind and the
+ * matching quote closes it; the other quote character is literal text
+ * inside a region; inside `"…"` a backslash escapes the next character;
+ * inside `'…'` a doubled `''` is one escaped quote — the first closes,
+ * the second reopens, net effect still inside. A `#` inside a region is
+ * scalar text, which keeps a flow mapping whose earlier quoted value
+ * contains ` # ` — `- { name: "build #1", uses: some/action@v1 }` —
+ * from losing its `uses` key and letting an unpinned action escape.
+ */
+function stripInlineComment(line: string): string {
+  let region: '"' | "'" | undefined;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (region === '"') {
+      // An escaped character can never close the region.
+      if (char === '\\') index += 1;
+      else if (char === '"') region = undefined;
+      continue;
+    }
+    if (region === "'") {
+      if (char === "'") {
+        // A doubled '' is one escaped quote: still inside the region.
+        if (line[index + 1] === "'") index += 1;
+        else region = undefined;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      region = char;
+      continue;
+    }
+    // At the start of the line or after whitespace, `#` opens a comment.
+    if (char === '#' && (index === 0 || /\s/.test(line[index - 1] ?? ''))) {
+      return line.slice(0, index).trim();
+    }
+  }
+  return line.trim();
+}
+
+/**
  * The references the `uses` keys on one line name, in the order they sit
- * on it. Empty when the line carries no `uses` key with a value.
+ * on it. Empty when the line carries no `uses` key with a value. The
+ * line is passed past its inline comment (see `stripInlineComment`), so
+ * a trailing `# …` can neither hide a reference nor fake one.
  *
  * The leading `(?:^|[^\w-])` keeps `reuses:` and `sub-uses:` out, and the
  * token stops at whitespace, a comma or a closing brace, so a flow
@@ -187,19 +265,21 @@ function stripQuotes(token: string): string {
  * The entry for a `uses` key whose value sits on the next line: the
  * reference is the first token of the next line that carries one.
  *
- * Empty and comment-only lines are skipped: a comment is documentation
- * and an empty line carries no reference. When the continuation line
- * carries a `uses` key of its own, that key reports the reference, so
- * this returns nothing — the reference is never reported twice.
+ * Empty and comment-only lines are skipped — both strip to empty —
+ * because a comment is documentation and an empty line carries no
+ * reference. When the continuation line carries a `uses` key of its own,
+ * that key reports the reference, so this returns nothing — the
+ * reference is never reported twice.
  */
 function continuationEntry(
   lines: string[],
   from: number,
 ): { reference: string; line: string } | undefined {
   for (let index = from + 1; index < lines.length; index += 1) {
-    const line = (lines[index] ?? '').trim();
+    // Stripped of its inline comment, so a continuation line with a
+    // trailing comment yields the value and a comment-only line empty.
+    const line = stripInlineComment(lines[index] ?? '');
     if (line === '') continue;
-    if (line.startsWith('#')) continue;
     if (usesReferences(line).length > 0) return undefined;
     const reference = stripQuotes(line.split(/\s+/)[0] ?? '');
     if (reference === '') continue;
@@ -212,20 +292,27 @@ function usesLines(text: string): { reference: string; line: string }[] {
   const lines = text.split('\n');
   const entries: { reference: string; line: string }[] = [];
   for (const [index, raw] of lines.entries()) {
-    const line = raw.trim();
-    // A comment-only line: documentation, not a step. The reference in it
-    // is never run, so the pin guard has nothing to say about it.
-    if (line.startsWith('#')) continue;
+    // The line past its inline comment. A comment-only line strips to
+    // empty: documentation, not a step. The reference in it is never
+    // run, so the pin guard has nothing to say about it.
+    const line = stripInlineComment(raw);
+    if (line === '') continue;
     const references = usesReferences(line);
-    if (references.length > 0) {
-      for (const reference of references) {
+    // A block-scalar header names no action on its own line — the value
+    // sits on the following indented lines — so it is the empty-value
+    // form below, never a same-line reference to pin-check.
+    const hasBlockHeader = references.some((reference) => BLOCK_SCALAR_HEADER.test(reference));
+    const actionReferences = references.filter((reference) => !BLOCK_SCALAR_HEADER.test(reference));
+    if (actionReferences.length > 0) {
+      for (const reference of actionReferences) {
         entries.push({ reference, line });
       }
       continue;
     }
-    // No reference on this line: the key carries an empty value, so the
-    // reference is the first token of the next line that has one.
-    if (!USES_EMPTY_VALUE.test(line)) continue;
+    // No reference on this line: the key carries an empty value — or a
+    // block-scalar header — so the reference is the first token of the
+    // next line that has one.
+    if (!hasBlockHeader && !USES_EMPTY_VALUE.test(line)) continue;
     const continuation = continuationEntry(lines, index);
     if (continuation !== undefined) entries.push(continuation);
   }
@@ -445,6 +532,102 @@ describe('the workflow files — what the merge gate runs', () => {
       usesLines(own).map((entry) => entry.reference),
       'the reference is reported twice',
     ).toEqual(['actions/checkout@v4']);
+  });
+
+  it('ignores a uses line whose only value is an inline comment', () => {
+    // Silent failure this prevents: `- uses: # note` is a null value in
+    // YAML — the comment starts where the value would — so no action
+    // runs. Matching the raw line reported the phantom `#` as an
+    // unpinned action: a loud but nonsense failure naming a line that
+    // does nothing. The stripped line is exactly `- uses:`.
+    expect(usesLines('      - uses: # note'), 'a `#` was read as a reference').toEqual([]);
+    // The continuation rule applies behind it, unchanged: an unpinned
+    // reference on the next line is still caught, on that line.
+    const step = ['      - uses: # note', '          actions/checkout@v4'].join('\n');
+    const caught = usesLines(step).filter((entry) => !PINNED_ACTION.test(entry.reference));
+    expect(
+      caught.map((entry) => entry.reference),
+      'the reference behind a `uses: # note` key is not caught',
+    ).toEqual(['actions/checkout@v4']);
+    expect(caught[0]?.line, 'the reported line is not the continuation line (`uses: # note`)').toBe(
+      'actions/checkout@v4',
+    );
+    // A `#` with no whitespace before it is part of the value, not a
+    // comment: the fragment keeps the whole token, and the pin guard
+    // still judges that whole token.
+    const fragment = 'org/action@v4#frag';
+    expect(
+      usesLines(`      - uses: ${fragment}`).map((entry) => entry.reference),
+      'the `#frag` part of the reference was comment-stripped',
+    ).toEqual([fragment]);
+  });
+
+  it('reads a uses key past a quoted `#` in an earlier value', () => {
+    // Silent failure this prevents: a comment strip that truncates at
+    // the first `#` regardless of quotes is fail-open. In
+    // `- { name: "build #1", uses: some/action@v1 }` the `#` sits
+    // inside a quoted scalar; truncating there loses the `uses` key,
+    // the reference list comes back empty, and an unpinned action
+    // escapes the pin guard — a regression the raw-line match never
+    // had. Every spelling here must report the reference.
+    const spellings = [
+      '      - { name: "build #1", uses: some/action@v1 }',
+      "      - { name: 'build #1', uses: some/action@v1 }",
+      '      - { name: "build \\"a\\" #1", uses: some/action@v1 }',
+      '      - { name: "it\'s #1", uses: some/action@v1 }',
+    ];
+    for (const step of spellings) {
+      const caught = usesLines(step).filter((entry) => !PINNED_ACTION.test(entry.reference));
+      expect(
+        caught.map((entry) => entry.reference),
+        `the pin guard does not see this step: ${step}`,
+      ).toEqual(['some/action@v1']);
+    }
+    // A `#` that really opens a comment still ends the line even when
+    // the comment itself contains quotes: the value is reported, the
+    // comment is not part of it.
+    const trailing = "      - uses: org/action@v4 # it's a comment";
+    expect(
+      usesLines(trailing).map((entry) => entry.reference),
+      'the trailing comment was read as part of the reference',
+    ).toEqual(['org/action@v4']);
+  });
+
+  it('treats a block-scalar header as the empty-value form', () => {
+    // Silent failure this prevents: `uses: |` is a block scalar — the
+    // value sits on the following indented lines — but the regex
+    // captured the indicator itself and the guard reported the nonsense
+    // `not pinned: |`. The header is the empty-value form: no same-line
+    // reference, and the continuation rule names the line that carries
+    // the reference.
+    const step = ['      - uses: |', '          actions/checkout@v4'].join('\n');
+    const caught = usesLines(step).filter((entry) => !PINNED_ACTION.test(entry.reference));
+    expect(
+      caught.map((entry) => entry.reference),
+      'the pin guard does not see the reference behind a block header',
+    ).toEqual(['actions/checkout@v4']);
+    expect(caught[0]?.line, 'the reported line is not the continuation line (block header)').toBe(
+      'actions/checkout@v4',
+    );
+    // The same step with a pinned reference stays clean.
+    const pinned = [
+      '      - uses: |',
+      '          actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
+    ].join('\n');
+    expect(
+      usesLines(pinned).filter((entry) => !PINNED_ACTION.test(entry.reference)),
+      'a pinned step behind a block header is flagged',
+    ).toEqual([]);
+    // A header with no continuation names nothing: no entry, and above
+    // all no phantom `|` reference to fail the pin guard on.
+    expect(usesLines('      - uses: |'), 'a block header yields an entry').toEqual([]);
+    // Every header spelling is the same step to the guard.
+    for (const header of ['|', '|-', '|+', '>', '>-', '|2', '|2-']) {
+      expect(
+        usesLines(`      - uses: ${header}`),
+        `the header \`${header}\` yields an entry`,
+      ).toEqual([]);
+    }
   });
 
   it('ignores a commented-out action reference', () => {
