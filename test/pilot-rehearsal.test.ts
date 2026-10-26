@@ -277,6 +277,35 @@ const NETWORK_SEAMS: readonly NetworkSeam[] = [
   },
 ];
 
+/**
+ * Install every outbound seam, and return ONE undo for the whole set.
+ *
+ * `NETWORK_SEAMS.map(...)` hides a trap of its own: an install that throws
+ * mid-map leaves the seams already installed PATCHED, and the restore array
+ * is never assigned — so the caller's `finally` guards nothing and the
+ * globals stay trapped for the rest of the process. A mid-install throw here
+ * undoes what it already installed BEFORE the error propagates, and the
+ * returned undo restores every seam in REVERSE install order, the order a
+ * hand-written unwind used to follow.
+ */
+function installNetworkSeams(
+  onAttempt: (label: string) => void,
+  seams: readonly NetworkSeam[] = NETWORK_SEAMS,
+): () => void {
+  const restores: Array<() => void> = [];
+  try {
+    for (const seam of seams) {
+      restores.push(seam.install(onAttempt));
+    }
+  } catch (error) {
+    for (const restore of restores.reverse()) restore();
+    throw error;
+  }
+  return () => {
+    for (const restore of restores.reverse()) restore();
+  };
+}
+
 describe('the M6 rehearsal — every task still answerable', () => {
   // The suite is ASYNC: the F4 family runs the product's own diff, redline
   // and historical cores against a STUB eCFR, so the payloads under test are
@@ -337,14 +366,14 @@ describe('the M6 rehearsal — every task still answerable', () => {
     // past a fetch-only trap. The whole point is that the zero below
     // means "no network", not "no fetch".
     const attempts: string[] = [];
-    const restore = NETWORK_SEAMS.map((seam) => seam.install((label) => attempts.push(label)));
+    const restore = installNetworkSeams((label) => attempts.push(label));
     try {
       const trapped = await withRehearsal();
       expect(trapped.failed, 'the suite failed while the network was trapped').toBe(0);
       expect(trapped.passed).toBeGreaterThan(20);
       expect(attempts, `the suite attempted: ${attempts.join(', ')}`).toEqual([]);
     } finally {
-      for (const undo of restore.reverse()) undo();
+      restore();
     }
   });
 
@@ -360,7 +389,7 @@ describe('the M6 rehearsal — every task still answerable', () => {
     // other seven seams still passed. That was caught by a review that
     // deleted one trap and watched the suite stay green.
     const attempts: string[] = [];
-    const restore = NETWORK_SEAMS.map((seam) => seam.install((label) => attempts.push(label)));
+    const restore = installNetworkSeams((label) => attempts.push(label));
     try {
       for (const seam of NETWORK_SEAMS) {
         expect(() => seam.probe(), `${seam.label} did not trip its trap`).toThrow(
@@ -368,10 +397,48 @@ describe('the M6 rehearsal — every task still answerable', () => {
         );
       }
     } finally {
-      for (const undo of restore.reverse()) undo();
+      restore();
     }
     // Every seam fired exactly once, in the order the list declares.
     expect(attempts).toEqual(NETWORK_SEAMS.map((seam) => seam.label));
+  });
+
+  it('undoes the seams it installed when an install throws', () => {
+    // A mid-install throw must not leave the earlier seams patched: with
+    // `map` the restore array was never assigned, so nothing could undo
+    // them. FAKE seams observe the undo without touching a real global —
+    // the first records its undo, the second throws a known error.
+    const undone: string[] = [];
+    const recording = (label: string, sink: string[]): NetworkSeam => ({
+      label,
+      install: () => () => {
+        sink.push(label);
+      },
+      probe: () => {},
+    });
+    const failure = new Error('install failed');
+    const boom: NetworkSeam = {
+      label: 'boom',
+      install: () => {
+        throw failure;
+      },
+      probe: () => {},
+    };
+    expect(() => installNetworkSeams(() => {}, [recording('first', undone), boom])).toThrow(
+      failure,
+    );
+    // The seam installed before the throw was undone before it propagated.
+    expect(undone).toEqual(['first']);
+
+    // The success path returns one undo that restores in REVERSE install
+    // order, so a caller can hand it straight to a `finally`.
+    const restored: string[] = [];
+    const restore = installNetworkSeams(() => {}, [
+      recording('a', restored),
+      recording('b', restored),
+    ]);
+    restore();
+    expect(restored).toEqual(['b', 'a']);
   });
 
   it('traps every outbound seam it claims to, and cannot be quietly narrowed', () => {
