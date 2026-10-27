@@ -412,7 +412,7 @@ on `4`.
 
 ```bash
 npm ci
-npm run ci           # format:check + lint + typecheck + tests + build + audit
+npm run ci           # format:check + lint + workflow lint + typecheck + tests + build + audit
 npm run test:coverage
 npm run scan         # gitleaks + osv-scanner + trivy + semgrep (skips missing tools)
 ```
