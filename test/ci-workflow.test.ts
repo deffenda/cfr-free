@@ -195,14 +195,24 @@ const BLOCK_SCALAR_HEADER = /^[|>][-+\d]*$/;
  * A `#` opens a comment only outside every quoted scalar and only at the
  * start of the line or after whitespace, so `org/action@v4#frag` keeps
  * its `#frag` while `- uses: # note` strips to `- uses:`. Quote rules:
- * a `"` or `'` outside any region opens a region of that kind and the
- * matching quote closes it; the other quote character is literal text
- * inside a region; inside `"…"` a backslash escapes the next character;
- * inside `'…'` a doubled `''` is one escaped quote — the first closes,
- * the second reopens, net effect still inside. A `#` inside a region is
- * scalar text, which keeps a flow mapping whose earlier quoted value
- * contains ` # ` — `- { name: "build #1", uses: some/action@v1 }` —
- * from losing its `uses` key and letting an unpinned action escape.
+ * a `"` or `'` outside any region opens a region of that kind only where
+ * YAML can start a quoted scalar — at the start of the line, after
+ * whitespace, or after a flow indicator (`[`, `{`, `,`, `:`) — so an
+ * apostrophe inside a plain scalar (`it's`) is text, not an opener; the
+ * matching quote closes the region; the other quote character is
+ * literal text inside a region; inside `"…"` a backslash escapes the
+ * next character; inside `'…'` a doubled `''` is one escaped quote —
+ * the first closes, the second reopens, net effect still inside. A `#`
+ * inside a region is scalar text, which keeps a flow mapping whose
+ * earlier quoted value contains ` # ` — `- { name: "build #1", uses:
+ * some/action@v1 }` — from losing its `uses` key and letting an
+ * unpinned action escape. The opener position rule matters both ways:
+ * a plain-scalar apostrophe treated as an opener swallows a real
+ * comment after it (`- uses: org/action@v4 it's # uses: evil/action@v1`
+ * would report the comment's reference), and it can close on the
+ * opening quote of a later real quoted scalar, so the `#` inside that
+ * scalar opens a phantom comment that truncates the line before
+ * `uses:` and lets an unpinned action escape.
  */
 function stripInlineComment(line: string): string {
   let region: '"' | "'" | undefined;
@@ -223,15 +233,34 @@ function stripInlineComment(line: string): string {
       continue;
     }
     if (char === '"' || char === "'") {
-      region = char;
+      // A quote opens a region only where YAML can start a quoted
+      // scalar; mid-token (`it's`) it is plain-scalar text.
+      if (opensQuotedScalar(line, index)) region = char;
       continue;
     }
     // At the start of the line or after whitespace, `#` opens a comment.
-    if (char === '#' && (index === 0 || /\s/.test(line[index - 1] ?? ''))) {
-      return line.slice(0, index).trim();
-    }
+    if (char === '#' && opensComment(line, index)) return line.slice(0, index).trim();
   }
   return line.trim();
+}
+
+/**
+ * Whether YAML can start a quoted scalar at `index`: at the start of the
+ * line, after whitespace, or after a flow indicator. Mid-token (`it's`)
+ * a quote is plain-scalar text and opens no region.
+ */
+function opensQuotedScalar(line: string, index: number): boolean {
+  if (index === 0) return true;
+  const previous = line[index - 1] ?? '';
+  return /\s/.test(previous) || '[{:,'.includes(previous);
+}
+
+/**
+ * Whether `#` at `index` opens a comment: at the start of the line or
+ * after whitespace.
+ */
+function opensComment(line: string, index: number): boolean {
+  return index === 0 || /\s/.test(line[index - 1] ?? '');
 }
 
 /**
@@ -608,6 +637,54 @@ describe('the workflow files — what the merge gate runs', () => {
     expect(
       usesLines(trailing).map((entry) => entry.reference),
       'the trailing comment was read as part of the reference',
+    ).toEqual(['org/action@v4']);
+  });
+
+  it('reads a plain-scalar apostrophe as text, not as a quote', () => {
+    // Silent failure this prevents: a `'` anywhere outside a region
+    // opened one, so an apostrophe inside a plain scalar mis-strips in
+    // both directions. Fail-open: in
+    // `- { name: don't, title: 'build #1', uses: some/action@v1 }` the
+    // phantom region closes on the real quoted scalar's opening quote,
+    // the `#` inside that scalar opens a phantom comment, the line
+    // truncates before `uses:`, and an unpinned action escapes the pin
+    // guard. Fail-closed, the inverse: in
+    // `- uses: org/action@v4 it's # uses: evil/action@v1` the phantom
+    // region swallows the real comment and the guard would report the
+    // comment's reference — a false pin failure naming a line that
+    // does nothing.
+    const failOpen = "      - { name: don't, title: 'build #1', uses: some/action@v1 }";
+    expect(
+      usesLines(failOpen)
+        .filter((entry) => !PINNED_ACTION.test(entry.reference))
+        .map((entry) => entry.reference),
+      `the pin guard does not see this step: ${failOpen}`,
+    ).toEqual(['some/action@v1']);
+    const failClosed = "      - uses: org/action@v4 it's # uses: evil/action@v1";
+    expect(
+      usesLines(failClosed).map((entry) => entry.reference),
+      'the comment behind a plain-scalar apostrophe was read as references',
+    ).toEqual(['org/action@v4']);
+    // The doubled-'' escape branch of the single-quote stripper, before
+    // this test unexercised: inside `'…'` the first quote of a doubled
+    // pair escapes rather than closes, so the region — and the `#`
+    // text inside it — survives to the real closing quote. If the
+    // first quote closed instead, the `#` would open a phantom comment,
+    // the line would truncate before `uses:`, and this step would drop
+    // out of the guard's view.
+    const doubled = "      - { name: 'it''s # not a comment', uses: some/action@v1 }";
+    expect(
+      usesLines(doubled)
+        .filter((entry) => !PINNED_ACTION.test(entry.reference))
+        .map((entry) => entry.reference),
+      `the pin guard does not see this step: ${doubled}`,
+    ).toEqual(['some/action@v1']);
+    // A quoted value closed right before a real comment: the closing
+    // quote ends the region, the comment strips, the value reports.
+    const closing = "      - uses: 'org/action@v4' # it's fine";
+    expect(
+      usesLines(closing).map((entry) => entry.reference),
+      'the value behind a closed quoted scalar was not reported',
     ).toEqual(['org/action@v4']);
   });
 
