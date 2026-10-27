@@ -47,7 +47,7 @@ export interface QueryOutcome {
   readonly noAnswerViolation: boolean;
   /** The top 5 hits as citations. */
   readonly top5: readonly string[];
-  /** Warm search latency in milliseconds (median of 3 runs). */
+  /** Warm search latency in milliseconds (median of the two timed runs; the warm-up is discarded). */
   readonly latencyMs: number;
 }
 
