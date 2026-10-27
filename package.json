@@ -43,7 +43,7 @@
     "validate": "bash scripts/validate.sh",
     "review": "node tools/llm-review.mjs",
     "review:spec": "node tools/llm-review.mjs docs/SPEC.md",
-    "ci": "npm run format:check && npm run lint && npm run typecheck && npm run test:coverage && npm run build && npm run scan:audit"
+    "ci": "npm run format:check && npm run lint && npm run lint:actions && npm run typecheck && npm run test:coverage && npm run build && npm run scan:audit"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

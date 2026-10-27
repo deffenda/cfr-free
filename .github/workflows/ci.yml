@@ -39,7 +39,7 @@ jobs:
       # build, and this job builds explicitly in `npm run ci` — running it
       # during install would build twice.
       - run: npm ci --ignore-scripts
-      # `npm run ci` runs these six steps in this order for local use. CI
+      # `npm run ci` runs these seven steps in this order for local use. CI
       # calls them individually so a failure names itself: four of the
       # five failures in the week to 2026-10-22 surfaced only as
       # "Run npm run ci", which sends the reader back to a local
@@ -48,6 +48,17 @@ jobs:
         run: npm run format:check
       - name: lint (eslint)
         run: npm run lint
+      # The runner ships no actionlint binary; this is the same pinned
+      # install the `actionlint` job uses, and GITHUB_PATH puts it on
+      # PATH for the `npm run lint:actions` step below. Without it the
+      # step would fail with `actionlint: command not found` on every
+      # pull request.
+      - name: Install actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: lint (actionlint, workflows)
+        run: npm run lint:actions
       - name: typecheck (tsc --noEmit)
         run: npm run typecheck
       - name: test (vitest, coverage)
