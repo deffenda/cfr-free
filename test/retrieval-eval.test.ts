@@ -417,7 +417,7 @@ describe('retrieval evaluation runner (M3)', () => {
       const a = renderReport(evaluateSet(service, 'dev'));
       const b = renderReport(evaluateSet(service, 'dev'));
       // The report text is deterministic EXCEPT the latency figures,
-      // which are measurements; compare the non-latency lines.
+      // which are measurements; compare with the latency figures neutralized.
       expect(neutralizeLatency(a)).toBe(neutralizeLatency(b));
       // The comparison must reach the PER-QUERY rows: the helper keeps
       // every line and neutralizes only the trailing latency token, so one
