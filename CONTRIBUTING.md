@@ -24,7 +24,7 @@ Requires Node ≥ 22.5.
 4. Run the gates locally before pushing:
 
    ```bash
-   npm run ci        # format, lint, typecheck, tests+coverage, build, audit
+   npm run ci        # format, lint, workflow lint, typecheck, tests+coverage, build, audit
    npm run scan      # optional: gitleaks/osv/trivy/semgrep (skips missing tools)
    ```
 

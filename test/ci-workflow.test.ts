@@ -345,6 +345,24 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
     expect(workflowRunSteps(workflow)).toEqual(local);
   });
 
+  it('installs the pinned actionlint before any workflow runs the shared gate', () => {
+    // Silent failure this prevents: `npm run ci` now includes
+    // `npm run lint:actions`, and only ci.yml's quality job installs
+    // actionlint. A workflow that calls the shared gate without the
+    // install fails every invocation with `actionlint: command not
+    // found` — on a release tag that blocks publish, github-release and
+    // the npm job at once (release.yml's `ci` job).
+    const install = 'go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12';
+    for (const { name, path } of workflowFiles) {
+      const text = readFileSync(path, 'utf8');
+      const gate = text.indexOf('run: npm run ci');
+      if (gate < 0) continue;
+      const at = text.indexOf(install);
+      expect(at, `${name}: npm run ci with no pinned actionlint install`).toBeGreaterThanOrEqual(0);
+      expect(at, `${name}: actionlint installs only after the gate`).toBeLessThan(gate);
+    }
+  });
+
   it('still produces every check branch protection requires', () => {
     // The matrix legs become the check names, so the matrix has to contain
     // the versions branch protection names.

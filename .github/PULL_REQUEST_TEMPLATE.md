@@ -12,7 +12,7 @@
 
 ## Checklist
 
-- [ ] `npm run ci` passes locally (format, lint, typecheck, tests + coverage, build, audit)
+- [ ] `npm run ci` passes locally (format, lint, workflow lint, typecheck, tests + coverage, build, audit)
 - [ ] New/changed behavior has tests
 - [ ] Docs updated if user-visible behavior changed (README / SPEC)
 - [ ] No secrets, credentials, or personal data in the diff

@@ -29,6 +29,14 @@ jobs:
       # build, and this job builds explicitly in `npm run ci` — running it
       # during install would build twice.
       - run: npm ci --ignore-scripts
+      # `npm run ci` includes `npm run lint:actions`, and the runner ships
+      # no actionlint binary; this is the same pinned install ci.yml's
+      # quality job uses. Without it this gate would fail with
+      # `actionlint: command not found` on every release tag.
+      - name: Install actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - run: npm run ci
 
   container-e2e:
