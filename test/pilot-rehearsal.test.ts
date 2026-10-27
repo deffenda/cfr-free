@@ -284,9 +284,12 @@ const NETWORK_SEAMS: readonly NetworkSeam[] = [
  * mid-map leaves the seams already installed PATCHED, and the restore array
  * is never assigned — so the caller's `finally` guards nothing and the
  * globals stay trapped for the rest of the process. A mid-install throw here
- * undoes what it already installed BEFORE the error propagates, and the
+ * undoes what it already installed BEFORE the error propagates, and a restore
+ * that throws does not strand the remaining seams — every one is still
+ * attempted, and the ORIGINAL install error is rethrown unchanged. The
  * returned undo restores every seam in REVERSE install order, the order a
- * hand-written unwind used to follow.
+ * hand-written unwind used to follow; the restore list is never mutated, so
+ * every invocation of that undo runs in that same reverse order.
  */
 function installNetworkSeams(
   onAttempt: (label: string) => void,
@@ -298,11 +301,17 @@ function installNetworkSeams(
       restores.push(seam.install(onAttempt));
     }
   } catch (error) {
-    for (const restore of restores.reverse()) restore();
+    for (const restore of [...restores].reverse()) {
+      try {
+        restore();
+      } catch {
+        // A failing undo must not strand the seams still waiting theirs.
+      }
+    }
     throw error;
   }
   return () => {
-    for (const restore of restores.reverse()) restore();
+    for (const restore of [...restores].reverse()) restore();
   };
 }
 
@@ -407,7 +416,8 @@ describe('the M6 rehearsal — every task still answerable', () => {
     // A mid-install throw must not leave the earlier seams patched: with
     // `map` the restore array was never assigned, so nothing could undo
     // them. FAKE seams observe the undo without touching a real global —
-    // the first records its undo, the second throws a known error.
+    // the recorders note their undo in turn, and the last seam throws a
+    // known error.
     const undone: string[] = [];
     const recording = (label: string, sink: string[]): NetworkSeam => ({
       label,
@@ -424,21 +434,56 @@ describe('the M6 rehearsal — every task still answerable', () => {
       },
       probe: () => {},
     };
-    expect(() => installNetworkSeams(() => {}, [recording('first', undone), boom])).toThrow(
-      failure,
-    );
-    // The seam installed before the throw was undone before it propagated.
-    expect(undone).toEqual(['first']);
+    const thrown: unknown[] = [];
+    try {
+      installNetworkSeams(() => {}, [
+        recording('first', undone),
+        recording('second', undone),
+        boom,
+      ]);
+    } catch (error) {
+      thrown.push(error);
+    }
+    // The ORIGINAL install error propagates by IDENTITY — `toThrow(failure)`
+    // compares messages only, which a same-message look-alike would pass.
+    expect(thrown[0]).toBe(failure);
+    // Both earlier seams were undone, in REVERSE install order — the CATCH
+    // path, where forward and reverse used to be indistinguishable with a
+    // single installed undo.
+    expect(undone).toEqual(['second', 'first']);
+
+    // A restore that THROWS must not strand the seams behind it: the
+    // original install error still propagates by identity, and the other
+    // seam's undo still ran.
+    const poisonUndone: string[] = [];
+    const poison: NetworkSeam = {
+      label: 'poison',
+      install: () => () => {
+        throw new Error('restore failed');
+      },
+      probe: () => {},
+    };
+    const poisonThrown: unknown[] = [];
+    try {
+      installNetworkSeams(() => {}, [recording('other', poisonUndone), poison, boom]);
+    } catch (error) {
+      poisonThrown.push(error);
+    }
+    expect(poisonThrown[0]).toBe(failure);
+    expect(poisonUndone).toEqual(['other']);
 
     // The success path returns one undo that restores in REVERSE install
-    // order, so a caller can hand it straight to a `finally`.
+    // order, so a caller can hand it straight to a `finally` — and because
+    // the undo never mutates the restore list, a SECOND invocation runs in
+    // reverse again instead of falling back to forward order.
     const restored: string[] = [];
     const restore = installNetworkSeams(() => {}, [
       recording('a', restored),
       recording('b', restored),
     ]);
     restore();
-    expect(restored).toEqual(['b', 'a']);
+    restore();
+    expect(restored).toEqual(['b', 'a', 'b', 'a']);
   });
 
   it('traps every outbound seam it claims to, and cannot be quietly narrowed', () => {
