@@ -289,7 +289,11 @@ const NETWORK_SEAMS: readonly NetworkSeam[] = [
  * attempted, and the ORIGINAL install error is rethrown unchanged. The
  * returned undo restores every seam in REVERSE install order, the order a
  * hand-written unwind used to follow; the restore list is never mutated, so
- * every invocation of that undo runs in that same reverse order.
+ * every invocation of that undo runs in that same reverse order. That
+ * per-restore tolerance belongs to the UNWIND, not to the returned undo: a
+ * success-path restore is a plain assignment that cannot throw, and one
+ * that did would propagate to the caller — there is no competing error for
+ * it to shield.
  */
 function installNetworkSeams(
   onAttempt: (label: string) => void,
@@ -454,11 +458,14 @@ describe('the M6 rehearsal — every task still answerable', () => {
 
     // A restore that THROWS must not strand the seams behind it: the
     // original install error still propagates by identity, and the other
-    // seam's undo still ran.
+    // seam's undo still ran. The poison restore records its own attempt
+    // BEFORE throwing, so the assertion proves it ran first (reverse
+    // install order) instead of the unwind quietly skipping it.
     const poisonUndone: string[] = [];
     const poison: NetworkSeam = {
       label: 'poison',
       install: () => () => {
+        poisonUndone.push('poison');
         throw new Error('restore failed');
       },
       probe: () => {},
@@ -470,7 +477,7 @@ describe('the M6 rehearsal — every task still answerable', () => {
       poisonThrown.push(error);
     }
     expect(poisonThrown[0]).toBe(failure);
-    expect(poisonUndone).toEqual(['other']);
+    expect(poisonUndone).toEqual(['poison', 'other']);
 
     // The success path returns one undo that restores in REVERSE install
     // order, so a caller can hand it straight to a `finally` — and because
