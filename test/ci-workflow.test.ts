@@ -43,8 +43,8 @@ import { describe, expect, it } from 'vitest';
  * can. `actionlint` does: it validates expressions and contexts (a
  * job-level `if` on `matrix` among them), and it runs inside the gate
  * itself (`npm run ci` → `npm run lint:actions`) in every workflow leg
- * that runs the gate, on the version pinned above; CONTRIBUTING.md names
- * how to install it.
+ * that runs the gate, on the version `ACTIONLINT_VERSION` pins below;
+ * CONTRIBUTING.md names how to install it.
  */
 
 const WORKFLOW_PATH = fileURLToPath(new URL('../.github/workflows/ci.yml', import.meta.url));
@@ -412,14 +412,17 @@ const GATE_COMMAND = /(?:^|[\s;&|(`'"])npm run\s+(?:ci|lint:actions)(?![\w:.-])/
 
 /**
  * A line appending GOPATH's bin dir to GITHUB_PATH as a command, in the
- * same command-position anchor as the install line: the echoed content
- * must name `go env GOPATH` (the spelling both workflows use) — an echo
- * appending the wrong directory sets a PATH the bare `actionlint` is
- * not on — and the redirect must end the line, so a note or echo
- * QUOTING the redirect (which carries text after the target, at minimum
- * the closing quote) is documentation, not PATH setup.
+ * same command-position anchor as the install line. Three conditions:
+ * the echoed content must name `go env GOPATH` (the spelling both
+ * workflows use) — an echo appending the wrong directory sets a PATH the
+ * bare `actionlint` is not on; the target is `$GITHUB_PATH` or
+ * `${GITHUB_PATH}`, quoted or not, since both spellings redirect to the
+ * file GitHub reads; and the redirect must end the line, so a note or
+ * echo QUOTING the redirect (which carries text after the target, at
+ * minimum the closing quote) is documentation, not PATH setup.
  */
-const GITHUB_PATH_ECHO = /^\s*-?\s*(?:run:)?\s*echo\b.*go env GOPATH.*>>\s*"\$GITHUB_PATH"\s*$/;
+const GITHUB_PATH_ECHO =
+  /^\s*-?\s*(?:run:)?\s*echo\b.*go env GOPATH.*>>\s*"?\$(?:GITHUB_PATH|\{GITHUB_PATH\})"?\s*$/;
 
 /** An actionlint run by absolute GOPATH path — no PATH lookup involved. */
 const ACTIONLINT_BY_PATH = /\$\(go env GOPATH\)\/bin\/actionlint/;
@@ -667,7 +670,7 @@ function unreadRunFindings(file: string, text: string): string[] {
     const stripped = stripInlineComment(lines[index] ?? '');
     if (GATE_COMMAND.test(stripped) || ACTIONLINT_BY_PATH.test(stripped)) {
       findings.push(
-        `${file}:${index + 1}: gate or actionlint run on a line this guard does not read as a run value — flow-style YAML is not parsed; use block-style steps`,
+        `${file}:${index + 1}: gate or actionlint run on a line this guard does not read as a run value — run values must be a block-style \`run:\` key at step indent, not flow style, a plain-scalar continuation or compact step indentation`,
       );
     }
   }
@@ -1330,7 +1333,7 @@ describe('the per-job gate guard — synthetic job snippets', () => {
     // formatted file would claim a clean guard while nothing was judged.
     // The unread-run check fails closed on the run itself instead.
     const expected = (line: number): string[] => [
-      `synthetic.yml:${line}: gate or actionlint run on a line this guard does not read as a run value — flow-style YAML is not parsed; use block-style steps`,
+      `synthetic.yml:${line}: gate or actionlint run on a line this guard does not read as a run value — run values must be a block-style \`run:\` key at step indent, not flow style, a plain-scalar continuation or compact step indentation`,
     ];
     const header = ['name: Synthetic', '', 'jobs: { gate: { steps: [{ run: npm run ci }] } }'].join(
       '\n',
@@ -1379,6 +1382,39 @@ describe('the per-job gate guard — synthetic job snippets', () => {
     expect(gateFindings('synthetic.yml', text)).toEqual([
       'synthetic.yml: job `gate`, step `run: npm run ci`: bare gate with no `>> "$GITHUB_PATH"` echo appending $(go env GOPATH)/bin',
     ]);
+  });
+
+  it('accepts the unquoted and braced GITHUB_PATH redirect spellings', () => {
+    // Silent failure this prevents the OTHER way: GitHub documents the
+    // redirect unquoted (`>> $GITHUB_PATH`), and that spelling does put
+    // the directory on later steps' PATH — a guard that rejects it
+    // fails a correct file, which is how guards get disabled.
+    for (const target of ['$GITHUB_PATH', '${GITHUB_PATH}', '"$GITHUB_PATH"']) {
+      const text = syntheticWorkflow([
+        '  gate:',
+        '    steps:',
+        '      - name: Install actionlint',
+        `        run: ${ACTIONLINT_INSTALL}`,
+        '      - name: Put GOPATH/bin on PATH',
+        `        run: echo "$(go env GOPATH)/bin" >> ${target}`,
+        '      - run: npm run ci',
+      ]);
+      expect(gateFindings('synthetic.yml', text), target).toEqual([]);
+    }
+    // A trailing inline comment is stripped before this line is judged,
+    // so the echo still counts: it IS PATH setup. (A note that QUOTES
+    // the redirect instead of performing it is rejected below — the
+    // quoted text ends with `'`, after the target.)
+    const commented = syntheticWorkflow([
+      '  gate:',
+      '    steps:',
+      '      - name: Install actionlint',
+      `        run: ${ACTIONLINT_INSTALL}`,
+      '      - name: Put GOPATH/bin on PATH',
+      '        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH" # for later steps',
+      '      - run: npm run ci',
+    ]);
+    expect(gateFindings('synthetic.yml', commented)).toEqual([]);
   });
 
   it('ignores an install or echo a line merely quotes, not runs', () => {
