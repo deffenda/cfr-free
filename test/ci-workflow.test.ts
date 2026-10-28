@@ -202,10 +202,10 @@ const BLOCK_SCALAR_HEADER = /^[|>][-+\d]*$/;
  * A `#` opens a comment only outside every quoted scalar and only at the
  * start of the line or after whitespace, so `org/action@v4#frag` keeps
  * its `#frag` while `- uses: # note` strips to `- uses:`. Quote rules:
- * a `"` or `'` outside any region opens a region of that kind only where
- * YAML can start a quoted scalar — at the start of the line, after
- * whitespace, or after a flow indicator (`[`, `{`, `,`, `:`) — so an
- * apostrophe inside a plain scalar (`it's`) is text, not an opener; the
+ * a `"` or `'` outside any region opens a region of that kind at an
+ * approximate scalar-start position — the start of the line, after
+ * whitespace, or directly after a flow indicator (`[`, `{`, `,`, `:`) —
+ * so an apostrophe inside a plain scalar (`it's`) is text, not an opener; the
  * matching quote closes the region; the other quote character is
  * literal text inside a region; inside `"…"` a backslash escapes the
  * next character; inside `'…'` a doubled `''` is one escaped quote —
@@ -219,7 +219,12 @@ const BLOCK_SCALAR_HEADER = /^[|>][-+\d]*$/;
  * would report the comment's reference), and it can close on the
  * opening quote of a later real quoted scalar, so the `#` inside that
  * scalar opens a phantom comment that truncates the line before
- * `uses:` and lets an unpinned action escape.
+ * `uses:` and lets an unpinned action escape. The position test
+ * approximates where YAML starts a quoted scalar; it does not track an
+ * already-open plain scalar, so a quote after whitespace inside one
+ * (`- run: echo ab ' cd`) still opens a region and mis-strips such
+ * contrived lines in either direction — a known limitation, recorded
+ * here without any behaviour change.
  */
 function stripInlineComment(line: string): string {
   let region: '"' | "'" | undefined;
@@ -252,9 +257,11 @@ function stripInlineComment(line: string): string {
 }
 
 /**
- * Whether YAML can start a quoted scalar at `index`: at the start of the
- * line, after whitespace, or after a flow indicator. Mid-token (`it's`)
- * a quote is plain-scalar text and opens no region.
+ * Whether a quote at `index` opens a region: at the start of the line,
+ * after whitespace, or directly after a flow indicator (`[`, `{`, `:`,
+ * `,`) — an approximation of where YAML starts a quoted scalar (see
+ * `stripInlineComment` for its known limitation). Mid-token (`it's`) a
+ * quote is plain-scalar text and opens no region.
  */
 function opensQuotedScalar(line: string, index: number): boolean {
   if (index === 0) return true;
@@ -1110,6 +1117,34 @@ describe('the workflow files — what the merge gate runs', () => {
       usesLines(closing).map((entry) => entry.reference),
       'the value behind a closed quoted scalar was not reported',
     ).toEqual(['org/action@v4']);
+  });
+
+  it('reads a quote directly after a flow indicator as an opener', () => {
+    // Silent failure this prevents: `opensQuotedScalar` opens a region
+    // not only at line start or after whitespace but also directly
+    // after a flow indicator (`[`, `{`, `,`, `:`) with no space
+    // between — the JSON-style spelling `- {name:"build #1", uses:
+    // some/action@v1}`. Each shape below puts the opening quote
+    // directly after one of the four. If the flow-indicator disjunct
+    // `'[{:,'` were removed from `opensQuotedScalar`, each quote would
+    // read as plain-scalar text, the ` #` inside the value would open a
+    // phantom comment, the line would truncate before `uses:`, and the
+    // unpinned action would escape the pin guard — fail-open. That
+    // removal is the regression this test exists to catch; every shape
+    // must keep its line alive to the unpinned reference.
+    const adjacent = [
+      '      - {"build #1", uses: some/action@v1}', // `"` after `{`
+      '      - {name:"build #1", uses: some/action@v1}', // `"` after `:`
+      '      - ["build #1", uses: some/action@v1]', // `"` after `[`
+      '      - {name: don\'t,"build #1", uses: some/action@v1}', // `"` after `,`
+    ];
+    for (const step of adjacent) {
+      const caught = usesLines(step).filter((entry) => !PINNED_ACTION.test(entry.reference));
+      expect(
+        caught.map((entry) => entry.reference),
+        `the pin guard does not see this step: ${step}`,
+      ).toEqual(['some/action@v1']);
+    }
   });
 
   it('treats a block-scalar header as the empty-value form', () => {
