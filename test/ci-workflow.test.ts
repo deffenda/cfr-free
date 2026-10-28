@@ -369,9 +369,10 @@ function jobBlock(text: string, jobName: string): string {
  * The actionlint version every WORKFLOW install pins. One version across
  * the workflows — ci.yml's quality job, ci.yml's `actionlint` job and
  * release's `ci` job — or a change is green on one leg and red on
- * another. The local leg (`npm run ci`, `npm run lint:actions`) names
- * its own copy of the version in AGENTS.md and CONTRIBUTING.md; this
- * test cannot read those, so it pins only the workflow files.
+ * another. The local leg names its own copy of the version in AGENTS.md
+ * and CONTRIBUTING.md; this test reads the workflow files and
+ * package.json only, so a version mentioned only in prose is unguarded
+ * BY CHOICE — every workflow install must equal the constant below.
  */
 const ACTIONLINT_VERSION = 'v1.7.12';
 
@@ -400,12 +401,14 @@ const GATE_COMMAND = /(?:^|[\s;&|(`'"])npm run\s+(?:ci|lint:actions)(?![\w:.-])/
 
 /**
  * A line appending GOPATH's bin dir to GITHUB_PATH as a command, in the
- * same command-position anchor as the install line, with the redirect
- * ending the line: a note or echo QUOTING the redirect carries text
- * after the target (at minimum the closing quote), which documentation
- * is not PATH setup.
+ * same command-position anchor as the install line: the echoed content
+ * must name `go env GOPATH` (the spelling both workflows use) — an echo
+ * appending the wrong directory sets a PATH the bare `actionlint` is
+ * not on — and the redirect must end the line, so a note or echo
+ * QUOTING the redirect (which carries text after the target, at minimum
+ * the closing quote) is documentation, not PATH setup.
  */
-const GITHUB_PATH_ECHO = /^\s*-?\s*(?:run:)?\s*echo\b.*>>\s*"\$GITHUB_PATH"\s*$/;
+const GITHUB_PATH_ECHO = /^\s*-?\s*(?:run:)?\s*echo\b.*go env GOPATH.*>>\s*"\$GITHUB_PATH"\s*$/;
 
 /** An actionlint run by absolute GOPATH path — no PATH lookup involved. */
 const ACTIONLINT_BY_PATH = /\$\(go env GOPATH\)\/bin\/actionlint/;
@@ -427,24 +430,37 @@ type JobGate = {
 };
 
 /**
- * The jobs of a workflow text, in file order: the name from the
- * two-space-indented key under the `jobs` key and the body lines up to
- * the next such key. The key is matched in the spellings YAML accepts
- * and prettier keeps — bare, quoted (`"jobs":`), or carrying an inline
- * comment (`jobs: # why`) — so no spelling of it hides a file's jobs
- * from the guard. A line back at column 0 ends the mapping — and every
- * job's body — so a workflow that puts something after `jobs:` stops
- * here too. Empty when the text has no `jobs` key at all: a caller then
- * reports nothing only when the workflow really has no jobs to guard.
+ * The index of the `jobs` mapping key line: bare, quoted (`"jobs":`) or
+ * carrying an inline comment (`jobs: # why`) — the spellings YAML
+ * accepts and prettier keeps — and -1 when the text has no such line.
+ * A flow-style VALUE on the key line (`jobs: { … }`) is deliberately not
+ * a header: there is no mapping below it to walk, and `gateFindings`
+ * reports any gate run it cannot read instead of passing over it.
  */
-function workflowJobs(text: string): { name: string; lines: string[] }[] {
-  const lines = text.split('\n');
-  const header = lines.findIndex((line) => {
+function jobsHeaderIndex(lines: string[]): number {
+  return lines.findIndex((line) => {
     const key = JOBS_HEADER.exec(line);
     if (key === null) return false;
     const rest = line.slice(key[0].length).trim();
     return rest === '' || rest.startsWith('#');
   });
+}
+
+/**
+ * The jobs of a workflow text, in file order: the name from the
+ * two-space-indented key under the `jobs` key and the body lines up to
+ * the next such key. No spelling of the KEY hides a file's jobs from the
+ * guard; a flow-style VALUE (`jobs: { … }`, `gate: { steps: … }`) has no
+ * such key line to read here, and the runs it hides are caught by
+ * `gateFindings`' unread-run check below. A line back at column 0 ends
+ * the mapping — and every job's body — so a workflow that puts something
+ * after `jobs:` stops here too. Empty when the text has no `jobs` key at
+ * all: a caller then reports nothing only when the workflow really has
+ * no jobs to guard.
+ */
+function workflowJobs(text: string): { name: string; lines: string[] }[] {
+  const lines = text.split('\n');
+  const header = jobsHeaderIndex(lines);
   if (header === -1) return [];
   const jobs: { name: string; lines: string[] }[] = [];
   let current: { name: string; lines: string[] } | undefined;
@@ -462,24 +478,46 @@ function workflowJobs(text: string): { name: string; lines: string[] }[] {
 }
 
 /**
- * The value of a `run:` block scalar: its content lines — indented past
- * the run key at column 8, comment-only lines stripped — joined as the
- * shell would see them.
+ * The line indexes of a block scalar's content: lines indented past the
+ * run key at column 8, blanks skipped, a line back at column 8 or left
+ * ending the value — the same walk `blockScalarValue` joins.
  */
-function blockScalarValue(lines: string[], index: number): string {
-  const parts: string[] = [];
+function blockScalarContent(lines: string[], index: number): number[] {
+  const content: number[] = [];
   for (let next = index + 1; next < lines.length; next += 1) {
-    const content = lines[next] ?? '';
-    if (content.trim() === '') continue;
+    const text = lines[next] ?? '';
+    if (text.trim() === '') continue;
     // The run key sits at column 8 in both step spellings, so the block's
     // content is every line indented past it; a line back at column 8 or
     // left is the next key and ends the value.
-    if (content.length - content.trimStart().length <= 8) break;
-    const stripped = stripInlineComment(content);
+    if (text.length - text.trimStart().length <= 8) break;
+    content.push(next);
+  }
+  return content;
+}
+
+/**
+ * The value of a `run:` block scalar: its content lines — comment-only
+ * lines stripped — joined as the shell would see them.
+ */
+function blockScalarValue(lines: string[], index: number): string {
+  const parts: string[] = [];
+  for (const next of blockScalarContent(lines, index)) {
+    const stripped = stripInlineComment(lines[next] ?? '');
     if (stripped === '') continue;
     parts.push(stripped);
   }
   return parts.join('\n');
+}
+
+/**
+ * The text after a `run:` key at the two column positions a step's run
+ * key sits at (column 6 after `- `, column 8 under a `name:`/`uses:`
+ * sibling) — undefined when the line carries no run key at all.
+ */
+function runRestAt(line: string): string | undefined {
+  const match = /^ {6}- run:(.*)$/.exec(line) ?? /^ {8}run:(.*)$/.exec(line);
+  return match?.[1];
 }
 
 /**
@@ -496,9 +534,7 @@ function blockScalarValue(lines: string[], index: number): string {
  * which is all the ordering the gate rules need.
  */
 function runValueAt(lines: string[], index: number): string | undefined {
-  const line = lines[index] ?? '';
-  const match = /^ {6}- run:(.*)$/.exec(line) ?? /^ {8}run:(.*)$/.exec(line);
-  const rest = match?.[1];
+  const rest = runRestAt(lines[index] ?? '');
   if (rest === undefined) return undefined;
   const value = stripInlineComment(rest);
   if (!BLOCK_SCALAR_HEADER.test(value)) return value;
@@ -554,6 +590,80 @@ function workflowGateConsumers(text: string): { job: string; step: string }[] {
 }
 
 /**
+ * The line indexes in `lines[from, to)` that hold run values this guard
+ * reads: the run key's own line, plus a block scalar's content lines.
+ */
+function readRunLines(lines: string[], from: number, to: number): Set<number> {
+  const read = new Set<number>();
+  for (let index = from; index < to; index += 1) {
+    const rest = runRestAt(lines[index] ?? '');
+    if (rest === undefined) continue;
+    read.add(index);
+    if (BLOCK_SCALAR_HEADER.test(stripInlineComment(rest))) {
+      for (const next of blockScalarContent(lines, index)) read.add(next);
+    }
+  }
+  return read;
+}
+
+/**
+ * The line range `[from, to)` of the jobs mapping: `from === to` when
+ * the text has no walkable mapping. A flow-style value sits ON the key
+ * line and so starts the range there; an empty or comment tail starts a
+ * block mapping on the next line; anything else (`jobs: null`) leaves no
+ * mapping at all. The range ends where `workflowJobs` ends it.
+ */
+function jobsRegion(lines: string[]): { from: number; to: number } {
+  const header = lines.findIndex((line) => JOBS_HEADER.test(line));
+  if (header === -1) return { from: 0, to: 0 };
+  const key = JOBS_HEADER.exec(lines[header] ?? '')?.[0] ?? '';
+  const rest = (lines[header] ?? '').slice(key.length).trim();
+  const flow = rest.startsWith('{');
+  if (!flow && rest !== '' && !rest.startsWith('#')) return { from: 0, to: 0 };
+  const from = flow ? header : header + 1;
+  let to = lines.length;
+  for (let index = header + 1; index < lines.length; index += 1) {
+    // The same line that ends the mapping for `workflowJobs`: any
+    // column-0 content line, while a column-0 comment ends nothing.
+    if (/^[^\s#]/.test(lines[index] ?? '')) {
+      to = index;
+      break;
+    }
+  }
+  return { from, to };
+}
+
+/**
+ * A gate or absolute-path actionlint run on a line inside the `jobs`
+ * mapping that is NOT a run value this guard reads — a flow-style value
+ * (`jobs: { … }`, `gate: { steps: [{ run: … }] }`, `- { run: … }`) or an
+ * indentation `runRestAt` does not know. Reported instead of skipped:
+ * block-style reading walks straight past these spellings, so passing
+ * over them would let a file claim a clean guard while the ordering
+ * rules judged nothing. Prettier keeps flow style as written, so the
+ * shape is reachable in a formatted file. Lines outside the mapping
+ * (comments, other top-level keys) are never judged, and a flow value
+ * carrying no gate run is out of these rules' scope.
+ */
+function unreadRunFindings(file: string, text: string): string[] {
+  const lines = text.split('\n');
+  const { from, to } = jobsRegion(lines);
+  if (from === to) return [];
+  const read = readRunLines(lines, from, to);
+  const findings: string[] = [];
+  for (let index = from; index < to; index += 1) {
+    if (read.has(index)) continue;
+    const stripped = stripInlineComment(lines[index] ?? '');
+    if (GATE_COMMAND.test(stripped) || ACTIONLINT_BY_PATH.test(stripped)) {
+      findings.push(
+        `${file}:${index + 1}: gate or actionlint run on a line this guard does not read as a run value — flow-style YAML is not parsed; use block-style steps`,
+      );
+    }
+  }
+  return findings;
+}
+
+/**
  * Every invariant a workflow's jobs break, as messages naming the file,
  * the job and the step. Empty when every job holds them:
  *
@@ -569,9 +679,14 @@ function workflowGateConsumers(text: string): { job: string; step: string }[] {
  *  - a job that invokes actionlint by absolute GOPATH path carries the
  *    install in an earlier step too, but needs no PATH echo: the
  *    absolute path never reads PATH.
+ *
+ * Findings also name any gate or absolute-path run inside the mapping
+ * that sits on a line the run-value reader does not read (see
+ * `unreadRunFindings`): the rules above only judge what the parser can
+ * see, so a spelling it cannot parse must fail here rather than pass.
  */
 function gateFindings(file: string, text: string): string[] {
-  const findings: string[] = [];
+  const findings: string[] = unreadRunFindings(file, text);
   for (const job of workflowJobs(text)) {
     const scan = scanJobGate(job.lines);
     const where = (step: string): string => `${file}: job \`${job.name}\`, step \`${step}\``;
@@ -585,7 +700,9 @@ function gateFindings(file: string, text: string): string[] {
         );
       }
       if (scan.echoOrdinal === -1) {
-        findings.push(`${where(consumer.step)}: bare gate with no \`>> "$GITHUB_PATH"\` echo`);
+        findings.push(
+          `${where(consumer.step)}: bare gate with no \`>> "$GITHUB_PATH"\` echo appending $(go env GOPATH)/bin`,
+        );
       } else if (scan.echoOrdinal >= consumer.ordinal) {
         findings.push(
           `${where(consumer.step)}: \`>> "$GITHUB_PATH"\` echo must be in an earlier step than the gate`,
@@ -1188,6 +1305,65 @@ describe('the per-job gate guard — synthetic job snippets', () => {
     }
   });
 
+  it('fails a gate run written in flow style the block reader cannot read', () => {
+    // Silent failure this prevents: `workflowJobs` and `runValueAt`
+    // read block-style mappings only, so a flow-style jobs key, job
+    // value, steps value or step hides the gate run from every rule in
+    // `gateFindings` — and prettier keeps flow style as written, so the
+    // formatted file would claim a clean guard while nothing was judged.
+    // The unread-run check fails closed on the run itself instead.
+    const expected = (line: number): string[] => [
+      `synthetic.yml:${line}: gate or actionlint run on a line this guard does not read as a run value — flow-style YAML is not parsed; use block-style steps`,
+    ];
+    const header = ['name: Synthetic', '', 'jobs: { gate: { steps: [{ run: npm run ci }] } }'].join(
+      '\n',
+    );
+    expect(gateFindings('synthetic.yml', header), 'flow jobs value').toEqual(expected(3));
+    const jobValue = [
+      'name: Synthetic',
+      '',
+      'jobs:',
+      '  gate: { steps: [{ run: npm run ci }] }',
+    ].join('\n');
+    expect(gateFindings('synthetic.yml', jobValue), 'flow job value').toEqual(expected(4));
+    const stepsValue = [
+      'name: Synthetic',
+      '',
+      'jobs:',
+      '  gate:',
+      '    steps: [{ run: npm run ci }]',
+    ].join('\n');
+    expect(gateFindings('synthetic.yml', stepsValue), 'flow steps value').toEqual(expected(5));
+    const flowStep = syntheticWorkflow(['  gate:', '    steps:', '      - { run: npm run ci }']);
+    expect(gateFindings('synthetic.yml', flowStep), 'flow step').toEqual(expected(6));
+    // A flow value with no gate run is out of these rules' scope: the
+    // guard judges gate and actionlint runs, not mapping style as such.
+    const inert = ['name: Synthetic', '', 'jobs: { build: { steps: [{ run: echo hi }] } }'].join(
+      '\n',
+    );
+    expect(gateFindings('synthetic.yml', inert), 'inert flow').toEqual([]);
+  });
+
+  it('fails an echo that appends a directory GOPATH is not on', () => {
+    // Silent failure this prevents: the redirect alone does not put the
+    // installed binary on PATH — an echo appending the wrong directory
+    // still dies with `actionlint: command not found`, so the content
+    // appended must name `go env GOPATH` too, in the spelling the
+    // workflows use.
+    const text = syntheticWorkflow([
+      '  gate:',
+      '    steps:',
+      '      - name: Put a directory on PATH',
+      '        run: echo "/usr/local/bin" >> "$GITHUB_PATH"',
+      '      - name: Install actionlint',
+      `        run: ${ACTIONLINT_INSTALL}`,
+      '      - run: npm run ci',
+    ]);
+    expect(gateFindings('synthetic.yml', text)).toEqual([
+      'synthetic.yml: job `gate`, step `run: npm run ci`: bare gate with no `>> "$GITHUB_PATH"` echo appending $(go env GOPATH)/bin',
+    ]);
+  });
+
   it('ignores an install or echo a line merely quotes, not runs', () => {
     // Silent failure this prevents: an `echo` that PRINTS the install
     // line contains every word of it, so a substring match counts the
@@ -1217,7 +1393,7 @@ describe('the per-job gate guard — synthetic job snippets', () => {
       '      - run: npm run ci',
     ]);
     expect(gateFindings('synthetic.yml', quotedEcho)).toEqual([
-      'synthetic.yml: job `gate`, step `run: npm run ci`: bare gate with no `>> "$GITHUB_PATH"` echo',
+      'synthetic.yml: job `gate`, step `run: npm run ci`: bare gate with no `>> "$GITHUB_PATH"` echo appending $(go env GOPATH)/bin',
     ]);
   });
 
@@ -1260,7 +1436,7 @@ describe('the per-job gate guard — synthetic job snippets', () => {
       '      - run: npm run ci',
     ]);
     expect(gateFindings('synthetic.yml', commentedEcho)).toEqual([
-      'synthetic.yml: job `gate`, step `run: npm run ci`: bare gate with no `>> "$GITHUB_PATH"` echo',
+      'synthetic.yml: job `gate`, step `run: npm run ci`: bare gate with no `>> "$GITHUB_PATH"` echo appending $(go env GOPATH)/bin',
     ]);
   });
 
@@ -1277,7 +1453,7 @@ describe('the per-job gate guard — synthetic job snippets', () => {
       '      - run: npm run lint:actions',
     ]);
     expect(gateFindings('synthetic.yml', text)).toEqual([
-      'synthetic.yml: job `gate`, step `run: npm run lint:actions`: bare gate with no `>> "$GITHUB_PATH"` echo',
+      'synthetic.yml: job `gate`, step `run: npm run lint:actions`: bare gate with no `>> "$GITHUB_PATH"` echo appending $(go env GOPATH)/bin',
     ]);
   });
 
