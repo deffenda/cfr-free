@@ -291,9 +291,9 @@ const NETWORK_SEAMS: readonly NetworkSeam[] = [
  * hand-written unwind used to follow; the restore list is never mutated, so
  * every invocation of that undo runs in that same reverse order. That
  * per-restore tolerance belongs to the UNWIND, not to the returned undo: a
- * success-path restore is a plain assignment that cannot throw, and one
- * that did would propagate to the caller — there is no competing error for
- * it to shield.
+ * success-path restore on these seams is a `delete` or a re-`defineProperty`
+ * of the original descriptor, and neither throws here — one that did would
+ * propagate to the caller, with no competing error for it to shield.
  */
 function installNetworkSeams(
   onAttempt: (label: string) => void,
