@@ -47,7 +47,12 @@ export interface QueryOutcome {
   readonly noAnswerViolation: boolean;
   /** The top 5 hits as citations. */
   readonly top5: readonly string[];
-  /** Warm search latency in milliseconds (median of the two timed runs; the warm-up is discarded). */
+  /**
+   * Warm search latency in milliseconds: the median of the two timed
+   * runs. Two untimed searches ran before those and are discarded —
+   * the first warm-up outright, the second when the first timed run
+   * overwrites its result.
+   */
   readonly latencyMs: number;
 }
 
@@ -116,7 +121,12 @@ function median(values: readonly number[]): number {
   return sorted.length % 2 === 1 ? high : (low + high) / 2;
 }
 
-/** Evaluate one query against the service (one warm-up call is discarded). */
+/**
+ * Evaluate one query against the service. Two untimed warm-up searches
+ * run first — one discarded outright, one overwritten by the first
+ * timed run — and the median of the last two (timed) searches is
+ * reported as {@link QueryOutcome.latencyMs}.
+ */
 export function evaluateQuery(service: CFRService, entry: RetrievalQuery): QueryOutcome {
   service.search({ query: entry.query, perPage: 5 }); // warm-up, discarded
   const timings: number[] = [];
