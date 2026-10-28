@@ -245,8 +245,9 @@ function stripInlineComment(line: string): string {
       continue;
     }
     if (char === '"' || char === "'") {
-      // A quote opens a region only where YAML can start a quoted
-      // scalar; mid-token (`it's`) it is plain-scalar text.
+      // A quote opens a region only at a scalar-start position — line
+      // start, whitespace, or a flow indicator (see `opensQuotedScalar`);
+      // mid-token (`it's`) it is plain-scalar text.
       if (opensQuotedScalar(line, index)) region = char;
       continue;
     }
