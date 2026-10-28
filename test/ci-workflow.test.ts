@@ -17,7 +17,10 @@ import { describe, expect, it } from 'vitest';
  *  2. The `quality` job must run the same commands, in the same order, as
  *     `npm run ci`. That script is the local gate; once the two diverge,
  *     "green locally" stops meaning "green in CI", and the divergence is
- *     invisible until a merge fails.
+ *     invisible until a merge fails. The check reads the sequence from
+ *     the `quality` job's own block, so moving the steps to another job
+ *     fails here rather than leaving `quality` green having run none of
+ *     them.
  *  3. Those commands are split into one step each so a failure names
  *     itself. Four of the five CI failures in the week to 2026-10-22
  *     surfaced only as "Run npm run ci", sending the reader back to a
@@ -36,8 +39,12 @@ import { describe, expect, it } from 'vitest';
  * draft of this change did exactly that. YAML accepted it, prettier
  * accepted it, this guard accepted it — and GitHub answered with a failed
  * run carrying zero jobs, which also meant no pull request check ever
- * reported. Only GitHub's parser rules that out; `actionlint` would catch
- * it locally, and adding it is an install the operator has to approve.
+ * reported. Only GitHub's parser rules that out — this text guard never
+ * can. `actionlint` does: it validates expressions and contexts (a
+ * job-level `if` on `matrix` among them), and it runs inside the gate
+ * itself (`npm run ci` → `npm run lint:actions`) in every workflow leg
+ * that runs the gate, on the version pinned above; CONTRIBUTING.md names
+ * how to install it.
  */
 
 const WORKFLOW_PATH = fileURLToPath(new URL('../.github/workflows/ci.yml', import.meta.url));
@@ -390,12 +397,16 @@ const ACTIONLINT_INSTALL_LINE =
   /^\s*-?\s*(?:run:)?\s*go install github\.com\/rhysd\/actionlint\/cmd\/actionlint@(\S+)\s*$/;
 
 /**
- * A run value invoking the shared gate as a command: `npm run ci` or
- * `npm run lint:actions`, the two spellings a step uses to run what runs
- * locally under `npm run ci`. The command must stand alone as a word:
- * `npm ci` is an install, and `npm run ci:extra` is another script. The
- * value arrives as one line, or as block-scalar lines joined by `\n`, so
- * a command folded across lines still reads as one.
+ * The gate's command — `npm run ci` or `npm run lint:actions`, the two
+ * spellings a step uses to run what runs locally under `npm run ci` — in
+ * command position anywhere in a run value. The command must stand alone
+ * as a word: `npm ci` is an install, and `npm run ci:extra` is another
+ * script. The value arrives as one line, or as block-scalar lines joined
+ * by `\n`, so a command folded across lines still reads as one. The match
+ * is textual, not shell-aware: a value that only PRINTS the command
+ * (`echo "npm run ci"`) counts as a consumer too — treating a step that
+ * may run the gate as one that does is the safe direction, since the
+ * finding it can raise is a missing install, never a skipped gate.
  */
 const GATE_COMMAND = /(?:^|[\s;&|(`'"])npm run\s+(?:ci|lint:actions)(?![\w:.-])/;
 
@@ -737,7 +748,13 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
     expect(script, 'package.json has no `ci` script').toBeDefined();
     const local = localGateCommands(script ?? '');
     expect(local.length).toBeGreaterThan(1);
-    expect(workflowRunSteps(workflow)).toEqual(local);
+    // Read the sequence from the `quality` job's own block: a whole-file
+    // scan also passes when the steps sit in ANOTHER job, leaving the
+    // check named `quality (22)`/`quality (24)` green having run none of
+    // them — the divergence this invariant exists to prevent.
+    const quality = workflowJobs(workflow).find((job) => job.name === 'quality');
+    expect(quality, 'ci.yml has no `quality` job').toBeDefined();
+    expect(workflowRunSteps(quality?.lines.join('\n') ?? '')).toEqual(local);
   });
 
   it('installs the pinned actionlint before any job runs the shared gate', () => {
