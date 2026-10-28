@@ -378,8 +378,15 @@ const ACTIONLINT_VERSION = 'v1.7.12';
 /** The pinned install a gate-running job must carry, in an earlier step. */
 const ACTIONLINT_INSTALL = `go install github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}`;
 
-/** Every actionlint `go install` in a workflow text, capturing its version. */
-const ACTIONLINT_VERSIONS = /go install github\.com\/rhysd\/actionlint\/cmd\/actionlint@(\S+)/g;
+/**
+ * A line running the actionlint install AS A COMMAND, capturing its
+ * version. Anchored at the command position (indent, optional `- `, an
+ * optional `run: ` prefix), so an echo PRINTING the install line or a
+ * comment quoting it is not an install — only this spelling builds the
+ * binary the gate shells out to.
+ */
+const ACTIONLINT_INSTALL_LINE =
+  /^\s*-?\s*(?:run:)?\s*go install github\.com\/rhysd\/actionlint\/cmd\/actionlint@(\S+)\s*$/;
 
 /**
  * A run value invoking the shared gate as a command: `npm run ci` or
@@ -391,11 +398,20 @@ const ACTIONLINT_VERSIONS = /go install github\.com\/rhysd\/actionlint\/cmd\/act
  */
 const GATE_COMMAND = /(?:^|[\s;&|(`'"])npm run\s+(?:ci|lint:actions)(?![\w:.-])/;
 
-/** The shell redirect that puts GOPATH's bin dir on GITHUB_PATH. */
-const GITHUB_PATH_ECHO = />>\s*"\$GITHUB_PATH"/;
+/**
+ * A line appending GOPATH's bin dir to GITHUB_PATH as a command, in the
+ * same command-position anchor as the install line, with the redirect
+ * ending the line: a note or echo QUOTING the redirect carries text
+ * after the target (at minimum the closing quote), which documentation
+ * is not PATH setup.
+ */
+const GITHUB_PATH_ECHO = /^\s*-?\s*(?:run:)?\s*echo\b.*>>\s*"\$GITHUB_PATH"\s*$/;
 
 /** An actionlint run by absolute GOPATH path — no PATH lookup involved. */
 const ACTIONLINT_BY_PATH = /\$\(go env GOPATH\)\/bin\/actionlint/;
+
+/** The `jobs` mapping key, in the spellings YAML accepts and prettier keeps. */
+const JOBS_HEADER = /^["']?jobs["']?\s*:/;
 
 /** One gate-relevant line of a job: the step it belongs to, numbered. */
 type GateLine = { step: string; ordinal: number };
@@ -412,15 +428,23 @@ type JobGate = {
 
 /**
  * The jobs of a workflow text, in file order: the name from the
- * two-space-indented key under `jobs:` and the body lines up to the next
- * such key. A line back at column 0 ends the mapping — and every job's
- * body — so a workflow that puts something after `jobs:` stops here too.
- * Empty when the text has no `jobs:` line: a caller then reports nothing
- * only when the workflow really has no jobs to guard.
+ * two-space-indented key under the `jobs` key and the body lines up to
+ * the next such key. The key is matched in the spellings YAML accepts
+ * and prettier keeps — bare, quoted (`"jobs":`), or carrying an inline
+ * comment (`jobs: # why`) — so no spelling of it hides a file's jobs
+ * from the guard. A line back at column 0 ends the mapping — and every
+ * job's body — so a workflow that puts something after `jobs:` stops
+ * here too. Empty when the text has no `jobs` key at all: a caller then
+ * reports nothing only when the workflow really has no jobs to guard.
  */
 function workflowJobs(text: string): { name: string; lines: string[] }[] {
   const lines = text.split('\n');
-  const header = lines.findIndex((line) => /^jobs:\s*$/.test(line));
+  const header = lines.findIndex((line) => {
+    const key = JOBS_HEADER.exec(line);
+    if (key === null) return false;
+    const rest = line.slice(key[0].length).trim();
+    return rest === '' || rest.startsWith('#');
+  });
   if (header === -1) return [];
   const jobs: { name: string; lines: string[] }[] = [];
   let current: { name: string; lines: string[] } | undefined;
@@ -487,10 +511,11 @@ function runValueAt(lines: string[], index: number): string | undefined {
  * carries the pinned install and the GITHUB_PATH echo. Steps are
  * numbered so `gateFindings` can order by step, not by line: a step's
  * own lines all sit together, and the effect the guard needs from the
- * echo reaches only LATER steps. Install and echo detection tests the
- * line with its inline comment stripped, so neither a commented-out
- * install nor a documentation line quoting one satisfies the checks —
- * a commented-out install installs nothing.
+ * echo reaches only LATER steps. Install and echo detection runs on the
+ * line with its inline comment stripped AND anchored at the command
+ * position, so a commented-out install, an echo PRINTING the install
+ * line, or any text quoting the redirect counts for neither — the guard
+ * needs the command to run, not its words to appear.
  */
 function scanJobGate(lines: string[]): JobGate {
   const gate: JobGate = { consumers: [], actionlintRuns: [], installOrdinal: -1, echoOrdinal: -1 };
@@ -503,7 +528,7 @@ function scanJobGate(lines: string[]): JobGate {
       ordinal += 1;
     }
     const stripped = stripInlineComment(line);
-    if (gate.installOrdinal === -1 && stripped.includes(ACTIONLINT_INSTALL)) {
+    if (gate.installOrdinal === -1 && ACTIONLINT_INSTALL_LINE.test(stripped)) {
       gate.installOrdinal = ordinal;
     }
     if (gate.echoOrdinal === -1 && GITHUB_PATH_ECHO.test(stripped)) {
@@ -602,17 +627,18 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
     // Silent failure this prevents: `npm run ci` runs `npm run
     // lint:actions`, so every JOB that invokes the shared gate needs the
     // pinned actionlint install — and a bare PATH invocation the
-    // GITHUB_PATH echo — before that step. The guard this replaces
-    // searched each FILE for the whole-file substring `run: npm run ci`
-    // and so silently SKIPPED ci.yml — the job branch protection depends
-    // on — because ci.yml runs the gate as seven individual steps and
-    // names `npm run ci` only in comments that sit before the installs;
-    // a naive whole-file scan trips on those comments instead. This
-    // reads every job and every run spelling (same-line, `|`, `>`), so
-    // the failure names file, job and step rather than arriving as
-    // `actionlint: command not found` on every pull request — or, on a
-    // release tag, blocking publish, github-release and the npm job at
-    // once (release.yml's `ci` job).
+    // GITHUB_PATH echo — in an earlier step. The guard this replaces
+    // searched each FILE for the substring `run: npm run ci`, a spelling
+    // ci.yml — the job branch protection depends on — never uses: it
+    // runs the gate as seven individual steps, and its only mentions of
+    // the command sit in comments. Loosening the substring to `npm run
+    // ci` to catch it would trade the skip for the opposite failure —
+    // those comments sit before the installs, so a whole-file scan trips
+    // on them and fails the correct file. This reads every job and every
+    // run spelling (same-line, `|`, `>`), so the failure names file, job
+    // and step rather than arriving as `actionlint: command not found`
+    // on every pull request — or, on a release tag, blocking publish,
+    // github-release and the npm job at once (release.yml's `ci` job).
     const reports = workflowFiles.map(({ name, path }) => {
       const text = readFileSync(path, 'utf8');
       return { name, consumers: workflowGateConsumers(text), findings: gateFindings(name, text) };
@@ -636,11 +662,14 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
     // another, surfacing as an unrelated-looking failure on whichever
     // leg moves last. There must be at least one occurrence, all
     // carrying the version pinned in this file; zero occurrences would
-    // make this guard pass on nothing.
+    // make this guard pass on nothing. Only real install COMMAND lines
+    // count — a comment quoting the line is not an install, and an echo
+    // printing it would otherwise drag a stray quote into the version.
     const installs: { name: string; version: string }[] = [];
     for (const { name, path } of workflowFiles) {
-      for (const match of readFileSync(path, 'utf8').matchAll(ACTIONLINT_VERSIONS)) {
-        installs.push({ name, version: match[1] ?? '' });
+      for (const line of readFileSync(path, 'utf8').split('\n')) {
+        const found = ACTIONLINT_INSTALL_LINE.exec(stripInlineComment(line));
+        if (found !== null) installs.push({ name, version: found[1] ?? '' });
       }
     }
     expect(installs.length, 'no actionlint install found').toBeGreaterThan(0);
@@ -1108,7 +1137,7 @@ describe('the per-job gate guard — synthetic job snippets', () => {
     // a fold that installs, echoes and gates in one step looks right by
     // line order and still dies with `actionlint: command not found`
     // on every pull request (or, on a release tag, at publish time).
-    const text = syntheticWorkflow([
+    const installFirst = syntheticWorkflow([
       '  gate:',
       '    steps:',
       '      - name: gate',
@@ -1117,9 +1146,78 @@ describe('the per-job gate guard — synthetic job snippets', () => {
       '          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"',
       '          npm run ci',
     ]);
-    expect(gateFindings('synthetic.yml', text)).toEqual([
+    const expected = [
       'synthetic.yml: job `gate`, step `name: gate`: pinned install must be in an earlier step than the gate',
       'synthetic.yml: job `gate`, step `name: gate`: `>> "$GITHUB_PATH"` echo must be in an earlier step than the gate',
+    ];
+    expect(gateFindings('synthetic.yml', installFirst)).toEqual(expected);
+    // The reverse line order fails identically: nothing about the rule
+    // depends on which of the two lines the fold puts first.
+    const echoFirst = syntheticWorkflow([
+      '  gate:',
+      '    steps:',
+      '      - name: gate',
+      '        run: |',
+      '          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"',
+      `          ${ACTIONLINT_INSTALL}`,
+      '          npm run ci',
+    ]);
+    expect(gateFindings('synthetic.yml', echoFirst)).toEqual(expected);
+  });
+
+  it('reads a jobs key that is quoted or carries an inline comment', () => {
+    // Silent failure this prevents: `workflowJobs` locates the jobs
+    // mapping by its key line, so a key spelled `"jobs":` or `jobs: #
+    // why` is invisible to a bare-match scanner — every job in the file
+    // leaves the guard's view at once, and a gate step with no install
+    // sails through. The quoted and commented spellings are the same
+    // mapping to YAML and prettier keeps both.
+    const body = [
+      '  gate:',
+      '    steps:',
+      '      - name: Put GOPATH on PATH',
+      '        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"',
+      '      - run: npm run ci',
+    ];
+    const expected = [
+      'synthetic.yml: job `gate`, step `run: npm run ci`: runs the gate with no pinned actionlint install',
+    ];
+    for (const header of ['jobs:', '"jobs":', 'jobs: # every job']) {
+      const text = ['name: Synthetic', '', header, ...body].join('\n');
+      expect(gateFindings('synthetic.yml', text), header).toEqual(expected);
+    }
+  });
+
+  it('ignores an install or echo a line merely quotes, not runs', () => {
+    // Silent failure this prevents: an `echo` that PRINTS the install
+    // line contains every word of it, so a substring match counts the
+    // install as present while no binary is built — and a note quoting
+    // the GITHUB_PATH redirect likewise sets no PATH. Both shapes pass
+    // a raw-text guard and still die with `actionlint: command not
+    // found`; only the command at the command position counts.
+    const quotedInstall = syntheticWorkflow([
+      '  gate:',
+      '    steps:',
+      '      - name: echo the install line',
+      `        run: echo "${ACTIONLINT_INSTALL}"`,
+      '      - name: Put GOPATH on PATH',
+      '        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"',
+      '      - run: npm run ci',
+    ]);
+    expect(gateFindings('synthetic.yml', quotedInstall)).toEqual([
+      'synthetic.yml: job `gate`, step `run: npm run ci`: runs the gate with no pinned actionlint install',
+    ]);
+    const quotedEcho = syntheticWorkflow([
+      '  gate:',
+      '    steps:',
+      '      - name: install actionlint',
+      `        run: ${ACTIONLINT_INSTALL}`,
+      '      - name: explain the redirect',
+      '        run: echo \'append "$(go env GOPATH)/bin" >> "$GITHUB_PATH"\'',
+      '      - run: npm run ci',
+    ]);
+    expect(gateFindings('synthetic.yml', quotedEcho)).toEqual([
+      'synthetic.yml: job `gate`, step `run: npm run ci`: bare gate with no `>> "$GITHUB_PATH"` echo',
     ]);
   });
 
