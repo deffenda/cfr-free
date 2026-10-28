@@ -1123,7 +1123,7 @@ describe('the workflow files — what the merge gate runs', () => {
     // Silent failure this prevents: `opensQuotedScalar` opens a region
     // not only at line start or after whitespace but also directly
     // after a flow indicator (`[`, `{`, `,`, `:`) with no space
-    // between — the JSON-style spelling `- {name:"build #1", uses:
+    // between — the JSON-style spelling `{"name":"build #1", uses:
     // some/action@v1}`. Each shape below puts the opening quote
     // directly after one of the four. If the flow-indicator disjunct
     // `'[{:,'` were removed from `opensQuotedScalar`, each quote would
@@ -1134,7 +1134,7 @@ describe('the workflow files — what the merge gate runs', () => {
     // must keep its line alive to the unpinned reference.
     const adjacent = [
       '      - {"build #1", uses: some/action@v1}', // `"` after `{`
-      '      - {name:"build #1", uses: some/action@v1}', // `"` after `:`
+      '      - {"name":"build #1", uses: some/action@v1}', // `"` after `:`
       '      - ["build #1", uses: some/action@v1]', // `"` after `[`
       '      - {name: don\'t,"build #1", uses: some/action@v1}', // `"` after `,`
     ];
