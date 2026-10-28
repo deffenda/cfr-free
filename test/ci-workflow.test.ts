@@ -365,6 +365,215 @@ function jobBlock(text: string, jobName: string): string {
   return (end === -1 ? rest : rest.slice(0, end)).join('\n');
 }
 
+/**
+ * The actionlint version every workflow installs. One version everywhere:
+ * the local gate, ci.yml's `actionlint` job and release's `ci` job must
+ * lint with the same rule set, or a change is green on one leg and red on
+ * another.
+ */
+const ACTIONLINT_VERSION = 'v1.7.12';
+
+/** The pinned install line a gate-running job must carry, before the gate. */
+const ACTIONLINT_INSTALL = `go install github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}`;
+
+/** Every actionlint `go install` in a workflow text, capturing its version. */
+const ACTIONLINT_VERSIONS = /go install github\.com\/rhysd\/actionlint\/cmd\/actionlint@(\S+)/g;
+
+/**
+ * A run value invoking the shared gate as a command: `npm run ci` or
+ * `npm run lint:actions`, the two spellings a step uses to run what runs
+ * locally under `npm run ci`. The command must stand alone as a word:
+ * `npm ci` is an install, and `npm run ci:extra` is another script. The
+ * value arrives as one line, or as block-scalar lines joined by `\n`, so
+ * a command folded across lines still reads as one.
+ */
+const GATE_COMMAND = /(?:^|[\s;&|(`'"])npm run\s+(?:ci|lint:actions)(?![\w:.-])/;
+
+/** The shell redirect that puts GOPATH's bin dir on GITHUB_PATH. */
+const GITHUB_PATH_ECHO = />>\s*"\$GITHUB_PATH"/;
+
+/** An actionlint run by absolute GOPATH path — no PATH lookup involved. */
+const ACTIONLINT_BY_PATH = /\$\(go env GOPATH\)\/bin\/actionlint/;
+
+/** A run value and the line its command is judged on. */
+type RunValue = { value: string; index: number };
+
+/** One gate-relevant line of a job: the step it belongs to and where. */
+type GateLine = { step: string; index: number };
+
+/** What one job says about the shared gate, for `gateFindings` to judge. */
+type JobGate = {
+  consumers: GateLine[];
+  actionlintRuns: GateLine[];
+  installIndex: number;
+  echoIndex: number;
+};
+
+/**
+ * The jobs of a workflow text, in file order: the name from the
+ * two-space-indented key under `jobs:` and the body lines up to the next
+ * such key. A line back at column 0 ends the mapping — and every job's
+ * body — so a workflow that puts something after `jobs:` stops here too.
+ * Empty when the text has no `jobs:` line: a caller then reports nothing
+ * only when the workflow really has no jobs to guard.
+ */
+function workflowJobs(text: string): { name: string; lines: string[] }[] {
+  const lines = text.split('\n');
+  const header = lines.findIndex((line) => /^jobs:\s*$/.test(line));
+  if (header === -1) return [];
+  const jobs: { name: string; lines: string[] }[] = [];
+  let current: { name: string; lines: string[] } | undefined;
+  for (const line of lines.slice(header + 1)) {
+    if (/^[^\s#]/.test(line)) break;
+    const key = /^ {2}([^#\s][^:]*):/.exec(line);
+    if (key !== null) {
+      current = { name: key[1] ?? '', lines: [] };
+      jobs.push(current);
+      continue;
+    }
+    current?.lines.push(line);
+  }
+  return jobs;
+}
+
+/**
+ * The value of the `run:` key on line `index`, in every spelling the
+ * repo uses or could regress to: a same-line scalar (`run: npm run ci`),
+ * a literal block (`run: |` / `run: |-`) and a folded block (`run: >` /
+ * `run: >-`), where the value sits on the more-indented lines after the
+ * header. Comment-only lines never join the value — a `#` first on the
+ * line is a comment to the shell too, so `run: # npm run ci` and a
+ * `# npm run ci` line inside a block run nothing.
+ *
+ * The index returned is the line the command is judged on: the run line
+ * itself for a scalar, the carrying content line for a block (the first
+ * content line when the command is folded across lines), so an install
+ * above the command counts as before it and an install below as after.
+ *
+ * Undefined when line `index` carries no `run:` key, so only run values
+ * are ever read as commands.
+ */
+function blockScalarValue(lines: string[], index: number): RunValue {
+  const parts: string[] = [];
+  let first = -1;
+  let carrying = -1;
+  for (let next = index + 1; next < lines.length; next += 1) {
+    const content = lines[next] ?? '';
+    if (content.trim() === '') continue;
+    // The run key sits at column 8 in both step spellings, so the block's
+    // content is every line indented past it; a line back at column 8 or
+    // left is the next key and ends the value.
+    if (content.length - content.trimStart().length <= 8) break;
+    const stripped = stripInlineComment(content);
+    if (stripped === '') continue;
+    if (first === -1) first = next;
+    if (carrying === -1 && GATE_COMMAND.test(stripped)) carrying = next;
+    parts.push(stripped);
+  }
+  const at = carrying !== -1 ? carrying : first;
+  return { value: parts.join('\n'), index: at === -1 ? index : at };
+}
+
+function runValueAt(lines: string[], index: number): RunValue | undefined {
+  const line = lines[index] ?? '';
+  const match = /^ {6}- run:(.*)$/.exec(line) ?? /^ {8}run:(.*)$/.exec(line);
+  const rest = match?.[1];
+  if (rest === undefined) return undefined;
+  const value = stripInlineComment(rest);
+  if (!BLOCK_SCALAR_HEADER.test(value)) return { value, index };
+  return blockScalarValue(lines, index);
+}
+
+/**
+ * Everything one job says about the shared gate: which steps invoke it,
+ * which steps run actionlint by absolute GOPATH path, and where the
+ * pinned install and the GITHUB_PATH echo sit. Comment-only lines count
+ * for neither install nor echo — a commented-out install installs nothing
+ * — so documentation cannot satisfy the checks below.
+ */
+function scanJobGate(lines: string[]): JobGate {
+  const gate: JobGate = { consumers: [], actionlintRuns: [], installIndex: -1, echoIndex: -1 };
+  let step = '(no run step)';
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    if (/^ {6}- /.test(line)) step = line.trim().replace(/^- /, '');
+    if (!line.trim().startsWith('#')) {
+      if (gate.installIndex === -1 && line.includes(ACTIONLINT_INSTALL)) {
+        gate.installIndex = index;
+      }
+      if (gate.echoIndex === -1 && GITHUB_PATH_ECHO.test(line)) {
+        gate.echoIndex = index;
+      }
+    }
+    const run = runValueAt(lines, index);
+    if (run === undefined) continue;
+    if (GATE_COMMAND.test(run.value)) gate.consumers.push({ step, index: run.index });
+    if (ACTIONLINT_BY_PATH.test(run.value)) gate.actionlintRuns.push({ step, index: run.index });
+  }
+  return gate;
+}
+
+/** Every step of every job whose run value invokes the shared gate. */
+function workflowGateConsumers(text: string): { job: string; step: string }[] {
+  const consumers: { job: string; step: string }[] = [];
+  for (const job of workflowJobs(text)) {
+    for (const found of scanJobGate(job.lines).consumers) {
+      consumers.push({ job: job.name, step: found.step });
+    }
+  }
+  return consumers;
+}
+
+/**
+ * Every invariant a workflow's jobs break, as messages naming the file,
+ * the job and the step. Empty when every job holds them:
+ *
+ *  - a job whose run value invokes the shared gate carries the pinned
+ *    actionlint install AND the `>> "$GITHUB_PATH"` echo before the
+ *    first consumer step — the gate shells out to a bare `actionlint`,
+ *    which the runner does not ship;
+ *  - a job that invokes actionlint by absolute GOPATH path carries the
+ *    install before the invocation, but needs no PATH echo: the absolute
+ *    path never reads PATH.
+ */
+function gateFindings(file: string, text: string): string[] {
+  const findings: string[] = [];
+  for (const job of workflowJobs(text)) {
+    const scan = scanJobGate(job.lines);
+    const where = (step: string): string => `${file}: job \`${job.name}\`, step \`${step}\``;
+    const consumer = scan.consumers[0];
+    if (consumer !== undefined) {
+      if (scan.installIndex === -1) {
+        findings.push(`${where(consumer.step)}: runs the gate with no pinned actionlint install`);
+      } else if (scan.installIndex > consumer.index) {
+        findings.push(`${where(consumer.step)}: pinned install comes after the gate`);
+      }
+      if (scan.echoIndex === -1) {
+        findings.push(`${where(consumer.step)}: bare gate with no \`>> "$GITHUB_PATH"\` echo`);
+      } else if (scan.echoIndex > consumer.index) {
+        findings.push(`${where(consumer.step)}: \`>> "$GITHUB_PATH"\` echo comes after the gate`);
+      }
+    }
+    const absolute = scan.actionlintRuns[0];
+    if (absolute !== undefined) {
+      if (scan.installIndex === -1) {
+        findings.push(`${where(absolute.step)}: GOPATH-path actionlint with no pinned install`);
+      } else if (scan.installIndex > absolute.index) {
+        findings.push(`${where(absolute.step)}: pinned install comes after the invocation`);
+      }
+    }
+  }
+  return findings;
+}
+
+/**
+ * A synthetic workflow text: `jobs:` plus the lines given, for the
+ * parser tests below. Nothing real is ever mutated to make a guard fail.
+ */
+function syntheticWorkflow(jobLines: string[]): string {
+  return ['name: Synthetic', '', 'jobs:', ...jobLines].join('\n');
+}
+
 describe('ci.yml — the workflow the merge gate depends on', () => {
   it('runs the local gate commands verbatim, in order, one step each', () => {
     const script = manifest.scripts.ci;
@@ -374,21 +583,55 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
     expect(workflowRunSteps(workflow)).toEqual(local);
   });
 
-  it('installs the pinned actionlint before any workflow runs the shared gate', () => {
-    // Silent failure this prevents: `npm run ci` now includes
-    // `npm run lint:actions`, and only ci.yml's quality job installs
-    // actionlint. A workflow that calls the shared gate without the
-    // install fails every invocation with `actionlint: command not
-    // found` — on a release tag that blocks publish, github-release and
-    // the npm job at once (release.yml's `ci` job).
-    const install = 'go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12';
-    for (const { name, path } of workflowFiles) {
+  it('installs the pinned actionlint before any job runs the shared gate', () => {
+    // Silent failure this prevents: `npm run ci` runs `npm run
+    // lint:actions`, so every JOB that invokes the shared gate needs the
+    // pinned actionlint install — and a bare PATH invocation the
+    // GITHUB_PATH echo — before that step. The guard this replaces
+    // searched each FILE for the whole-file substring `run: npm run ci`
+    // and so silently SKIPPED ci.yml — the job branch protection depends
+    // on — because ci.yml runs the gate as seven individual steps and
+    // names `npm run ci` only in comments that sit before the installs;
+    // a naive whole-file scan trips on those comments instead. This
+    // reads every job and every run spelling (same-line, `|`, `>`), so
+    // the failure names file, job and step rather than arriving as
+    // `actionlint: command not found` on every pull request — or, on a
+    // release tag, blocking publish, github-release and the npm job at
+    // once (release.yml's `ci` job).
+    const reports = workflowFiles.map(({ name, path }) => {
       const text = readFileSync(path, 'utf8');
-      const gate = text.indexOf('run: npm run ci');
-      if (gate < 0) continue;
-      const at = text.indexOf(install);
-      expect(at, `${name}: npm run ci with no pinned actionlint install`).toBeGreaterThanOrEqual(0);
-      expect(at, `${name}: actionlint installs only after the gate`).toBeLessThan(gate);
+      return { name, consumers: workflowGateConsumers(text), findings: gateFindings(name, text) };
+    });
+    const findings = reports.flatMap((report) => report.findings);
+    expect(findings, 'gate consumers need actionlint before them').toEqual([]);
+    // The guard passes vacuously if the parser sees no consumer at all —
+    // exactly how the old substring search skipped ci.yml. Both workflows
+    // that run the gate have to be visible here.
+    for (const name of ['ci.yml', 'release.yml']) {
+      const seen = reports.find((entry) => entry.name === name)?.consumers.length ?? 0;
+      expect(seen, `${name}: no gate consumer seen`).toBeGreaterThan(0);
+    }
+  });
+
+  it('installs one identical actionlint version everywhere it is installed', () => {
+    // Silent failure this prevents: ci.yml's quality job, ci.yml's
+    // actionlint job and release.yml's ci job each install actionlint
+    // themselves. If one drifts to another version, the legs lint with
+    // different rule sets — a change green on one leg goes red on
+    // another, surfacing as an unrelated-looking failure on whichever
+    // leg moves last. There must be at least one occurrence, all
+    // carrying the version pinned in this file; zero occurrences would
+    // make this guard pass on nothing.
+    const installs: { name: string; version: string }[] = [];
+    for (const { name, path } of workflowFiles) {
+      for (const match of readFileSync(path, 'utf8').matchAll(ACTIONLINT_VERSIONS)) {
+        installs.push({ name, version: match[1] ?? '' });
+      }
+    }
+    expect(installs.length, 'no actionlint install found').toBeGreaterThan(0);
+    for (const install of installs) {
+      const message = `${install.name}: actionlint @${install.version}`;
+      expect(install.version, message).toBe(ACTIONLINT_VERSION);
     }
   });
 
@@ -796,5 +1039,146 @@ describe('the workflow files — what the merge gate runs', () => {
     expect(steps.join('\n'), 'the security job no longer runs gitleaks').toContain(gitleaks);
     expect(steps.join('\n'), 'the security job no longer runs osv-scanner').toContain(osv);
     expect(security, 'the block ran on into the next job').not.toContain('npm test');
+  });
+});
+
+/**
+ * The gate guard's parser, on SYNTHETIC job snippets — never by mutating
+ * a real workflow. Each snippet violates exactly one invariant, so a
+ * guard that stops enforcing that rule fails HERE, where the message
+ * names the rule; the real-file test can only show that the real files
+ * still hold today, not that the parser would notice their violation
+ * tomorrow.
+ */
+describe('the per-job gate guard — synthetic job snippets', () => {
+  it('fails a consumer with no install, even when the echo is there', () => {
+    // Silent failure this prevents: the install and the PATH echo are two
+    // requirements, and either alone still dies with `actionlint: command
+    // not found` — a job can put GOPATH on GITHUB_PATH and have no binary
+    // to put there.
+    const text = syntheticWorkflow([
+      '  gate:',
+      '    steps:',
+      '      - name: Put GOPATH on PATH',
+      '        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"',
+      '      - run: npm run ci',
+    ]);
+    expect(gateFindings('synthetic.yml', text)).toEqual([
+      'synthetic.yml: job `gate`, step `run: npm run ci`: runs the gate with no pinned actionlint install',
+    ]);
+  });
+
+  it('fails an install that sits after the consumer step', () => {
+    // Silent failure this prevents: order matters — an install below the
+    // gate step runs after it, and the gate still dies with
+    // `actionlint: command not found` on every run.
+    const text = syntheticWorkflow([
+      '  gate:',
+      '    steps:',
+      '      - name: Put GOPATH on PATH',
+      '        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"',
+      '      - run: npm run ci',
+      '      - name: Install actionlint',
+      `        run: ${ACTIONLINT_INSTALL}`,
+    ]);
+    expect(gateFindings('synthetic.yml', text)).toEqual([
+      'synthetic.yml: job `gate`, step `run: npm run ci`: pinned install comes after the gate',
+    ]);
+  });
+
+  it('fails a bare PATH consumer with no GITHUB_PATH echo', () => {
+    // Silent failure this prevents: `npm run ci` and `npm run
+    // lint:actions` invoke a bare `actionlint`, which the runner does
+    // not ship. The install alone leaves it off PATH — the step dies with
+    // `actionlint: command not found` though the binary exists.
+    const text = syntheticWorkflow([
+      '  gate:',
+      '    steps:',
+      '      - name: Install actionlint',
+      `        run: ${ACTIONLINT_INSTALL}`,
+      '      - run: npm run lint:actions',
+    ]);
+    expect(gateFindings('synthetic.yml', text)).toEqual([
+      'synthetic.yml: job `gate`, step `run: npm run lint:actions`: bare gate with no `>> "$GITHUB_PATH"` echo',
+    ]);
+  });
+
+  it('passes an absolute-GOPATH actionlint run without the echo', () => {
+    // Silent failure this prevents: a job that invokes actionlint by its
+    // absolute GOPATH path never reads PATH, so demanding the echo there
+    // would fail a workflow that is correct — and a guard that fails on
+    // correct files gets edited until it stops guarding. The install it
+    // still needs: without it there is no binary at that path.
+    const text = syntheticWorkflow([
+      '  lint:',
+      '    steps:',
+      '      - name: Install actionlint',
+      `        run: ${ACTIONLINT_INSTALL}`,
+      '      - name: actionlint (workflow lint)',
+      '        run: \'"$(go env GOPATH)/bin/actionlint"\'',
+    ]);
+    expect(gateFindings('synthetic.yml', text)).toEqual([]);
+    // The same job without the install still fails: absolute path or
+    // not, the binary has to exist before it is run.
+    const uninstalled = syntheticWorkflow([
+      '  lint:',
+      '    steps:',
+      '      - name: actionlint (workflow lint)',
+      '        run: \'"$(go env GOPATH)/bin/actionlint"\'',
+    ]);
+    expect(gateFindings('synthetic.yml', uninstalled)).toEqual([
+      'synthetic.yml: job `lint`, step `name: actionlint (workflow lint)`: GOPATH-path actionlint with no pinned install',
+    ]);
+  });
+
+  it('sees a literal `run: |` consumer and a folded `run: >` one', () => {
+    // Silent failure this prevents: a consumer behind a block-scalar
+    // header is a real run — the shell gets the command — but a guard
+    // reading only same-line `run:` values misses it, and the job runs
+    // the gate with no actionlint install again: `actionlint: command
+    // not found`, invisible until the workflow fails.
+    const literal = syntheticWorkflow([
+      '  gate:',
+      '    steps:',
+      '      - name: Install actionlint',
+      '        run: |',
+      `          ${ACTIONLINT_INSTALL}`,
+      '          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"',
+      '      - name: shared gate',
+      '        run: |',
+      '          npm run ci',
+    ]);
+    expect(workflowGateConsumers(literal)).toEqual([{ job: 'gate', step: 'name: shared gate' }]);
+    expect(gateFindings('synthetic.yml', literal)).toEqual([]);
+    // A folded scalar joins its lines with spaces, so the command may sit
+    // across two lines and still be one command to the shell.
+    const folded = syntheticWorkflow([
+      '  gate:',
+      '    steps:',
+      '      - run: >',
+      '          npm run',
+      '          ci',
+    ]);
+    expect(workflowGateConsumers(folded)).toEqual([{ job: 'gate', step: 'run: >' }]);
+  });
+
+  it('never treats a comment-only line as a consumer, in any spelling', () => {
+    // Silent failure this prevents: both real workflows name `npm run
+    // ci` in comments that sit BEFORE the installs — the exact shape that
+    // made a whole-file scan fail the real files. A parser that read
+    // comments as runs would demand an install before a comment about
+    // the gate, fail the correct workflows, and get disabled rather than
+    // fixed.
+    const text = syntheticWorkflow([
+      '  gate:',
+      '    steps:',
+      '      # - run: npm run ci',
+      '      - name: block comment',
+      '        run: |',
+      '          # npm run ci',
+      '      - name: same-line comment',
+      '        run: # npm run ci',
+    ]);
+    expect(workflowGateConsumers(text)).toEqual([]);
   });
 });

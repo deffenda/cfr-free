@@ -13,6 +13,10 @@ npm run ci      # the same gate CI runs
 
 Requires Node ≥ 22.5.
 
+The local gate also needs `actionlint` on PATH — `npm run ci` runs
+`npm run lint:actions`. Install it with `brew install actionlint` or
+`go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12`.
+
 ## Workflow
 
 1. Open an issue first for anything beyond small fixes.
