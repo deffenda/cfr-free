@@ -12,10 +12,11 @@ import { clientSafeMessage } from './client-safe.js';
 /**
  * MCP tool registrations. Every tool is read-only (never destructive,
  * idempotent). Six read the local index with zero network access during tool
- * calls; `diff_issues` and `redline` are the deliberate network exceptions —
- * read-only everywhere, but each fetches two issue dates' full-title XML from
- * eCFR on demand (see their registrations below), which is why the server
- * registers them only when an eCFR client is injected.
+ * calls; `get_section_at`, `diff_issues` and `redline` are the deliberate
+ * network exceptions — read-only everywhere, but each fetches from eCFR on
+ * demand (a point-in-time revision, or two issue dates' full-title XML; see
+ * their registrations below), which is why the server registers them only
+ * when an eCFR client is injected.
  */
 
 const READ_ONLY_ANNOTATIONS = {
@@ -25,7 +26,7 @@ const READ_ONLY_ANNOTATIONS = {
   openWorldHint: false,
 } as const;
 
-// diff_issues and redline hit the live eCFR versioner on every call — openWorld stays true while the other hints stay read-only.
+// get_section_at, diff_issues and redline hit the live eCFR versioner on every call — openWorld stays true while the other hints stay read-only.
 const DIFF_ANNOTATIONS = {
   ...READ_ONLY_ANNOTATIONS,
   openWorldHint: true,
@@ -231,7 +232,7 @@ function textContent(payload: unknown): string {
   return JSON.stringify(payload, null, 2);
 }
 
-/** Register all tools on the server; `deps.ecfr` gates the diff and redline tools. */
+/** Register all tools on the server; `deps.ecfr` gates the three eCFR-backed tools (get_section_at, diff_issues, redline). */
 export function registerTools(
   server: McpServer,
   service: CFRService,
@@ -536,8 +537,9 @@ export function registerTools(
   );
 
   // Registered only when an eCFR client is injected: without one there is no
-  // honest way to serve a point-in-time diff or redline, so the tools stay off
-  // the server's tools/list instead of existing as guaranteed failures.
+  // honest way to serve a point-in-time read, diff or redline, so the tools
+  // stay off the server's tools/list instead of existing as guaranteed
+  // failures.
   const ecfr = deps?.ecfr;
   if (ecfr !== undefined) {
     server.registerTool(
