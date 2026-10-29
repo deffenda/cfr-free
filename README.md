@@ -45,9 +45,12 @@ keys, no telemetry — one Node process and one SQLite file.
   FTS5, bundled with Node 22.5+)
 - Network access only for `cfr-free sync`, `cfr-free diff`,
   `cfr-free redline`, and `cfr-free historical` (~2–3 MB from ecfr.gov
-  per full-title fetch; the two-date views fetch twice). `serve` and
-  `mcp` refresh a stale or empty index once at startup unless
-  `CFR_AUTO_SYNC=0`; querying an already-built index is fully offline.
+  per full-title fetch; the two-date views fetch twice), plus two `serve`
+  HTTP routes (`/api/v1/diff`, `/api/v1/redline`) that fetch from eCFR
+  per request. `serve` and `mcp` refresh a stale or empty index once at
+  startup unless `CFR_AUTO_SYNC=0`, and re-sync periodically when
+  `CFR_REFRESH_HOURS` is set (default 0 = off); querying an
+  already-built index is otherwise fully offline.
 
 ## Quickstart
 
@@ -332,9 +335,9 @@ disorders?"_ or _"Search Title 38 for traumatic brain injury compensation."_
 | `index_status`       | —                                                 | Issue date, last sync, row counts, staleness, drift flag, corpus receipt hash, and what the last sync amended/added/removed                                                                                                                                                                                                                      |
 | `list_parts`         | —                                                 | Parts in the index with titles and section/appendix counts                                                                                                                                                                                                                                                                                       |
 | `health`             | —                                                 | One-call readiness verdict: `ready`, `stale`, `degraded` (structure drift), or `empty`                                                                                                                                                                                                                                                           |
+| `get_section_at`     | `at_date` (YYYY-MM-DD), `citation`                | One provision as it stood at a date: the eCFR revision in force then, fetched statelessly on every call (no local index; the point-in-time archive starts 2017-01-01)                                                                                                                                                                            |
 | `diff_issues`        | `from_date`, `to_date`                            | Provision-level diff between two eCFR issue dates: changed/added/removed citations (capped, with a truncation flag)                                                                                                                                                                                                                              |
 | `redline`            | `from_date`, `to_date`, `citation`                | Line-level redline of one provision between two eCFR issue dates: status, both sides' text, and per-line hunks                                                                                                                                                                                                                                   |
-| `get_section_at`     | `at_date` (YYYY-MM-DD), `citation`                | One provision as it stood at a date: the eCFR revision in force then, fetched statelessly on every call (no local index; the point-in-time archive starts 2017-01-01)                                                                                                                                                                            |
 
 All tools are **read-only**; the six index tools query only the local index and
 never hit the network, while `get_section_at`, `diff_issues` and `redline`
