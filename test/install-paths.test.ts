@@ -549,16 +549,29 @@ describe('the release guard', () => {
     // tag-triggered release itself: the workflow checks out the pushed tag
     // and requires tag == package.json, so without an exemption the guard
     // would fail every release by construction (observed on v0.2.1,
-    // 2026-10-29). Only the tag currently being released is exempt, and
-    // only when that is actually what is checked out: branch and PR runs
-    // set GITHUB_REF_TYPE to "branch" (or leave it unset locally), so
-    // there the guard still covers every tag.
+    // 2026-10-29 UTC). Only the tag the runner reports as being released
+    // is exempt — GITHUB_REF_TYPE is "tag" solely on tag-triggered runs,
+    // and GitHub does not let a workflow overwrite that default — so
+    // branch and PR runs ("branch", or unset locally) still cover every
+    // tag. The exemption is an env-var signal, not a verification that
+    // refs/tags/$GITHUB_REF_NAME is HEAD; the workflow's own
+    // `test "$TAG" = "$PKG"` checks, which run in jobs needing this one,
+    // carry that burden. When the exemption applies, the vacuous
+    // "not equal to any tag" loop below is replaced by a positive
+    // assertion that the checked-out version IS the released tag.
     const manifest = readManifest();
     const version = manifest.version ?? '';
     expect(version).toMatch(/^\d+\.\d+\.\d+$/);
 
     const releasingTag =
       process.env.GITHUB_REF_TYPE === 'tag' ? (process.env.GITHUB_REF_NAME ?? '') : '';
+    if (releasingTag) {
+      // On the release run itself, replace the vacuous loop below with the
+      // invariant the workflow enforces: the checked-out manifest must be
+      // exactly the tag being released.
+      expect(releasingTag).toMatch(/^v\d+\.\d+\.\d+$/);
+      expect(version).toBe(releasingTag.slice(1));
+    }
     const tags = execFileSync('git', ['tag'], { encoding: 'utf8' })
       .split('\n')
       .map((tag) => tag.trim())
