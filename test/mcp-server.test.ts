@@ -798,6 +798,29 @@ describe('MCP diff_issues tool (ecfr injected)', () => {
     }
   });
 
+  it('describes at_date as a read date, not an issue date, and keeps the format check (tools/list wire text)', async () => {
+    const probe = await connectedServer(stubEcfr({}));
+    try {
+      const listed = await probe.client.listTools();
+      const byName = new Map(listed.tools.map((tool) => [tool.name, tool]));
+      const prop = (
+        name: string,
+        arg: string,
+      ): { description?: string; pattern?: string } | undefined =>
+        (
+          byName.get(name)?.inputSchema as {
+            properties?: Record<string, { description?: string; pattern?: string }>;
+          }
+        )?.properties?.[arg];
+      expect(prop('get_section_at', 'at_date')?.description).toContain('date at which to read');
+      expect(prop('get_section_at', 'at_date')?.description).not.toContain('issue date');
+      // The shared dateArgSchema format check must survive the .describe() override.
+      expect(prop('get_section_at', 'at_date')?.pattern).toBe('^\\d{4}-\\d{2}-\\d{2}$');
+    } finally {
+      await probe.close();
+    }
+  });
+
   it('get_section_at reports a date outside eCFR archive as a client-safe error', async () => {
     const probe = await connectedServer(stubEcfr({}));
     try {

@@ -26,8 +26,8 @@ keys, no telemetry — one Node process and one SQLite file.
 - **MCP server** with nine read-only tools any MCP client can use: six
   offline index-backed ones (`search_regulations`, `get_section`,
   `browse_title38`, `index_status`, `list_parts`, `health`) plus three that
-  fetch the live eCFR versioner per call (`diff_issues`, `redline`,
-  `get_section_at` — one provision as it stood at a date).
+  fetch the live eCFR versioner per call (`get_section_at` (one provision
+  as it stood at a date), `diff_issues`, `redline`).
 - **HTTP JSON API** for scripts and apps: search, read sections, browse the
   CFR hierarchy, health check, Prometheus metrics.
 - **Measured retrieval**: a frozen query set and runner score the search
@@ -43,15 +43,23 @@ keys, no telemetry — one Node process and one SQLite file.
 
 - Node.js **≥ 22.5** (uses the built-in `node:sqlite`; SQLite ≥ 3.50 with
   FTS5, bundled with Node 22.5+)
-- Network access only for `cfr-free sync`, `cfr-free diff`, and
-  `cfr-free redline` (~2–3 MB from ecfr.gov per fetch); serving and
-  searching are fully offline.
+- Network access only for `cfr-free sync`, `cfr-free diff`,
+  `cfr-free redline` and `cfr-free historical` (~2–3 MB from ecfr.gov
+  per full-title fetch; the two-date views fetch twice); the startup
+  refresh of a stale or empty index by `search`, `serve` and `mcp`
+  (unless `CFR_AUTO_SYNC=0`); the opt-in periodic re-sync in `serve`
+  and `mcp` when `CFR_REFRESH_HOURS` is set (default 0 = off);
+  `serve`'s `/api/v1/diff` and `/api/v1/redline` routes; and `mcp`'s
+  three eCFR-backed tools (`get_section_at`, `diff_issues`, `redline`),
+  which fetch from eCFR on every call. Reads from a fresh index never
+  touch the network.
 
 ## Quickstart
 
-Four ways in, depending on what you have. The first needs nothing but
-Docker; the second needs only npm; the third needs npm and a compiler; the
-fourth needs a checkout.
+Five ways in, depending on what you have. The first needs nothing but
+Docker; the second needs only npm; the third needs only Node and runs
+the package straight from a release tarball (no compiler); the fourth
+needs npm and a compiler; the fifth needs a checkout.
 
 ### 1. Docker (nothing to install)
 
@@ -82,15 +90,26 @@ npx -y cfr-free serve           # HTTP API on http://127.0.0.1:8787
 The published tarball ships the compiled `dist/`, so this route needs
 neither a compiler nor a checkout — it is the fastest way in.
 
-> **Is it on the registry yet?** `npm view cfr-free version` answers with a
-> version number once the package is published, and with `404 Not Found`
-> before that. Publication runs from the `v*`-tag release workflow with OIDC
-> provenance (no publish token) and is gated behind trusted-publishing
-> registration on npmjs.com, so this route goes live when that gate opens.
-> Until it does, the Docker route above and the GitHub route below both
-> work today with no gate at all.
+### 3. From a release tarball (no compiler)
 
-### 3. From GitHub (no publish step)
+```bash
+npx -y https://github.com/deffenda/cfr-free/releases/download/v0.2.1/cfr-free-0.2.1.tgz version  # -> 0.2.1
+npx -y https://github.com/deffenda/cfr-free/releases/download/v0.2.1/cfr-free-0.2.1.tgz serve    # HTTP API on http://127.0.0.1:8787
+```
+
+Every GitHub release carries the package tarball at
+`releases/download/<tag>/cfr-free-<version>.tgz`; for `v0.2.1` that
+tarball holds the same contents the npm registry serves (verified by
+unpacking both: identical file trees). `npx` installs the tarball
+directly from the URL — the `cfr-free` package itself never comes from
+the registry, no compiler runs on first use, and the version in the URL
+pins the release exactly. `npx` does still fetch the package's runtime
+dependencies from npm (they are not bundled). Verified on the `v0.2.1`
+release, 2026-10-29: both commands above ran end to end (`version` →
+`0.2.1`; `serve` answered `/health` with HTTP 200). Swap the tag and
+filename together to pick another release.
+
+### 4. From GitHub (no publish step)
 
 ```bash
 npx -y github:deffenda/cfr-free version    # -> 0.2.1
@@ -125,7 +144,7 @@ npm install github:deffenda/cfr-free
 > project-local install, the npm route above, or the Docker image instead —
 > all four were re-verified on npm 11.20.0.
 
-### 4. From a source checkout
+### 5. From a source checkout
 
 ```bash
 # requires Node >= 22.5
@@ -185,14 +204,14 @@ Prefer Compose? `docker compose up -d --build` serves the API on
 (`docker compose run --rm cfr-free sync`) so starts never trigger a surprise
 download.
 
-npm publishing runs from the `v*`-tag release workflow with OIDC provenance
-(no publish tokens), gated behind the `NPM_TRUSTED_PUBLISHING` repository
-variable plus one-time trusted-publisher registration on npmjs.com. The
-publish job verifies before it publishes that the packed tarball carries the
-executable and every file it imports, and that the tag matches the
-`package.json` version — so a release cannot ship a broken package. Check
-whether the gate is open with `npm view cfr-free version` (see
-[Quickstart](#quickstart)).
+The package is on npm (`npm view cfr-free version` prints the latest; see
+[Quickstart](#quickstart)). Releases publish from the `v*`-tag workflow
+with OIDC provenance (no publish token), gated behind the
+`NPM_TRUSTED_PUBLISHING` repository variable plus one-time
+trusted-publisher registration on npmjs.com. The publish job verifies
+before it publishes that the packed tarball carries the executable and
+every file it imports, and that the tag matches the `package.json`
+version — so a release cannot ship a broken package.
 
 ### Verify the install (smoke checklist)
 
@@ -204,9 +223,11 @@ the packed tarball into a throwaway prefix was run and the installed binary
 was exercised (`--version`, and a search against a copy of the index); the
 GitHub Release asset route — the same tarball, fetched from a release URL —
 was created, downloaded and installed end to end **in a scratch
-repository**, since this repository has no release yet; a project-local
-`npm install github:deffenda/cfr-free` was run and its binary exercised;
-and `npx -y github:deffenda/cfr-free` was run, MCP over stdio included.
+repository**; it now also runs straight from this repository's own
+releases (`v0.2.1`, verified 2026-10-29, see [Quickstart](#quickstart)). A
+project-local `npm install github:deffenda/cfr-free` was run and its
+binary exercised, and `npx -y github:deffenda/cfr-free` was run, MCP over
+stdio included.
 The route that does **not** work — `npm install -g github:…` — was measured
 too, and the failure is npm's (see [Quickstart](#quickstart)). The sequence
 below was run against a provisioned checkout; what it does not cover is an
@@ -272,9 +293,20 @@ Add to your MCP client config (e.g. `claude_desktop_config.json`):
 }
 ```
 
-That form needs nothing installed and no path to edit, and the published
-tarball ships compiled — no compiler runs on first use. Before the package
-is on the registry, the same config works from the git URL
+Using Claude Code? The same server registers in one command (verified
+2026-10-29):
+
+```bash
+claude mcp add cfr-free -- npx -y cfr-free mcp
+```
+
+That writes the local scope — this project only, the default;
+`claude mcp add -s user cfr-free -- npx -y cfr-free mcp` registers it for
+every project instead.
+
+All of these forms run `npx -y cfr-free mcp` under the hood: nothing
+installed, no path to edit, and the published tarball ships compiled —
+no compiler runs on first use. The JSON config also works from the git URL
 (`"args": ["-y", "github:deffenda/cfr-free", "mcp"]`), which `npx` fetches
 and compiles on first use (verified end to end: the `list_parts` tool
 answers over stdio). If you built it from a checkout, use the absolute
@@ -297,22 +329,24 @@ disorders?"_ or _"Search Title 38 for traumatic brain injury compensation."_
 
 ### MCP tools
 
-| Tool                 | Arguments                                         | Returns                                                                                                                                                                                                                                                                                                                                          |
-| -------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `search_regulations` | `query`, `page?`, `per_page?`, `part?`            | Ranked hits: citation (+ `38 C.F.R. §` display form, ecfr.gov link), heading, snippet, score, matches — with exact-citation pinning, `"quoted phrase"` search, and claims-acronym expansion (PTSD, TDIU, SMC, …). Each response also carries `matchedTerms`/`unmatchedTerms`: the query's content words the returned hits did and did not answer |
-| `get_section`        | `citation` (e.g. `38 CFR 4.125`)                  | Full section text as markdown + ecfr.gov link + cross-references with availability flags                                                                                                                                                                                                                                                         |
-| `browse_title38`     | `chapter?`, `part?`, `subpart?`, `subject_group?` | Children of the requested hierarchy level (a `subject_group` holds the sections of one regulatory subject)                                                                                                                                                                                                                                       |
-| `index_status`       | —                                                 | Issue date, last sync, row counts, staleness, drift flag, corpus receipt hash, and what the last sync amended/added/removed                                                                                                                                                                                                                      |
-| `list_parts`         | —                                                 | Parts in the index with titles and section/appendix counts                                                                                                                                                                                                                                                                                       |
-| `health`             | —                                                 | One-call readiness verdict: `ready`, `stale`, `degraded` (structure drift), or `empty`                                                                                                                                                                                                                                                           |
-| `diff_issues`        | `from_date`, `to_date`                            | Provision-level diff between two eCFR issue dates: changed/added/removed citations (capped, with a truncation flag)                                                                                                                                                                                                                              |
-| `redline`            | `from_date`, `to_date`, `citation`                | Line-level redline of one provision between two eCFR issue dates: status, both sides' text, and per-line hunks                                                                                                                                                                                                                                   |
+| Tool                 | Arguments                                                   | Returns                                                                                                                                                                                                                                                                                                                                          |
+| -------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `search_regulations` | `query`, `page?`, `per_page?`, `part?`, `kind?`, `chapter?` | Ranked hits: citation (+ `38 C.F.R. §` display form, ecfr.gov link), heading, snippet, score, matches — with exact-citation pinning, `"quoted phrase"` search, and claims-acronym expansion (PTSD, TDIU, SMC, …). Each response also carries `matchedTerms`/`unmatchedTerms`: the query's content words the returned hits did and did not answer |
+| `get_section`        | `citation` (e.g. `38 CFR 4.125`)                            | Full section text as markdown + ecfr.gov link + cross-references with availability flags                                                                                                                                                                                                                                                         |
+| `browse_title38`     | `chapter?`, `part?`, `subpart?`, `subject_group?`           | Children of the requested hierarchy level (a `subject_group` holds the sections of one regulatory subject)                                                                                                                                                                                                                                       |
+| `index_status`       | —                                                           | Issue date, last sync, row counts, staleness, drift flag, corpus receipt hash, and what the last sync amended/added/removed                                                                                                                                                                                                                      |
+| `list_parts`         | —                                                           | Parts in the index with titles and section/appendix counts                                                                                                                                                                                                                                                                                       |
+| `health`             | —                                                           | One-call readiness verdict: `ready`, `stale`, `degraded` (structure drift), or `empty`                                                                                                                                                                                                                                                           |
+| `get_section_at`     | `at_date` (YYYY-MM-DD), `citation`                          | One provision as it stood at a date: the eCFR revision in force then, fetched statelessly on every call (no local index; the point-in-time archive starts 2017-01-01)                                                                                                                                                                            |
+| `diff_issues`        | `from_date`, `to_date`                                      | Provision-level diff between two eCFR issue dates: changed/added/removed citations (capped, with a truncation flag)                                                                                                                                                                                                                              |
+| `redline`            | `from_date`, `to_date`, `citation`                          | Line-level redline of one provision between two eCFR issue dates: status, both sides' text, and per-line hunks                                                                                                                                                                                                                                   |
 
 All tools are **read-only**; the six index tools query only the local index and
-never hit the network, while `diff_issues` and `redline` fetch the two issue
-dates' full-title XML from eCFR on each call. Search and section responses
-carry a freshness envelope (`indexStale` + a `notice` when the local index has
-aged out) so a client can never unknowingly quote a lapsed version.
+never hit the network, while `get_section_at`, `diff_issues` and `redline`
+fetch from eCFR on each call (a point-in-time revision, or two issue dates'
+full-title XML). Search and section responses carry a freshness envelope
+(`indexStale` + a `notice` when the local index has aged out) so a client can
+never unknowingly quote a lapsed version.
 
 Beyond tools, the server exposes three MCP **resources** that clients can read
 directly — `cfr://index/status` (freshness JSON: issue date, last sync, row
@@ -326,13 +360,15 @@ follow cross-references → paste-ready citations with source URLs.
 
 ### HTTP API
 
-| Method         | Path                         | Query params                               |
-| -------------- | ---------------------------- | ------------------------------------------ |
-| `GET` / `HEAD` | `/health`                    | —                                          |
-| `GET` / `HEAD` | `/metrics`                   | — (Prometheus text format)                 |
-| `GET` / `HEAD` | `/api/v1/search`             | `q` (required), `page`, `per_page`, `part` |
-| `GET` / `HEAD` | `/api/v1/sections/:citation` | — (URL-encode citations with spaces)       |
-| `GET` / `HEAD` | `/api/v1/browse`             | `chapter`, `part`, `subpart`, `subjgrp`    |
+| Method         | Path                         | Query params                                                           |
+| -------------- | ---------------------------- | ---------------------------------------------------------------------- |
+| `GET` / `HEAD` | `/health`                    | —                                                                      |
+| `GET` / `HEAD` | `/metrics`                   | — (Prometheus text format)                                             |
+| `GET` / `HEAD` | `/api/v1/search`             | `q` (required), `page`, `per_page`, `part`, `kind`, `chapter`          |
+| `GET` / `HEAD` | `/api/v1/sections/:citation` | — (URL-encode citations with spaces)                                   |
+| `GET` / `HEAD` | `/api/v1/browse`             | `chapter`, `part`, `subpart`, `subjgrp`                                |
+| `GET` / `HEAD` | `/api/v1/diff`               | `from`, `to` (both required; fetches from eCFR per request)            |
+| `GET` / `HEAD` | `/api/v1/redline`            | `from`, `to`, `citation` (all required; fetches from eCFR per request) |
 
 `/health` and `/metrics` additionally expose `diskFree`/`diskTotal` and the
 `cfr_free_disk_free_bytes`/`cfr_free_disk_total_bytes` gauges when the platform
@@ -443,7 +479,9 @@ eCFR API ──sync──▶ SQLite (sections + FTS5 + structure meta)
 - `src/core/` — eCFR client, XML parser, FTS5 store, sync, service facade
 - `src/mcp/` — MCP server and tool registrations
 - `src/titan/` — HTTP JSON API
-- `src/commands/` — `sync`, `serve`, `mcp`
+- `src/commands/` — one entrypoint per subcommand: `mcp`, `sync`, `diff`,
+  `redline`, `historical`, `search`, `serve`, `export` (`help` and
+  `version` dispatch from `src/cli.ts`)
 - `docs/SPEC.md` — design decisions and review dispositions
 
 Sync is atomic: the whole index is replaced inside one `BEGIN IMMEDIATE`
