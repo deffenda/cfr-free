@@ -544,14 +544,25 @@ describe('the release guard', () => {
     // package.json still said 0.1.0, so the tree at that tag says 0.1.0
     // while `main` says 0.2.0 — and the next tag could satisfy neither.
     // The version must therefore move PAST every existing tag.
+    //
+    // The one run where this version legitimately equals a tag is the
+    // tag-triggered release itself: the workflow checks out the pushed tag
+    // and requires tag == package.json, so without an exemption the guard
+    // would fail every release by construction (observed on v0.2.1,
+    // 2026-10-29). Only the tag currently being released is exempt, and
+    // only when that is actually what is checked out: branch and PR runs
+    // set GITHUB_REF_TYPE to "branch" (or leave it unset locally), so
+    // there the guard still covers every tag.
     const manifest = readManifest();
     const version = manifest.version ?? '';
     expect(version).toMatch(/^\d+\.\d+\.\d+$/);
 
+    const releasingTag =
+      process.env.GITHUB_REF_TYPE === 'tag' ? (process.env.GITHUB_REF_NAME ?? '') : '';
     const tags = execFileSync('git', ['tag'], { encoding: 'utf8' })
       .split('\n')
       .map((tag) => tag.trim())
-      .filter((tag) => tag.startsWith('v'));
+      .filter((tag) => tag.startsWith('v') && tag !== releasingTag);
     for (const tag of tags) {
       const tagged = tag.slice(1);
       expect(version, `package.json ${version} is already used by tag ${tag}`).not.toBe(tagged);
