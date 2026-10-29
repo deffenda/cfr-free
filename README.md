@@ -49,9 +49,10 @@ keys, no telemetry — one Node process and one SQLite file.
 
 ## Quickstart
 
-Four ways in, depending on what you have. The first needs nothing but
-Docker; the second needs only npm; the third needs npm and a compiler; the
-fourth needs a checkout.
+Five ways in, depending on what you have. The first needs nothing but
+Docker; the second needs only npm; the third needs only Node and runs
+straight from a release tarball (no registry, no compiler); the fourth
+needs npm and a compiler; the fifth needs a checkout.
 
 ### 1. Docker (nothing to install)
 
@@ -82,15 +83,24 @@ npx -y cfr-free serve           # HTTP API on http://127.0.0.1:8787
 The published tarball ships the compiled `dist/`, so this route needs
 neither a compiler nor a checkout — it is the fastest way in.
 
-> **Is it on the registry yet?** `npm view cfr-free version` answers with a
-> version number once the package is published, and with `404 Not Found`
-> before that. Publication runs from the `v*`-tag release workflow with OIDC
-> provenance (no publish token) and is gated behind trusted-publishing
-> registration on npmjs.com, so this route goes live when that gate opens.
-> Until it does, the Docker route above and the GitHub route below both
-> work today with no gate at all.
+### 3. From a release tarball (no registry, no compiler)
 
-### 3. From GitHub (no publish step)
+```bash
+npx -y https://github.com/deffenda/cfr-free/releases/download/v0.2.1/cfr-free-0.2.1.tgz version  # -> 0.2.1
+npx -y https://github.com/deffenda/cfr-free/releases/download/v0.2.1/cfr-free-0.2.1.tgz serve    # HTTP API on http://127.0.0.1:8787
+```
+
+Every GitHub release carries the package tarball at
+`releases/download/<tag>/cfr-free-<version>.tgz` — the same contents the
+npm registry serves. `npx` runs it straight from the URL: no registry
+involved, no compiler on first use, and the version in the URL pins the
+release exactly. Verified on the `v0.2.1` release, 2026-10-29: both
+commands above ran end to end (`version` → `0.2.1`; `serve` answered
+`/health` with HTTP 200), and unpacking the release tarball beside npm's
+gives identical file trees. Swap the tag and filename together to pick
+another release.
+
+### 4. From GitHub (no publish step)
 
 ```bash
 npx -y github:deffenda/cfr-free version    # -> 0.2.1
@@ -125,7 +135,7 @@ npm install github:deffenda/cfr-free
 > project-local install, the npm route above, or the Docker image instead —
 > all four were re-verified on npm 11.20.0.
 
-### 4. From a source checkout
+### 5. From a source checkout
 
 ```bash
 # requires Node >= 22.5
@@ -185,14 +195,14 @@ Prefer Compose? `docker compose up -d --build` serves the API on
 (`docker compose run --rm cfr-free sync`) so starts never trigger a surprise
 download.
 
-npm publishing runs from the `v*`-tag release workflow with OIDC provenance
-(no publish tokens), gated behind the `NPM_TRUSTED_PUBLISHING` repository
-variable plus one-time trusted-publisher registration on npmjs.com. The
-publish job verifies before it publishes that the packed tarball carries the
-executable and every file it imports, and that the tag matches the
-`package.json` version — so a release cannot ship a broken package. Check
-whether the gate is open with `npm view cfr-free version` (see
-[Quickstart](#quickstart)).
+The package is on npm (`npm view cfr-free version` prints the latest; see
+[Quickstart](#quickstart)). Releases publish from the `v*`-tag workflow
+with OIDC provenance (no publish token), gated behind the
+`NPM_TRUSTED_PUBLISHING` repository variable plus one-time
+trusted-publisher registration on npmjs.com. The publish job verifies
+before it publishes that the packed tarball carries the executable and
+every file it imports, and that the tag matches the `package.json`
+version — so a release cannot ship a broken package.
 
 ### Verify the install (smoke checklist)
 
@@ -204,8 +214,10 @@ the packed tarball into a throwaway prefix was run and the installed binary
 was exercised (`--version`, and a search against a copy of the index); the
 GitHub Release asset route — the same tarball, fetched from a release URL —
 was created, downloaded and installed end to end **in a scratch
-repository**, since this repository has no release yet; a project-local
-`npm install github:deffenda/cfr-free` was run and its binary exercised;
+repository**, and now runs straight from this repository's own releases
+(`v0.2.1`, verified 2026-10-29, see [Quickstart](#quickstart)); a
+project-local `npm install github:deffenda/cfr-free` was run and its
+binary exercised;
 and `npx -y github:deffenda/cfr-free` was run, MCP over stdio included.
 The route that does **not** work — `npm install -g github:…` — was measured
 too, and the failure is npm's (see [Quickstart](#quickstart)). The sequence
@@ -272,9 +284,20 @@ Add to your MCP client config (e.g. `claude_desktop_config.json`):
 }
 ```
 
-That form needs nothing installed and no path to edit, and the published
-tarball ships compiled — no compiler runs on first use. Before the package
-is on the registry, the same config works from the git URL
+Using Claude Code? The same server registers in one command (verified
+2026-10-29):
+
+```bash
+claude mcp add cfr-free -- npx -y cfr-free mcp
+```
+
+That writes the local scope — this project only, the default;
+`claude mcp add -s user cfr-free -- npx -y cfr-free mcp` registers it for
+every project instead.
+
+Both forms run `npx -y cfr-free mcp` under the hood: nothing installed,
+no path to edit, and the published tarball ships compiled — no compiler
+runs on first use. The JSON config also works from the git URL
 (`"args": ["-y", "github:deffenda/cfr-free", "mcp"]`), which `npx` fetches
 and compiles on first use (verified end to end: the `list_parts` tool
 answers over stdio). If you built it from a checkout, use the absolute
@@ -443,7 +466,9 @@ eCFR API ──sync──▶ SQLite (sections + FTS5 + structure meta)
 - `src/core/` — eCFR client, XML parser, FTS5 store, sync, service facade
 - `src/mcp/` — MCP server and tool registrations
 - `src/titan/` — HTTP JSON API
-- `src/commands/` — `sync`, `serve`, `mcp`
+- `src/commands/` — one entrypoint per subcommand: `mcp`, `sync`, `diff`,
+  `redline`, `historical`, `search`, `serve`, `export` (`help` and
+  `version` dispatch from `src/cli.ts`)
 - `docs/SPEC.md` — design decisions and review dispositions
 
 Sync is atomic: the whole index is replaced inside one `BEGIN IMMEDIATE`
