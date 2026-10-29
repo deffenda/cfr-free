@@ -5,7 +5,7 @@ import { CHANGE_LIST_CAP } from '../core/changes.js';
 import { diffIssues } from '../core/diff.js';
 import type { EcfrApi } from '../core/ecfr.js';
 import { redlineSection } from '../core/redline.js';
-import { historicalSection } from '../core/historical.js';
+import { ARCHIVE_FLOOR, historicalSection } from '../core/historical.js';
 import type { CFRService } from '../core/service.js';
 import { clientSafeMessage } from './client-safe.js';
 
@@ -553,7 +553,7 @@ export function registerTools(
           'report which issue date it served, so the response names the REQUESTED date and ' +
           'never a served-revision date. Stateless: the revision is fetched from eCFR on ' +
           "every call — no local index, no cache. eCFR's point-in-time archive starts at " +
-          '2017-01-01; a date before that is rejected as not_found. Use this for ' +
+          `${ARCHIVE_FLOOR}; a date before that is rejected as not_found. Use this for ` +
           'date-of-claim and CUE questions ("what did this section say when the claim was ' +
           'filed?"); for the CURRENT text use get_section.',
         inputSchema: {
@@ -563,7 +563,7 @@ export function registerTools(
           // tell MCP clients the wrong thing. Same format check, its own
           // description (tools/list wire text — covered by a test).
           at_date: dateArgSchema.describe(
-            'requested date of the revision to fetch, YYYY-MM-DD (the eCFR archive starts 2017-01-01)',
+            `date at which to read the provision, YYYY-MM-DD (eCFR serves the revision in force then; its archive starts ${ARCHIVE_FLOOR})`,
           ),
           citation: z
             .string()
