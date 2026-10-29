@@ -16,10 +16,11 @@ A self-hosted **38 CFR data service ("Titan")** plus an **MCP server**, TypeScri
 Single npm package, one CLI (`cfr-free`) with subcommands (default: `mcp`):
 
 ```
-cfr-free sync      # build/refresh the local index from eCFR
-cfr-free serve     # start the Titan HTTP API (default 127.0.0.1:8787)
-cfr-free mcp       # start the MCP stdio server (reads local index)
+mcp  sync  diff  redline  historical  search  serve  export  help  version
 ```
+
+Signatures and one-line purposes live in `USAGE` (`src/cli.ts`); `help`
+and `version` dispatch there, the other eight in `src/commands/`.
 
 ```
 src/
@@ -29,13 +30,18 @@ src/
   logger.ts           stderr-only structured logging (stdout is JSON-RPC)
   process-utils.ts    idempotent shutdown handling shared by serve/mcp
   version.ts          package-version resolution seam
-  commands/           per-subcommand entrypoints (sync, serve, mcp,
-                      export, ensure-index, refresh-scheduler)
+  commands/           per-subcommand entrypoints (diff, ensure-index,
+                      export, historical, mcp, redline, refresh-scheduler,
+                      search, serve, sync)
   core/
     changes.ts        sync change report: hash diff between syncs
     citations.ts      parse/normalize "38 CFR 4.125", "38 C.F.R. § 4.125", "§ 4.125", "4.125"
+    diff.ts           stateless point-in-time diff: fetch two issue dates, hash per citation
     ecfr.ts           eCFR endpoints: dates, structure, full-title XML, search
+    historical.ts     point-in-time read: a provision as it stood at a requested date
     http-client.ts    fetch wrapper: timeout, size cap, gzip, friendly errors
+    point-in-time.ts  the "a date is a selector, not a stamp" notice, shared by the change views
+    redline.ts        per-provision line redline between two issue dates
     references.ts     cross-reference extraction for search results
     service.ts        facade shared by MCP + HTTP: search/getSection/browse/status
     store.ts          SQLite schema, queries (FTS5), transactional rebuild
@@ -50,6 +56,7 @@ src/
   titan/
     http-server.ts    node:http server + router (GET-only; JSON API, metrics text, UI assets)
     rate-limit.ts     per-peer token bucket for deliberately exposed APIs
+    ui.ts             read-only web UI assets, embedded as string constants (served at `/`)
 test/                 vitest unit + integration (mocked fetch, temp SQLite)
 ```
 
