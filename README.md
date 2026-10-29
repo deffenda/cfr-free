@@ -43,9 +43,11 @@ keys, no telemetry — one Node process and one SQLite file.
 
 - Node.js **≥ 22.5** (uses the built-in `node:sqlite`; SQLite ≥ 3.50 with
   FTS5, bundled with Node 22.5+)
-- Network access only for `cfr-free sync`, `cfr-free diff`, and
-  `cfr-free redline` (~2–3 MB from ecfr.gov per fetch); serving and
-  searching are fully offline.
+- Network access only for `cfr-free sync`, `cfr-free diff`,
+  `cfr-free redline`, and `cfr-free historical` (~2–3 MB from ecfr.gov
+  per full-title fetch; the two-date views fetch twice). `serve` and
+  `mcp` refresh a stale or empty index once at startup unless
+  `CFR_AUTO_SYNC=0`; querying an already-built index is fully offline.
 
 ## Quickstart
 
@@ -219,8 +221,8 @@ was created, downloaded and installed end to end **in a scratch
 repository**; it now also runs straight from this repository's own
 releases (`v0.2.1`, verified 2026-10-29, see [Quickstart](#quickstart)). A
 project-local `npm install github:deffenda/cfr-free` was run and its
-binary exercised;
-and `npx -y github:deffenda/cfr-free` was run, MCP over stdio included.
+binary exercised, and `npx -y github:deffenda/cfr-free` was run, MCP over
+stdio included.
 The route that does **not** work — `npm install -g github:…` — was measured
 too, and the failure is npm's (see [Quickstart](#quickstart)). The sequence
 below was run against a provisioned checkout; what it does not cover is an
@@ -332,10 +334,12 @@ disorders?"_ or _"Search Title 38 for traumatic brain injury compensation."_
 | `health`             | —                                                 | One-call readiness verdict: `ready`, `stale`, `degraded` (structure drift), or `empty`                                                                                                                                                                                                                                                           |
 | `diff_issues`        | `from_date`, `to_date`                            | Provision-level diff between two eCFR issue dates: changed/added/removed citations (capped, with a truncation flag)                                                                                                                                                                                                                              |
 | `redline`            | `from_date`, `to_date`, `citation`                | Line-level redline of one provision between two eCFR issue dates: status, both sides' text, and per-line hunks                                                                                                                                                                                                                                   |
+| `get_section_at`     | `at_date` (YYYY-MM-DD), `citation`                | One provision as it stood at a date: the eCFR revision in force then, fetched statelessly on every call (no local index; the point-in-time archive starts 2017-01-01)                                                                                                                                                                            |
 
 All tools are **read-only**; the six index tools query only the local index and
-never hit the network, while `diff_issues` and `redline` fetch the two issue
-dates' full-title XML from eCFR on each call. Search and section responses
+never hit the network, while `get_section_at`, `diff_issues` and `redline`
+fetch from eCFR on each call (a point-in-time revision, or two issue dates'
+full-title XML). Search and section responses
 carry a freshness envelope (`indexStale` + a `notice` when the local index has
 aged out) so a client can never unknowingly quote a lapsed version.
 
