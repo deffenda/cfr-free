@@ -26,8 +26,8 @@ keys, no telemetry — one Node process and one SQLite file.
 - **MCP server** with nine read-only tools any MCP client can use: six
   offline index-backed ones (`search_regulations`, `get_section`,
   `browse_title38`, `index_status`, `list_parts`, `health`) plus three that
-  fetch the live eCFR versioner per call (`get_section_at` — one provision
-  as it stood at a date — `diff_issues`, `redline`).
+  fetch the live eCFR versioner per call (`get_section_at` (one provision
+  as it stood at a date), `diff_issues`, `redline`).
 - **HTTP JSON API** for scripts and apps: search, read sections, browse the
   CFR hierarchy, health check, Prometheus metrics.
 - **Measured retrieval**: a frozen query set and runner score the search
