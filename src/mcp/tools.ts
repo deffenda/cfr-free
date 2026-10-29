@@ -557,7 +557,14 @@ export function registerTools(
           'date-of-claim and CUE questions ("what did this section say when the claim was ' +
           'filed?"); for the CURRENT text use get_section.',
         inputSchema: {
-          at_date: dateArgSchema,
+          // at_date is a REQUESTED date, not an issue date: eCFR serves the
+          // revision in force then and never reports which issue date it
+          // served, so inheriting dateArgSchema's "issue date" wording would
+          // tell MCP clients the wrong thing. Same format check, its own
+          // description (tools/list wire text — covered by a test).
+          at_date: dateArgSchema.describe(
+            'requested date of the revision to fetch, YYYY-MM-DD (the eCFR archive starts 2017-01-01)',
+          ),
           citation: z
             .string()
             .min(1)
