@@ -44,13 +44,15 @@ keys, no telemetry — one Node process and one SQLite file.
 - Node.js **≥ 22.5** (uses the built-in `node:sqlite`; SQLite ≥ 3.50 with
   FTS5, bundled with Node 22.5+)
 - Network access only for `cfr-free sync`, `cfr-free diff`,
-  `cfr-free redline`, and `cfr-free historical` (~2–3 MB from ecfr.gov
-  per full-title fetch; the two-date views fetch twice), plus two `serve`
-  HTTP routes (`/api/v1/diff`, `/api/v1/redline`) that fetch from eCFR
-  per request. `serve` and `mcp` refresh a stale or empty index once at
-  startup unless `CFR_AUTO_SYNC=0`, and re-sync periodically when
-  `CFR_REFRESH_HOURS` is set (default 0 = off); querying an
-  already-built index is otherwise fully offline.
+  `cfr-free redline` and `cfr-free historical` (~2–3 MB from ecfr.gov
+  per full-title fetch; the two-date views fetch twice); the startup
+  refresh of a stale or empty index by `search`, `serve` and `mcp`
+  (unless `CFR_AUTO_SYNC=0` — `serve` and `mcp` also re-sync
+  periodically when `CFR_REFRESH_HOURS` is set, default 0 = off);
+  `serve`'s `/api/v1/diff` and `/api/v1/redline` routes; and `mcp`'s
+  three eCFR-backed tools (`diff_issues`, `redline`, `get_section_at`),
+  which fetch from eCFR on every call. Querying an already-built index
+  is fully offline.
 
 ## Quickstart
 
@@ -327,24 +329,24 @@ disorders?"_ or _"Search Title 38 for traumatic brain injury compensation."_
 
 ### MCP tools
 
-| Tool                 | Arguments                                         | Returns                                                                                                                                                                                                                                                                                                                                          |
-| -------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `search_regulations` | `query`, `page?`, `per_page?`, `part?`            | Ranked hits: citation (+ `38 C.F.R. §` display form, ecfr.gov link), heading, snippet, score, matches — with exact-citation pinning, `"quoted phrase"` search, and claims-acronym expansion (PTSD, TDIU, SMC, …). Each response also carries `matchedTerms`/`unmatchedTerms`: the query's content words the returned hits did and did not answer |
-| `get_section`        | `citation` (e.g. `38 CFR 4.125`)                  | Full section text as markdown + ecfr.gov link + cross-references with availability flags                                                                                                                                                                                                                                                         |
-| `browse_title38`     | `chapter?`, `part?`, `subpart?`, `subject_group?` | Children of the requested hierarchy level (a `subject_group` holds the sections of one regulatory subject)                                                                                                                                                                                                                                       |
-| `index_status`       | —                                                 | Issue date, last sync, row counts, staleness, drift flag, corpus receipt hash, and what the last sync amended/added/removed                                                                                                                                                                                                                      |
-| `list_parts`         | —                                                 | Parts in the index with titles and section/appendix counts                                                                                                                                                                                                                                                                                       |
-| `health`             | —                                                 | One-call readiness verdict: `ready`, `stale`, `degraded` (structure drift), or `empty`                                                                                                                                                                                                                                                           |
-| `get_section_at`     | `at_date` (YYYY-MM-DD), `citation`                | One provision as it stood at a date: the eCFR revision in force then, fetched statelessly on every call (no local index; the point-in-time archive starts 2017-01-01)                                                                                                                                                                            |
-| `diff_issues`        | `from_date`, `to_date`                            | Provision-level diff between two eCFR issue dates: changed/added/removed citations (capped, with a truncation flag)                                                                                                                                                                                                                              |
-| `redline`            | `from_date`, `to_date`, `citation`                | Line-level redline of one provision between two eCFR issue dates: status, both sides' text, and per-line hunks                                                                                                                                                                                                                                   |
+| Tool                 | Arguments                                                   | Returns                                                                                                                                                                                                                                                                                                                                          |
+| -------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `search_regulations` | `query`, `page?`, `per_page?`, `part?`, `kind?`, `chapter?` | Ranked hits: citation (+ `38 C.F.R. §` display form, ecfr.gov link), heading, snippet, score, matches — with exact-citation pinning, `"quoted phrase"` search, and claims-acronym expansion (PTSD, TDIU, SMC, …). Each response also carries `matchedTerms`/`unmatchedTerms`: the query's content words the returned hits did and did not answer |
+| `get_section`        | `citation` (e.g. `38 CFR 4.125`)                            | Full section text as markdown + ecfr.gov link + cross-references with availability flags                                                                                                                                                                                                                                                         |
+| `browse_title38`     | `chapter?`, `part?`, `subpart?`, `subject_group?`           | Children of the requested hierarchy level (a `subject_group` holds the sections of one regulatory subject)                                                                                                                                                                                                                                       |
+| `index_status`       | —                                                           | Issue date, last sync, row counts, staleness, drift flag, corpus receipt hash, and what the last sync amended/added/removed                                                                                                                                                                                                                      |
+| `list_parts`         | —                                                           | Parts in the index with titles and section/appendix counts                                                                                                                                                                                                                                                                                       |
+| `health`             | —                                                           | One-call readiness verdict: `ready`, `stale`, `degraded` (structure drift), or `empty`                                                                                                                                                                                                                                                           |
+| `get_section_at`     | `at_date` (YYYY-MM-DD), `citation`                          | One provision as it stood at a date: the eCFR revision in force then, fetched statelessly on every call (no local index; the point-in-time archive starts 2017-01-01)                                                                                                                                                                            |
+| `diff_issues`        | `from_date`, `to_date`                                      | Provision-level diff between two eCFR issue dates: changed/added/removed citations (capped, with a truncation flag)                                                                                                                                                                                                                              |
+| `redline`            | `from_date`, `to_date`, `citation`                          | Line-level redline of one provision between two eCFR issue dates: status, both sides' text, and per-line hunks                                                                                                                                                                                                                                   |
 
 All tools are **read-only**; the six index tools query only the local index and
 never hit the network, while `get_section_at`, `diff_issues` and `redline`
 fetch from eCFR on each call (a point-in-time revision, or two issue dates'
-full-title XML). Search and section responses
-carry a freshness envelope (`indexStale` + a `notice` when the local index has
-aged out) so a client can never unknowingly quote a lapsed version.
+full-title XML). Search and section responses carry a freshness envelope
+(`indexStale` + a `notice` when the local index has aged out) so a client can
+never unknowingly quote a lapsed version.
 
 Beyond tools, the server exposes three MCP **resources** that clients can read
 directly — `cfr://index/status` (freshness JSON: issue date, last sync, row
