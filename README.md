@@ -26,8 +26,8 @@ keys, no telemetry — one Node process and one SQLite file.
 - **MCP server** with nine read-only tools any MCP client can use: six
   offline index-backed ones (`search_regulations`, `get_section`,
   `browse_title38`, `index_status`, `list_parts`, `health`) plus three that
-  fetch the live eCFR versioner per call (`diff_issues`, `redline`,
-  `get_section_at` — one provision as it stood at a date).
+  fetch the live eCFR versioner per call (`get_section_at` — one provision
+  as it stood at a date — `diff_issues`, `redline`).
 - **HTTP JSON API** for scripts and apps: search, read sections, browse the
   CFR hierarchy, health check, Prometheus metrics.
 - **Measured retrieval**: a frozen query set and runner score the search
@@ -47,12 +47,12 @@ keys, no telemetry — one Node process and one SQLite file.
   `cfr-free redline` and `cfr-free historical` (~2–3 MB from ecfr.gov
   per full-title fetch; the two-date views fetch twice); the startup
   refresh of a stale or empty index by `search`, `serve` and `mcp`
-  (unless `CFR_AUTO_SYNC=0` — `serve` and `mcp` also re-sync
-  periodically when `CFR_REFRESH_HOURS` is set, default 0 = off);
+  (unless `CFR_AUTO_SYNC=0`); the opt-in periodic re-sync in `serve`
+  and `mcp` when `CFR_REFRESH_HOURS` is set (default 0 = off);
   `serve`'s `/api/v1/diff` and `/api/v1/redline` routes; and `mcp`'s
-  three eCFR-backed tools (`diff_issues`, `redline`, `get_section_at`),
-  which fetch from eCFR on every call. Querying an already-built index
-  is fully offline.
+  three eCFR-backed tools (`get_section_at`, `diff_issues`, `redline`),
+  which fetch from eCFR on every call. Reads from a fresh index never
+  touch the network.
 
 ## Quickstart
 
@@ -360,13 +360,15 @@ follow cross-references → paste-ready citations with source URLs.
 
 ### HTTP API
 
-| Method         | Path                         | Query params                               |
-| -------------- | ---------------------------- | ------------------------------------------ |
-| `GET` / `HEAD` | `/health`                    | —                                          |
-| `GET` / `HEAD` | `/metrics`                   | — (Prometheus text format)                 |
-| `GET` / `HEAD` | `/api/v1/search`             | `q` (required), `page`, `per_page`, `part` |
-| `GET` / `HEAD` | `/api/v1/sections/:citation` | — (URL-encode citations with spaces)       |
-| `GET` / `HEAD` | `/api/v1/browse`             | `chapter`, `part`, `subpart`, `subjgrp`    |
+| Method         | Path                         | Query params                                                           |
+| -------------- | ---------------------------- | ---------------------------------------------------------------------- |
+| `GET` / `HEAD` | `/health`                    | —                                                                      |
+| `GET` / `HEAD` | `/metrics`                   | — (Prometheus text format)                                             |
+| `GET` / `HEAD` | `/api/v1/search`             | `q` (required), `page`, `per_page`, `part`, `kind`, `chapter`          |
+| `GET` / `HEAD` | `/api/v1/sections/:citation` | — (URL-encode citations with spaces)                                   |
+| `GET` / `HEAD` | `/api/v1/browse`             | `chapter`, `part`, `subpart`, `subjgrp`                                |
+| `GET` / `HEAD` | `/api/v1/diff`               | `from`, `to` (both required; fetches from eCFR per request)            |
+| `GET` / `HEAD` | `/api/v1/redline`            | `from`, `to`, `citation` (all required; fetches from eCFR per request) |
 
 `/health` and `/metrics` additionally expose `diskFree`/`diskTotal` and the
 `cfr_free_disk_free_bytes`/`cfr_free_disk_total_bytes` gauges when the platform
