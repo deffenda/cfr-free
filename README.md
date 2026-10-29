@@ -51,7 +51,7 @@ keys, no telemetry — one Node process and one SQLite file.
 
 Five ways in, depending on what you have. The first needs nothing but
 Docker; the second needs only npm; the third needs only Node and runs
-straight from a release tarball (no registry, no compiler); the fourth
+the package straight from a release tarball (no compiler); the fourth
 needs npm and a compiler; the fifth needs a checkout.
 
 ### 1. Docker (nothing to install)
@@ -83,7 +83,7 @@ npx -y cfr-free serve           # HTTP API on http://127.0.0.1:8787
 The published tarball ships the compiled `dist/`, so this route needs
 neither a compiler nor a checkout — it is the fastest way in.
 
-### 3. From a release tarball (no registry, no compiler)
+### 3. From a release tarball (no compiler)
 
 ```bash
 npx -y https://github.com/deffenda/cfr-free/releases/download/v0.2.1/cfr-free-0.2.1.tgz version  # -> 0.2.1
@@ -91,14 +91,16 @@ npx -y https://github.com/deffenda/cfr-free/releases/download/v0.2.1/cfr-free-0.
 ```
 
 Every GitHub release carries the package tarball at
-`releases/download/<tag>/cfr-free-<version>.tgz` — the same contents the
-npm registry serves. `npx` runs it straight from the URL: no registry
-involved, no compiler on first use, and the version in the URL pins the
-release exactly. Verified on the `v0.2.1` release, 2026-10-29: both
-commands above ran end to end (`version` → `0.2.1`; `serve` answered
-`/health` with HTTP 200), and unpacking the release tarball beside npm's
-gives identical file trees. Swap the tag and filename together to pick
-another release.
+`releases/download/<tag>/cfr-free-<version>.tgz`; for `v0.2.1` that
+tarball holds the same contents the npm registry serves (verified by
+unpacking both: identical file trees). `npx` installs the tarball
+directly from the URL — the `cfr-free` package itself never comes from
+the registry, no compiler runs on first use, and the version in the URL
+pins the release exactly. `npx` does still fetch the package's runtime
+dependencies from npm (they are not bundled). Verified on the `v0.2.1`
+release, 2026-10-29: both commands above ran end to end (`version` →
+`0.2.1`; `serve` answered `/health` with HTTP 200). Swap the tag and
+filename together to pick another release.
 
 ### 4. From GitHub (no publish step)
 
@@ -214,8 +216,8 @@ the packed tarball into a throwaway prefix was run and the installed binary
 was exercised (`--version`, and a search against a copy of the index); the
 GitHub Release asset route — the same tarball, fetched from a release URL —
 was created, downloaded and installed end to end **in a scratch
-repository**, and now runs straight from this repository's own releases
-(`v0.2.1`, verified 2026-10-29, see [Quickstart](#quickstart)); a
+repository**; it now also runs straight from this repository's own
+releases (`v0.2.1`, verified 2026-10-29, see [Quickstart](#quickstart)). A
 project-local `npm install github:deffenda/cfr-free` was run and its
 binary exercised;
 and `npx -y github:deffenda/cfr-free` was run, MCP over stdio included.
@@ -295,9 +297,9 @@ That writes the local scope — this project only, the default;
 `claude mcp add -s user cfr-free -- npx -y cfr-free mcp` registers it for
 every project instead.
 
-Both forms run `npx -y cfr-free mcp` under the hood: nothing installed,
-no path to edit, and the published tarball ships compiled — no compiler
-runs on first use. The JSON config also works from the git URL
+All of these forms run `npx -y cfr-free mcp` under the hood: nothing
+installed, no path to edit, and the published tarball ships compiled —
+no compiler runs on first use. The JSON config also works from the git URL
 (`"args": ["-y", "github:deffenda/cfr-free", "mcp"]`), which `npx` fetches
 and compiles on first use (verified end to end: the `list_parts` tool
 answers over stdio). If you built it from a checkout, use the absolute
