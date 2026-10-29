@@ -3,7 +3,9 @@
 Audited commit: `aa3f73c`, then rebased onto `8c876c5` when `main` moved
 mid-audit (see "Provenance" for exactly what was re-verified after the
 rebase).
-Scope: `src/` (37 files, ~8.4k lines), `test/` (39 files, 689 test cases),
+Scope: `src/` (37 files, ~8.4k lines), `test/` (36 test files; 743 test cases
+— 722 executed in the audited run, plus the 21 in `openapi-conformance` that
+could not load locally without PyYAML),
 `.github/workflows/` (3 files), `Dockerfile`, `docker-compose.yml`,
 `package.json`, `scripts/`, `tools/`, `docs/SPEC.md`, `docs/openapi.yaml`,
 `README.md`, `ROADMAP.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`.
@@ -42,19 +44,19 @@ Commands run against the audited commit, and their outcomes. This is the
 evidence base for every claim above; per `AGENTS.md` ("Evidence"), a gate
 claim needs the local output.
 
-| Check                             | Command                                                                                                     | Result                                                                                                                                       |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Remote state                      | `git fetch --all --prune`                                                                                   | `main` = `origin/main` at `aa3f73c`; `main` then moved to `8c876c5` mid-audit and the affected citations were re-verified (see "Provenance") |
-| Typecheck                         | `npm run typecheck`                                                                                         | pass, no output                                                                                                                              |
-| Lint                              | `npm run lint`                                                                                              | pass, **8 warnings**, 0 errors (all `security/detect-non-literal-fs-filename`)                                                               |
-| Tests + coverage                  | `npm run test:coverage`                                                                                     | **2 files fail** — see CR-01 and CR-02                                                                                                       |
-| Coverage floors                   | `npx vitest run --coverage --exclude test/openapi-conformance.test.ts --exclude test/install-paths.test.ts` | statements 97.35 %, branches 90.90 %, functions 97.65 %, lines 98.80 % — **all above the 90 % floors** in `vitest.config.ts:23-28`           |
-| `any` / `@ts-ignore` / TODO sweep | `grep -rn` over `src/`                                                                                      | 0 `any`, 0 `@ts-ignore`, 0 TODO/FIXME/HACK                                                                                                   |
-| Layering                          | `grep -rn "from '\.\./\(commands\|titan\|mcp\)" src/core/`                                                  | clean — `core/` has no upward imports                                                                                                        |
-| CI state                          | `gh run list --branch main`                                                                                 | all recent runs `success`                                                                                                                    |
-| Tag visibility in CI              | `git clone --depth 1` of the public repo                                                                    | `git tag` → **0 tags** (root cause of CR-01)                                                                                                 |
-| Linter blind spot                 | injected `==` and `debugger` into `UI_JS`                                                                   | prettier: 0 diff; eslint: 0 findings; control `.js` file: **2 errors** (root cause of CR-03)                                                 |
-| CLI behaviour                     | `node dist/cli.js search ab`                                                                                | full eCFR sync runs, **then** exit 1 (root cause of CR-05, CR-07)                                                                            |
+| Check                             | Command                                                                                                     | Result                                                                                                                                             |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Remote state                      | `git fetch --all --prune`                                                                                   | `main` = `origin/main` at `aa3f73c`; `main` then moved to `8c876c5` mid-audit and the affected citations were re-verified (see "Provenance")       |
+| Typecheck                         | `npm run typecheck`                                                                                         | pass, no output                                                                                                                                    |
+| Lint                              | `npm run lint`                                                                                              | pass, **8 warnings**, 0 errors (all `security/detect-non-literal-fs-filename`)                                                                     |
+| Tests + coverage                  | `npm run test:coverage`                                                                                     | **2 files fail** — see CR-01 and CR-02                                                                                                             |
+| Coverage floors                   | `npx vitest run --coverage --exclude test/openapi-conformance.test.ts --exclude test/install-paths.test.ts` | statements 97.35 %, branches 90.90 %, functions 97.65 %, lines 98.80 % — **all above the 90 % floors** in `vitest.config.ts:23-28`                 |
+| `any` / `@ts-ignore` / TODO sweep | `grep -rn` over `src/`                                                                                      | 0 `any`, 0 `@ts-ignore`, 0 TODO/FIXME/HACK                                                                                                         |
+| Layering                          | `grep -rn "from '\.\./\(commands\|titan\|mcp\)" src/core/`                                                  | clean — `core/` has no upward imports                                                                                                              |
+| CI state                          | `gh run list --branch main`                                                                                 | all recent runs `success`                                                                                                                          |
+| Tag visibility in CI              | `git clone --depth 1` of the public repo                                                                    | `git tag` → **0 tags** (root cause of CR-01)                                                                                                       |
+| Linter blind spot                 | injected `==` and `debugger` into `UI_JS`                                                                   | prettier: 0 diff; eslint: 0 findings; the same code in a plain `.js` file, linted by an equivalent flat config: **2 errors** (root cause of CR-03) |
+| CLI behaviour                     | `node dist/cli.js search ab`                                                                                | full eCFR sync runs, **then** exit 1 (root cause of CR-05, CR-07)                                                                                  |
 
 The audit ran `npm ci` from the committed lockfile to execute these gates.
 That produced a gitignored `node_modules/` and `dist/`; **no tracked file was
@@ -75,7 +77,7 @@ modified** and `git status` was clean before and after.
 | [CR-07](#cr-07) | P1  | CLI / docs      | Usage errors exit 1, contradicting the documented table             | CONFIRMED  |
 | [CR-08](#cr-08) | P1  | Web UI          | Raw validation-library messages shown to end users                  | CONFIRMED  |
 | [CR-09](#cr-09) | P1  | Web UI / a11y   | Focus is never moved on route change                                | CONFIRMED  |
-| [CR-10](#cr-10) | P1  | Architecture    | Two runtime ESM import cycles                                       | CONFIRMED  |
+| [CR-10](#cr-10) | P2  | Architecture    | Two runtime ESM import cycles                                       | CONFIRMED  |
 | [CR-11](#cr-11) | P1  | Tests           | The contract suite pins exact source line numbers                   | CONFIRMED  |
 | [CR-12](#cr-12) | P2  | Security / docs | Default container posture is an unauthenticated public API          | CONFIRMED  |
 | [CR-13](#cr-13) | P2  | Release         | The release pipeline never re-runs the secret scan                  | CONFIRMED  |
@@ -196,6 +198,7 @@ suite.
 // test/openapi-conformance.test.ts:43-45
 import addFormats from 'ajv-formats';
 import { Ajv2020 } from 'ajv/dist/2020.js';
+import type { AnySchema } from 'ajv';
 ```
 
 `grep -n ajv package.json` → no match. They resolve only because
@@ -287,7 +290,7 @@ same holds for `tsc`, which sees only a template literal.
 no linter, no formatter and no type-checker. `==` comparisons, unused
 variables, unreachable branches and typo-level mistakes in the UI are
 invisible. `test/ui.test.ts` does execute the served string in `node:vm`
-against a stub DOM — genuinely good — but its 39 assertions cover specific
+against a stub DOM — genuinely good — but its 39 test cases (96 assertions) cover specific
 behaviours, not style or dead code.
 
 **Fix:** extract `UI_JS` into a real `.js` file served as a static asset
@@ -535,7 +538,8 @@ skip link to `<main>`.
 
 ### CR-10 — Two runtime ESM import cycles
 
-**Severity: P1** · **Location:** `src/core/service.ts:5-6`,
+**Severity: P2** (downgraded from P1 on review — see the note below) ·
+**Location:** `src/core/service.ts:5-6`,
 `src/core/diff.ts:5`, `src/core/redline.ts:4,7` · **Confidence: CONFIRMED**
 
 Value imports (type-only imports are erased and do not cycle):
@@ -563,6 +567,14 @@ Both cycles vanish, `mcp/client-safe.ts:1-2` simplifies to one import, and
 `client-safe.ts` stops being the only module that knows the client-safe
 class set.
 
+**Severity note (added on review).** This was rated P1 when first written and
+is downgraded to P2. The cycles are real and the citations are exact, but
+there is no present defect: the code is correct today, the impact is
+hypothetical, and by this document's own scale — P1 "real weakness needing a
+fix", P2 "hardening / cost of change" — a latent-risk code smell with a
+sound, non-breaking fix belongs at P2. It is worth fixing; it is not a
+blocking weakness.
+
 ---
 
 <a id="cr-11"></a>
@@ -572,10 +584,14 @@ class set.
 **Severity: P1** · **Location:** `docs/openapi.yaml:39,64,89,114,139,164,251,306,383,430,491,497,503,511,517,525,531`;
 enforced by `test/openapi-conformance.test.ts:1020-1035` · **Confidence: CONFIRMED**
 
-Eighteen `# source: src/titan/http-server.ts:NN` comments, for example:
+Seventeen `# source: src/titan/http-server.ts:NN` comments (an 18th match in
+a grep is the convention note at `docs/openapi.yaml:4`), for example:
 
 ```yaml
-# source: src/titan/http-server.ts:545    # source: src/titan/http-server.ts:293,620,625 (encoding, URL parse, byte caps) + :429 …
+# docs/openapi.yaml:39
+# source: src/titan/http-server.ts:545
+# docs/openapi.yaml:491
+# source: src/titan/http-server.ts:293,620,625 (encoding, URL parse, byte caps) + :429 (service input) + :347 (diff params) + :410 (redline params)
 ```
 
 The test's own header explains the design (_"a line shift in the router fails
@@ -600,11 +616,11 @@ test time; the line number can remain in the comment as a hint.
 
 ### CR-12 — Default container posture is an unauthenticated public API
 
-**Severity: P2** · **Location:** `Dockerfile:25-26`, `README.md:67`,
+**Severity: P2** · **Location:** `Dockerfile:23-26`, `README.md:67`,
 `README.md:406-408` · **Confidence: CONFIRMED** · **[security+usability]**
 
 ```dockerfile
-# Dockerfile:25-26
+# Dockerfile:23-26
 ENV NODE_ENV=production \
     CFR_INDEX_PATH=/data/index.sqlite \
     CFR_HOST=0.0.0.0 \
@@ -1200,8 +1216,9 @@ the structured log.
 **Severity: P2** · **Location:** `test/ci-workflow.test.ts` (whole file),
 `.github/workflows/ci.yml` · **Confidence: CONFIRMED**
 
-`test/ci-workflow.test.ts` is 1 627 lines — roughly 11 % of the ~14 700-line
-suite — and asserts on the raw text of the 139-line `ci.yml`. It is already
+`test/ci-workflow.test.ts` is 1 627 lines — roughly 10 % of the ~16 300-line
+suite (16 150 of those lines are in `*.test.ts`) — and asserts on the raw text
+of the 139-line `ci.yml`. It is already
 linted by `actionlint`, which is in the gate (`package.json:46`) and is what
 actually catches the GitHub-expression errors the guard's own header says it
 cannot (`ci-workflow.test.ts:38-51`).
@@ -1526,7 +1543,12 @@ These were verified, not assumed. Do not regress them while fixing the above.
 - **Loopback-by-default with a coupled limiter.** `src/config.ts:90` refuses
   a non-loopback bind without `CFR_ALLOW_REMOTE=1`, and
   `src/commands/serve.ts:67` enables the limiter on exactly that same flag —
-  the limiter can never be off on a remote bind.
+  the limiter can never be off on a remote bind. (The check is on the literal
+  host string: `LOOPBACK_HOSTS` (`src/config.ts:31`) is
+  `127.0.0.1`, `::1`, `localhost`, `[::1]`, and `localhost` is trusted as
+  loopback without being resolved. Harmless in practice — `localhost`
+  resolves to a loopback address — but a manipulated `/etc/hosts` would make
+  a `CFR_HOST=localhost` bind routable with no limiter.)
 - **Rate-limiter peer identity is unforgeable:** `req.socket.remoteAddress`,
   with no `X-Forwarded-For` trust. Memory is bounded by `maxPeers` + LRU
   prune (`src/titan/rate-limit.ts:78-84`), and the IPv6-rotation trade-off is
@@ -1534,18 +1556,23 @@ These were verified, not assumed. Do not regress them while fixing the above.
 - **Client-safe error taxonomy.** `src/mcp/client-safe.ts:26-33`
   discriminates on class identity, not a `code` string, so `ENOENT` /
   `SQLITE_CANTOPEN` messages carrying file paths can never reach a client.
-  Non-`ServiceError` failures collapse to a fixed generic
-  (`src/titan/http-server.ts:669`).
+  Failures that are neither `ServiceError` nor `StructureError` collapse to a
+  fixed generic (`src/titan/http-server.ts:669`); `StructureError` messages do
+  reach the client by design, and are documented user-facing guidance
+  (`http-server.ts:653-662`).
 - **HTTP hygiene.** GET/HEAD only (`http-server.ts:594`), URL ≤ 2048 bytes →
   414, `q` ≤ 800 bytes, `part` ≤ 10 bytes, `nosniff` + CORP `same-origin` on
   every response, no CORS headers, strong sha256 `ETag` over exact bytes
-  with RFC 9110 weak comparison and correct list splitting
-  (`http-server.ts:116-143`).
+  (`http-server.ts:62-71`) with RFC 9110 weak comparison and correct list
+  splitting (`http-server.ts:116-135`).
 - **The UI is not an injection vector.** Zero inline script, `default-src
 'none'` CSP with `frame-ancestors 'none'` on the document, and no
   `innerHTML` / `outerHTML` / `document.write` anywhere in `src/` — dynamic
   nodes are built with `createElement` + `textContent`, and every href is
-  `encodeURIComponent`-encoded (`src/titan/ui.ts:267-269`).
+  `encodeURIComponent`-encoded (`src/titan/ui.ts:267-269`). (A grep for those
+  three names in `src/` returns exactly two hits, both inside the comment
+  that documents this rule at `src/titan/ui.ts:17-18`; there are no
+  assignments.)
 - **Upstream client.** Hardcoded `https://www.ecfr.gov`
   (`src/core/ecfr.ts:7`), not env-overridable → no SSRF. 15 s timeout, 50 MiB
   streaming cap enforced _during_ the read, bounded retries with backoff,
@@ -1570,7 +1597,7 @@ read`; `pull_request_target` unused; no untrusted `${{ }}` reaches a `run:`
   nested-quantifier shaped (`src/core/citations.ts:29-36`).
 - **Layering is clean.** No import from `src/core/` reaches `src/commands/`,
   `src/titan/` or `src/mcp/`; `src/titan/` and `src/mcp/` never import
-  `src/commands/`. The `src/` tree in `SPEC.md:24-58` matches the filesystem
+  `src/commands/`. The `src/` tree in `SPEC.md:26-61` matches the filesystem
   exactly.
 - **Strict typing.** `tsconfig.json:8-21` sets `strict`,
   `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`,
@@ -1582,7 +1609,7 @@ read`; `pull_request_target` unused; no untrusted `${{ }}` reaches a `run:`
   MCP output schemas (`tools.ts:35+`).
 - **The OpenAPI contract is real, not aspirational.** The conformance suite
   boots an in-process server and validates live response bodies against the
-  schemas (`test/openapi-conformance.test.ts:765-977`), checks that HEAD
+  schemas (`test/openapi-conformance.test.ts:765-976`), checks that HEAD
   mirrors GET (`:839`), and verifies that every `# source: file:line`
   citation in the YAML still points at the construct it names (`:1099`).
 - **The UI's `node:vm` harness** (`test/ui.test.ts:1-20`) executes the
@@ -1686,6 +1713,39 @@ orchestrating session; every headline claim above was re-verified there, by
 execution where the claim was behavioural. No repository file was modified
 in the course of the audit.
 
+### Fresh-context review
+
+The merged head was reviewed by an independent reviewer with no prior
+knowledge of this document, instructed to audit the audit: spot-check the
+citations, challenge the P1 severities, verify the "Controls that work"
+claims for false comfort, and look for material omissions. It confirmed the
+headline findings — CR-01's two halves, CR-02's undeclared dependencies, the
+CR-03 linter blind spot, CR-05 and CR-07's CLI behaviour (reproduced live),
+the coverage and lint figures, and every row of the rebase-mapping table
+below — and raised the following corrections, all of which are now applied:
+
+| Correction                                                                                                                               | Change                                                              |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| CR-10 rated P1 while the document itself concedes the code is correct today                                                              | downgraded to **P2**, with a note recording the reasoning           |
+| "Non-`ServiceError` failures collapse to a fixed generic" — `StructureError` is not a `ServiceError` and its message is echoed by design | claim made precise                                                  |
+| The ETag claim cited one range for two separate locations                                                                                | split into `http-server.ts:62-71` (sha256) and `:116-135` (matcher) |
+| "Eighteen `# source:` comments" — 17 citations plus the convention note at `docs/openapi.yaml:4`                                         | corrected to seventeen                                              |
+| "`test/ci-workflow.test.ts` is ~11 % of the ~14 700-line suite"                                                                          | corrected to ~10 % of ~16 300 lines (16 150 in `*.test.ts`)         |
+| Scope header said `test/` has 39 files                                                                                                   | corrected to 36 `*.test.ts` files and a measured 743 cases          |
+| `Dockerfile:25-26` quoted a four-line `ENV` block                                                                                        | corrected to `:23-26`                                               |
+| `SPEC.md:24-58` for the `src/` tree                                                                                                      | corrected to `:26-61`                                               |
+| A quoted YAML citation spliced two non-adjacent lines                                                                                    | shown as two separate lines with their line numbers                 |
+| The CR-02 import quote omitted the third import                                                                                          | completed                                                           |
+| `test/ui.test.ts` "39 assertions"                                                                                                        | corrected to 39 test cases / 96 assertions                          |
+| The linter control experiment's configuration was not stated                                                                             | stated (an equivalent flat config)                                  |
+| The `innerHTML` claim did not mention the two comment hits                                                                               | noted                                                               |
+
+The reviewer also confirmed the CR-18 "nine identical error-handling blocks"
+claim (nine `server.registerTool` calls, catch blocks at exactly the nine
+cited lines) and the `ajv` dependency graph from `package-lock.json`
+(`node_modules/ajv` 8.20.0, `node_modules/ajv-formats` 3.0.1, MCP SDK
+`ajv@^8.17.1` + `ajv-formats@^3.0.1`, eslint nesting `ajv@6.15.0`).
+
 ### Rebase onto `8c876c5`
 
 `origin/main` moved to `8c876c5` (_"docs: tighten the network bullet,
@@ -1705,7 +1765,7 @@ line against the new base:
 | `docs/SPEC.md:308`                 | `docs/SPEC.md:307`                        | shifted — re-verified                                  |
 | `docs/SPEC.md:1,349,376,411`       | unchanged                                 | re-verified                                            |
 | `docs/SPEC.md:310,334,363,383,469` | unchanged                                 | re-verified                                            |
-| `docs/SPEC.md:24-58`               | unchanged                                 | re-verified                                            |
+| `docs/SPEC.md:26-61`               | unchanged                                 | re-verified                                            |
 
 CR-26 is the only finding whose _substance_ changed; it is now marked
 fixed-upstream with a residual item. No other finding's disposition moved.
