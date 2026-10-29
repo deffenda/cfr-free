@@ -55,7 +55,7 @@ claim needs the local output.
 | Layering                          | `grep -rn "from '\.\./\(commands\|titan\|mcp\)" src/core/`                                                  | clean — `core/` has no upward imports                                                                                                              |
 | CI state                          | `gh run list --branch main`                                                                                 | all recent runs `success`                                                                                                                          |
 | Tag visibility in CI              | `git clone --depth 1` of the public repo                                                                    | `git tag` → **0 tags** (root cause of CR-01)                                                                                                       |
-| Linter blind spot                 | injected `==` and `debugger` into `UI_JS`                                                                   | prettier: 0 diff; eslint: 0 findings; the same code in a plain `.js` file, linted by an equivalent flat config: **2 errors** (root cause of CR-03) |
+| Linter blind spot                 | injected `==` and `debugger` into `UI_JS`                                                                   | prettier: 0 diff; eslint: 0 findings; the same code in a `.ts` control file under the repo's own eslint config: **2 errors** (root cause of CR-03) |
 | CLI behaviour                     | `node dist/cli.js search ab`                                                                                | full eCFR sync runs, **then** exit 1 (root cause of CR-05, CR-07)                                                                                  |
 
 The audit ran `npm ci` from the committed lockfile to execute these gates.
@@ -109,6 +109,7 @@ modified** and `git status` was clean before and after.
 | [CR-39](#cr-39) | P3  | CLI / UI        | `--help` on a subcommand is an error                                | CONFIRMED  |
 | [CR-40](#cr-40) | P3  | UI / a11y       | Missing `aria-current`; heading order skips `h2`                    | CONFIRMED  |
 | [CR-41](#cr-41) | P3  | Core            | Stale JSDoc block and two unused exports                            | CONFIRMED  |
+| [CR-42](#cr-42) | P3  | CI / docs       | `AGENTS.md` names three required checks; protection requires four   | CONFIRMED  |
 
 ---
 
@@ -280,11 +281,15 @@ injected: var probeVar   =    1;
 
 prettier --check ui.ts   →  "All matched files use Prettier code style!"   (0 diff)
 eslint  (eqeqeq: error, no-debugger: error) on ui.ts → 0 findings
-eslint  on the identical code as a plain .js file  → 2 errors
+eslint  on the identical code in a .ts control file, under the repo's own
+        eslint config                                    → 2 errors
 ```
 
 The tooling works; the `String.raw` block is specifically opaque to it. The
-same holds for `tsc`, which sees only a template literal.
+same holds for `tsc`, which sees only a template literal. (The control is a
+`.ts` file, not a `.js` one: `eqeqeq` is scoped to `**/*.ts` in
+`eslint.config.mjs:25`, so a `.js` control reproduces a different count under
+the repo's own config.)
 
 **Impact:** the largest single blob of logic in the repository is checked by
 no linter, no formatter and no type-checker. `==` comparisons, unused
@@ -1523,6 +1528,42 @@ unless a consumer is planned.
 
 ---
 
+<a id="cr-42"></a>
+
+### CR-42 — `AGENTS.md` and its guard name three required checks; branch protection requires four
+
+**Severity: P3** · **Location:** `AGENTS.md:48`,
+`test/ci-workflow.test.ts:55` · **Confidence: CONFIRMED** (found on review)
+
+`AGENTS.md:48` states that the required checks on `main` are "`quality (22)`,
+`quality (24)` and `security`". Branch protection actually requires four:
+
+```
+$ gh api repos/deffenda/cfr-free/branches/main/protection --jq '.required_status_checks.contexts'
+["quality (22)","quality (24)","security","actionlint"]
+```
+
+The guard that is supposed to keep the list in step repeats the same stale
+three:
+
+```ts
+// test/ci-workflow.test.ts:54-55
+/** The checks branch protection on `main` requires. Keep in step with it. */
+const REQUIRED_CHECKS = ['quality (22)', 'quality (24)', 'security'] as const;
+```
+
+**Impact:** low — `actionlint` is a required check that CI runs and that
+`npm run ci` also runs, so nothing is actually skipped. But `AGENTS.md` is the
+canonical agent-facing file, and it under-states the merge floor by one check,
+while the test whose stated job is to track that floor is itself stale. An
+agent reading `AGENTS.md` to decide which checks to wait for would wait for
+three of four.
+
+**Fix.** Add `actionlint` to the list in `AGENTS.md:48` and to
+`REQUIRED_CHECKS` in `test/ci-workflow.test.ts:55`.
+
+---
+
 ## Controls that work — preserve these
 
 These were verified, not assumed. Do not regress them while fixing the above.
@@ -1676,7 +1717,7 @@ Ordered by dependency and by cost, not by severity alone.
    maintainability refactors. CR-10 (extract `errors.ts`) is the enabling
    change for CR-21 and CR-22.
 7. **CR-12, CR-13, CR-19, CR-31** — deployment posture and doc hygiene.
-8. **The P3 sweep** — CR-34 through CR-41.
+8. **The P3 sweep** — CR-34 through CR-42.
 
 ---
 
@@ -1685,20 +1726,26 @@ Ordered by dependency and by cost, not by severity alone.
 Required by `AGENTS.md:51` (_"If a test asserts on the text of another file,
 surface it"_).
 
-| Test file                                    | Reads                                                       | Cost of a false failure                                   |
-| -------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------- |
-| `test/install-paths.test.ts:67,109`          | literal strings in `package.json` and `scripts/prepare.mjs` | renaming a script or env var breaks the test              |
-| `test/ci-workflow.test.ts` (1 627 lines)     | the raw text of `.github/workflows/ci.yml`                  | any reformat of the workflow breaks the guard — see CR-30 |
-| `test/openapi-conformance.test.ts:1020-1035` | exact line numbers in `src/titan/http-server.ts`            | see CR-11                                                 |
-| `test/markdown-tables.test.ts:152-171`       | the text of every tracked `.md`                             | a malformed table fails the suite                         |
-| `test/no-conflict-markers.test.ts:75-96`     | the text of every tracked file                              | a conflict marker fails the suite                         |
+| Test file                                       | Reads                                                                                                                                                                  | Cost of a false failure                                                                                                                 |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/install-paths.test.ts:67,109,472-474,486` | literal strings in `package.json` and `scripts/prepare.mjs`; **all three** workflow files (`ci.yml`, `release.yml`, `live-e2e.yml`); and the raw text of `release.yml` | renaming a script or env var breaks the test; **editing any workflow file breaks it** — e.g. renaming `gh release create` fails 3 tests |
+| `test/ci-workflow.test.ts` (1 627 lines)        | **every** `.yml`/`.yaml` in `.github/workflows/` (`:61-66`, `:788`, `:815`, `:900`) and `package.json` (`:52`)                                                         | **any** reformat of **any** workflow file breaks the guard — see CR-30                                                                  |
+| `test/openapi-conformance.test.ts:1020-1035`    | exact line numbers in `src/titan/http-server.ts`                                                                                                                       | see CR-11                                                                                                                               |
+| `test/markdown-tables.test.ts:152-171`          | the text of every tracked `.md`                                                                                                                                        | a malformed table fails the suite                                                                                                       |
+| `test/no-conflict-markers.test.ts:75-96`        | the text of every tracked file                                                                                                                                         | a conflict marker fails the suite                                                                                                       |
 
 **Assessment:** the first two are defensible inter-file contract tests —
 `install-paths.test.ts:36-40` states the rationale explicitly and each
-assertion names the file it reads. The markdown and conflict-marker guards are
-structural rather than textual-brittle, and both document precisely what they
-cannot see (a marker inside a fenced block; a setext `=======` underline) and
-skip vacuously rather than falsely when there is no git checkout
+assertion names the file it reads — but their blast radius is wider than the
+"Reads" column first suggested, and the table above now names every file.
+Two edits that the earlier form of this table did not disclose were confirmed
+to break the suite: unpinning `actions/checkout@v7` in `live-e2e.yml` fails
+`ci-workflow.test.ts` ("pins every action to a full commit SHA"), and renaming
+`gh release create` to `gh release upload` in `release.yml` fails
+`install-paths.test.ts` in 3 tests. The markdown and conflict-marker guards
+are structural rather than textual-brittle, and both document precisely what
+they cannot see (a marker inside a fenced block; a setext `=======` underline)
+and skip vacuously rather than falsely when there is no git checkout
 (`markdown-tables.test.ts:155-162`). The cost asymmetry in
 `ci-workflow.test.ts` is the one that is not defensible — see CR-30.
 
@@ -1724,21 +1771,23 @@ CR-03 linter blind spot, CR-05 and CR-07's CLI behaviour (reproduced live),
 the coverage and lint figures, and every row of the rebase-mapping table
 below — and raised the following corrections, all of which are now applied:
 
-| Correction                                                                                                                               | Change                                                              |
-| ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| CR-10 rated P1 while the document itself concedes the code is correct today                                                              | downgraded to **P2**, with a note recording the reasoning           |
-| "Non-`ServiceError` failures collapse to a fixed generic" — `StructureError` is not a `ServiceError` and its message is echoed by design | claim made precise                                                  |
-| The ETag claim cited one range for two separate locations                                                                                | split into `http-server.ts:62-71` (sha256) and `:116-135` (matcher) |
-| "Eighteen `# source:` comments" — 17 citations plus the convention note at `docs/openapi.yaml:4`                                         | corrected to seventeen                                              |
-| "`test/ci-workflow.test.ts` is ~11 % of the ~14 700-line suite"                                                                          | corrected to ~10 % of ~16 300 lines (16 150 in `*.test.ts`)         |
-| Scope header said `test/` has 39 files                                                                                                   | corrected to 36 `*.test.ts` files and a measured 743 cases          |
-| `Dockerfile:25-26` quoted a four-line `ENV` block                                                                                        | corrected to `:23-26`                                               |
-| `SPEC.md:24-58` for the `src/` tree                                                                                                      | corrected to `:26-61`                                               |
-| A quoted YAML citation spliced two non-adjacent lines                                                                                    | shown as two separate lines with their line numbers                 |
-| The CR-02 import quote omitted the third import                                                                                          | completed                                                           |
-| `test/ui.test.ts` "39 assertions"                                                                                                        | corrected to 39 test cases / 96 assertions                          |
-| The linter control experiment's configuration was not stated                                                                             | stated (an equivalent flat config)                                  |
-| The `innerHTML` claim did not mention the two comment hits                                                                               | noted                                                               |
+| Correction                                                                                                                               | Change                                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CR-10 rated P1 while the document itself concedes the code is correct today                                                              | downgraded to **P2**, with a note recording the reasoning                                                                                                                                                                                                                                                                                                                    |
+| "Non-`ServiceError` failures collapse to a fixed generic" — `StructureError` is not a `ServiceError` and its message is echoed by design | claim made precise                                                                                                                                                                                                                                                                                                                                                           |
+| The ETag claim cited one range for two separate locations                                                                                | split into `http-server.ts:62-71` (sha256) and `:116-135` (matcher)                                                                                                                                                                                                                                                                                                          |
+| "Eighteen `# source:` comments" — 17 citations plus the convention note at `docs/openapi.yaml:4`                                         | corrected to seventeen                                                                                                                                                                                                                                                                                                                                                       |
+| "`test/ci-workflow.test.ts` is ~11 % of the ~14 700-line suite"                                                                          | corrected to ~10 % of ~16 300 lines (16 150 in `*.test.ts`)                                                                                                                                                                                                                                                                                                                  |
+| Scope header said `test/` has 39 files                                                                                                   | corrected to 36 `*.test.ts` files and a measured 743 cases                                                                                                                                                                                                                                                                                                                   |
+| `Dockerfile:25-26` quoted a four-line `ENV` block                                                                                        | corrected to `:23-26`                                                                                                                                                                                                                                                                                                                                                        |
+| `SPEC.md:24-58` for the `src/` tree                                                                                                      | corrected to `:26-61`                                                                                                                                                                                                                                                                                                                                                        |
+| A quoted YAML citation spliced two non-adjacent lines                                                                                    | shown as two separate lines with their line numbers                                                                                                                                                                                                                                                                                                                          |
+| The CR-02 import quote omitted the third import                                                                                          | completed                                                                                                                                                                                                                                                                                                                                                                    |
+| `test/ui.test.ts` "39 assertions"                                                                                                        | corrected to 39 test cases / 96 assertions                                                                                                                                                                                                                                                                                                                                   |
+| The linter control experiment's configuration was not stated                                                                             | stated (a `.ts` control under the repo's own eslint config — a `.js` control reproduces a different count, because `eqeqeq` is scoped to `**/*.ts`)                                                                                                                                                                                                                          |
+| The `innerHTML` claim did not mention the two comment hits                                                                               | noted                                                                                                                                                                                                                                                                                                                                                                        |
+| **The AGENTS.md:51 Disclosure table under-reported which files are text-asserted on**                                                    | both rows expanded: `ci-workflow.test.ts` reads **every** workflow file plus `package.json`; `install-paths.test.ts` reads **all three** workflow files and the raw text of `release.yml`. Two edits the earlier table did not disclose were confirmed to break the suite (unpinning `actions/checkout@v7` in `live-e2e.yml`; renaming `gh release create` in `release.yml`) |
+| `AGENTS.md:48` and `test/ci-workflow.test.ts:55` name three required checks; branch protection requires four                             | added as **CR-42**                                                                                                                                                                                                                                                                                                                                                           |
 
 The reviewer also confirmed the CR-18 "nine identical error-handling blocks"
 claim (nine `server.registerTool` calls, catch blocks at exactly the nine
