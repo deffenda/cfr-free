@@ -1821,8 +1821,20 @@ describe('the release guard — the packed package must carry what the program r
       symlinkSync(join(ROOT, 'scripts', 'pack-list.mjs'), link);
       const out = execFileSync(process.execPath, [link, ROOT], { encoding: 'utf8' });
       const paths = JSON.parse(out) as string[];
-      expect(paths).toContain('dist/cli.js');
-      expect(paths).toContain('dist/titan/ui-client.js');
+      // The assertion is on paths the tarball carries WHETHER OR NOT the
+      // program has been built. `npm pack --dry-run --ignore-scripts` runs
+      // the `prepare` lifecycle script on npm 10 (which builds `dist/`) and
+      // skips it on npm 11 and 12 (which does not) — so asserting a `dist/`
+      // path here made this test answer differently on Node 22 and Node 24,
+      // and it failed on the Node 24 runner in CI. The BUILT package's
+      // contents are asserted by the guard test below, which builds before
+      // it packs.
+      //
+      // The regression this guards is an EMPTY list: the script printing
+      // nothing at all through a symlink.
+      expect(paths.length).toBeGreaterThan(0);
+      expect(paths).toContain('package.json');
+      expect(paths).toContain('README.md');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
