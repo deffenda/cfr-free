@@ -299,6 +299,22 @@ const CITATION_HINTS: Readonly<Record<string, string>> = {
   input: 'the citation must be a provision number such as 4.130',
 };
 
+/**
+ * Validate a search input against the schema the service uses.
+ *
+ * Exported so the CLI can refuse a bad flag BEFORE the index is opened: a
+ * rejected flag is the reader's mistake, and it must not be billed to a
+ * 2-3 MB sync — the same rule the query length follows.
+ *
+ * The errors are the service's plain-language ones, so the CLI and the API
+ * cannot drift in what they say about a rejected search.
+ */
+export function validateSearchInput(input: SearchInput): z.infer<typeof searchInputSchema> {
+  const parsed = searchInputSchema.safeParse(input);
+  if (!parsed.success) toServiceError(parsed.error, SEARCH_HINTS);
+  return parsed.data;
+}
+
 function toServiceError(error: unknown, hints: Readonly<Record<string, string>>): never {
   if (error instanceof z.ZodError) {
     const details = error.issues
@@ -414,9 +430,7 @@ export class CFRService {
   }
 
   search(input: SearchInput): SearchResponse {
-    const parsed = searchInputSchema.safeParse(input);
-    if (!parsed.success) toServiceError(parsed.error, SEARCH_HINTS);
-    const { query, page, perPage, part, kind, chapter } = parsed.data;
+    const { query, page, perPage, part, kind, chapter } = validateSearchInput(input);
     const outcome = this.store.search({ query, page, perPage, part, kind, chapter });
     const direct = this.directHit(query, { part, kind, chapter });
 

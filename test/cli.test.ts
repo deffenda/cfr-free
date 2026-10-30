@@ -9,7 +9,7 @@ import { formatSearchResults } from '../src/commands/search.js';
 import { Store } from '../src/core/store.js';
 import type { FetchLike } from '../src/core/http-client.js';
 import { VERSION } from '../src/version.js';
-import { FIXTURE_STRUCTURE } from './helpers.js';
+import { FIXTURE_STRUCTURE, openTempStore } from './helpers.js';
 
 function makeIo(env: NodeJS.ProcessEnv = {}): {
   out: string[];
@@ -540,15 +540,149 @@ describe('main: redline output', () => {
 
 describe('cfr-free search', () => {
   it('parses the words after the command as one query', () => {
-    expect(parseArgs(['search', 'PTSD', 'diagnosis'])).toEqual({
+    expect(parseArgs(['search', 'PTSD', 'diagnosis'])).toMatchObject({
       command: 'search',
       query: 'PTSD diagnosis',
+      json: false,
+      page: 1,
+      perPage: 10,
+    });
+  });
+
+  it('parses the search flags, wherever they sit', () => {
+    // The flag names mirror the HTTP query parameters, so a reader who knows
+    // the API knows the CLI. A value may be attached with `=` or given as
+    // the next argument, and a flag may come before or after the query.
+    expect(
+      parseArgs([
+        'search',
+        '--json',
+        '--page=2',
+        '--per-page',
+        '5',
+        '--part',
+        '4',
+        '--kind',
+        'section',
+        '--chapter',
+        'IV',
+        'PTSD',
+      ]),
+    ).toEqual({
+      command: 'search',
+      query: 'PTSD',
+      json: true,
+      page: 2,
+      perPage: 5,
+      part: '4',
+      kind: 'section',
+      chapter: 'IV',
     });
   });
 
   it('refuses a search with no query, and a dash-prefixed option', () => {
     expect(() => parseArgs(['search'])).toThrow(CliError);
     expect(() => parseArgs(['search', '--limit', '5'])).toThrow(/unknown option for search/);
+  });
+
+  it('refuses a bad flag before the index is opened', async () => {
+    // The same rule as the query length: a rejected flag is the reader's
+    // mistake, and it must not cost a 2-3 MB sync. The flags are validated
+    // where the query is — before anything is opened.
+    expect(() => parseArgs(['search', '--page', 'abc', 'PTSD'])).toThrow(/must be a whole number/);
+    expect(() => parseArgs(['search', '--kind', 'policy', 'PTSD'])).toThrow(/--kind must be/);
+    expect(() => parseArgs(['search', '--per-page', '50', 'PTSD'])).toThrow(/between 1 and 20/);
+    expect(() => parseArgs(['search', 'PTSD', '--page'])).toThrow(/--page needs a value/);
+    expect(() => parseArgs(['search', '--json=1', 'PTSD'])).toThrow(/--json takes no value/);
+
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-cli-'));
+    const indexPath = path.join(dir, 'index.sqlite');
+    const { err, io } = makeIo({ CFR_INDEX_PATH: indexPath, CFR_LOG_LEVEL: 'error' });
+    try {
+      const code = await main(['search', '--per-page', '50', 'PTSD'], io);
+      expect(code).toBe(2);
+      expect(err.join('')).toContain('between 1 and 20');
+      expect(existsSync(indexPath), 'the index must not be opened for a rejected flag').toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('emits the search response verbatim as JSON, for a script', async () => {
+    // The prose is for a reader; a script should never have to parse it.
+    const temp = openTempStore();
+    try {
+      const { out, io } = makeIo({
+        CFR_INDEX_PATH: temp.indexPath,
+        CFR_AUTO_SYNC: '0',
+        CFR_MAX_AGE_DAYS: '365',
+        CFR_LOG_LEVEL: 'error',
+      });
+      const code = await main(['search', '--json', 'disorders'], io);
+      expect(code).toBe(0);
+      const payload = JSON.parse(out.join('')) as Record<string, unknown>;
+      // The SearchResponse, field for field.
+      for (const field of [
+        'query',
+        'page',
+        'perPage',
+        'total',
+        'matchMode',
+        'hits',
+        'indexIssueDate',
+        'indexStale',
+        'notice',
+        'matchedTerms',
+        'unmatchedTerms',
+      ]) {
+        expect(payload, `the JSON payload is missing ${field}`).toHaveProperty(field);
+      }
+      expect(payload['query']).toBe('disorders');
+      expect(Array.isArray(payload['hits'])).toBe(true);
+      // And none of the reader's prose.
+      expect(out.join('')).not.toContain('candidate provision(s)');
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('pages through the results instead of stopping at ten', async () => {
+    // The ten results the command used to print were a dead end: there was
+    // no route to the rest, so a reader who narrowed by the wrong wording
+    // could not check the others.
+    const temp = openTempStore();
+    try {
+      const env = {
+        CFR_INDEX_PATH: temp.indexPath,
+        CFR_AUTO_SYNC: '0',
+        CFR_MAX_AGE_DAYS: '365',
+        CFR_LOG_LEVEL: 'error',
+      };
+      const first = makeIo(env);
+      const second = makeIo(env);
+      expect(
+        await main(['search', '--json', '--per-page', '1', '--page', '1', 'disorders'], first.io),
+      ).toBe(0);
+      expect(
+        await main(['search', '--json', '--per-page', '1', '--page', '2', 'disorders'], second.io),
+      ).toBe(0);
+
+      const page1 = JSON.parse(first.out.join('')) as {
+        page: number;
+        hits: Array<{ citation: string }>;
+      };
+      const page2 = JSON.parse(second.out.join('')) as {
+        page: number;
+        hits: Array<{ citation: string }>;
+      };
+      expect(page1.page).toBe(1);
+      expect(page2.page).toBe(2);
+      expect(page1.hits.length).toBe(1);
+      expect(page2.hits.length).toBe(1);
+      expect(page2.hits[0]?.citation).not.toBe(page1.hits[0]?.citation);
+    } finally {
+      temp.cleanup();
+    }
   });
 
   it('refuses a query the index could never match, before opening it', async () => {

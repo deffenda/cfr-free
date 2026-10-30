@@ -161,7 +161,7 @@ node dist/cli.js mcp            # MCP server on stdio (default command)
 
 node dist/cli.js export ./backup.sqlite   # consistent snapshot of the local index
 
-node dist/cli.js search PTSD               # ranked provisions from the local index (top 10)
+node dist/cli.js search PTSD               # ranked provisions from the local index
 
 node dist/cli.js diff 2026-01-01 2026-06-01   # provision changes between two issue dates
 node dist/cli.js redline 2026-01-01 2026-06-01 4.125   # line-level redline of one provision
@@ -169,6 +169,25 @@ node dist/cli.js redline 2026-01-01 2026-06-01 4.125   # line-level redline of o
 
 `npm link` in the checkout puts `cfr-free` on your PATH, after which the
 examples above work verbatim as `cfr-free …`.
+
+### Searching from the command line
+
+`cfr-free search` runs the same search the MCP and HTTP surfaces run, and
+takes the same parameters — the flag names mirror the API's query
+parameters (`--per-page` is `per_page`, `--kind` is `kind`):
+
+```bash
+cfr-free search PTSD                        # the hits, then the grounding summary
+cfr-free search --json PTSD                 # the search response verbatim, for a script
+cfr-free search --per-page 50 PTSD          # 50 hits per page (1-20; the default is 10)
+cfr-free search --page 2 --per-page 20 PTSD # the second page
+cfr-free search --part 4 --chapter IV PTSD  # narrowed to one part and chapter
+cfr-free search --kind appendix PTSD        # sections (the default) or appendices
+```
+
+The flags are query parameters, not configuration: everything that
+_configures_ the service stays an environment variable, so an MCP client
+config stays uniform.
 
 `cfr-free sync` writes the index at `~/.cfr-free/index.sqlite`. To try it
 against a throwaway index instead of your own, point `CFR_INDEX_PATH`
