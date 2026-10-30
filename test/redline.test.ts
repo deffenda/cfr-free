@@ -359,12 +359,14 @@ describe('CFRService.redlineBetween (redline facade)', () => {
     }
   });
 
-  it('fails closed with a mapped invalid_input when no eCFR client was injected', async () => {
+  it('fails closed with a mapped unavailable when no eCFR client was injected', async () => {
     const temp: TempStore = openTempStore();
     try {
       // Plain 2-arg construction (tests, index readers): the facade must not
       // reach into an undefined client — it throws a clean ServiceError the
-      // HTTP/MCP layers map instead of crashing the handler.
+      // HTTP/MCP layers map instead of crashing the handler. The code is
+      // `unavailable`, NOT `invalid_input`: the fault is the deployment's
+      // (no eCFR client was wired in), not the reader's.
       const service = new CFRService(temp.store, 7);
       const error = await service.redlineBetween(FROM_DATE, TO_DATE, '4.125').then(
         () => {
@@ -373,7 +375,7 @@ describe('CFRService.redlineBetween (redline facade)', () => {
         (thrown: unknown) => thrown,
       );
       expect(error).toBeInstanceOf(ServiceError);
-      expect((error as ServiceError).code).toBe('invalid_input');
+      expect((error as ServiceError).code).toBe('unavailable');
       expect((error as ServiceError).message).toBe('redline unavailable — no eCFR client injected');
     } finally {
       temp.cleanup();
