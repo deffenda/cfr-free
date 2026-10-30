@@ -17,14 +17,21 @@ The local gate also needs `actionlint` on PATH — `npm run ci` runs
 `npm run lint:actions`. Install it with `brew install actionlint` or
 `go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12`.
 
+Nothing else is needed: the OpenAPI contract suite parses `docs/openapi.yaml`
+with the `yaml` package from this repository's own devDependencies, so no
+Python interpreter or PyYAML is involved.
+
 ## Workflow
 
 1. Open an issue first for anything beyond small fixes.
 2. Branch from `main`: `git checkout -b fix/short-description`.
 3. Make the change with tests. `docs/SPEC.md` is the design authority —
    update it when behavior or architecture changes. HTTP API changes must
-   also update `docs/openapi.yaml` (each path cites its router line in
-   `src/titan/http-server.ts`).
+   also update `docs/openapi.yaml` (each path cites the router SYMBOL it
+   comes from — `src/titan/http-server.ts#handleSearch` — not a line
+   number, so inserting a line above the router does not invalidate the
+   citation; the contract suite resolves every citation and fails if the
+   symbol is gone or no longer carries the construct it is cited for).
 4. Run the gates locally before pushing:
 
    ```bash
@@ -60,6 +67,20 @@ The local gate also needs `actionlint` on PATH — `npm run ci` runs
   inject fetch/sleep through `HttpClient` options.
 - Keep the coverage thresholds green (`npm run test:coverage`); they are
   floors, not targets — prefer tests over exclusions.
+
+## Releases
+
+The release guard (`test/install-paths.test.ts`) compares `package.json`'s
+version with the repository's tags, so the rule is: **the version must move
+past the newest released tag.** Between releases `main` holds the version it
+just published; the first change on top of that must bump `package.json` to
+a new version (`0.2.2` → `0.2.3`), and the tag you cut must equal
+`package.json` exactly — the release workflow refuses to publish otherwise
+(`test "$TAG" = "$PKG"`).
+
+The guard reads `git tag`, so a checkout without tags leaves it asserting
+nothing. CI checks out with `fetch-depth: 0`; a shallow local clone needs
+`git fetch --tags` before the suite can judge the version.
 
 ## Reviews
 

@@ -4,7 +4,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Logger } from '../logger.js';
 import { CORPUS_RECEIPT_LIMIT } from '../core/changes.js';
-import { ServiceError, type CFRService } from '../core/service.js';
+import { ServiceError } from '../core/errors.js';
+import type { CFRService } from '../core/service.js';
 import { clientSafeMessage } from './client-safe.js';
 import { UNTRUSTED_DATA_NOTE } from './posture.js';
 
