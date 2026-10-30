@@ -56,6 +56,30 @@ describe('Titan HTTP API', () => {
     expect(headers.get('x-content-type-options')).toBe('nosniff');
   });
 
+  it('tells every route not to leak the URL it was reading', async () => {
+    // The API answers with paths and queries that can carry a search
+    // term. A client that follows a link out of a response must not
+    // carry that URL to the next site.
+    for (const path of ['/health', '/metrics', '/', '/ui.js', '/api/v1/search?q=PTSD']) {
+      const response = await fetch(`${base}${path}`);
+      expect(response.headers.get('referrer-policy'), path).toBe('no-referrer');
+    }
+  });
+
+  it('bounds the connections and the header wait', () => {
+    // The rate limiter runs only after the headers are complete, so a
+    // client that dribbles them holds a socket without spending a token.
+    const created = createHttpServer(new CFRService(temp.store, 7), createTestLogger());
+    try {
+      expect(created.headersTimeout).toBe(10_000);
+      expect(created.keepAliveTimeout).toBe(5_000);
+      expect(created.maxConnections).toBe(256);
+      expect(created.requestTimeout).toBe(60_000);
+    } finally {
+      created.close();
+    }
+  });
+
   it('exposes Prometheus metrics at /metrics', async () => {
     const response = await fetch(`${base}/metrics`);
     expect(response.status).toBe(200);

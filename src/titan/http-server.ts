@@ -25,6 +25,16 @@ const HTML_HEADER = 'text/html; charset=utf-8';
 const JS_HEADER = 'text/javascript; charset=utf-8';
 const CSS_HEADER = 'text/css; charset=utf-8';
 const NOSNIFF = 'X-Content-Type-Options';
+
+/**
+ * `Referrer-Policy: no-referrer` on every response.
+ *
+ * The API answers with paths and queries that can carry a search term, so
+ * a client that follows a link from a response must not leak the URL it
+ * was reading to the next site. The UI document says the same thing with a
+ * `<meta>` tag; the header is the one that also covers the API routes.
+ */
+const REFERRER_POLICY = 'referrer-policy';
 const SEARCH_PREFIX = '/api/v1/search';
 const SECTIONS_PREFIX = '/api/v1/sections/';
 const BROWSE_PATH = '/api/v1/browse';
@@ -184,6 +194,7 @@ function sendJson(
     'content-type': JSON_HEADER,
     'content-length': Buffer.byteLength(payload, 'utf8'),
     [NOSNIFF]: 'nosniff',
+    [REFERRER_POLICY]: 'no-referrer',
   };
   if (cacheControl !== undefined) headers['cache-control'] = cacheControl;
   if (etag !== undefined) headers['etag'] = etag;
@@ -204,6 +215,7 @@ function sendText(
     'content-type': TEXT_HEADER,
     'content-length': Buffer.byteLength(body, 'utf8'),
     [NOSNIFF]: 'nosniff',
+    [REFERRER_POLICY]: 'no-referrer',
   };
   if (cacheControl !== undefined) headers['cache-control'] = cacheControl;
   res.setHeader('cross-origin-resource-policy', 'same-origin');
@@ -232,6 +244,7 @@ function sendStatic(
     [NOSNIFF]: 'nosniff',
     'cache-control': 'no-store',
     'cross-origin-resource-policy': 'same-origin',
+    [REFERRER_POLICY]: 'no-referrer',
   };
   if (csp !== undefined) headers['content-security-policy'] = csp;
   res.writeHead(200, headers);
@@ -705,5 +718,13 @@ export function createHttpServer(
   // Bound how long a client may take to complete a request (SPEC §12 #16);
   // the header timeout already defaults to 60 s.
   server.requestTimeout = 60_000;
+  // The rate limiter runs inside `precheck`, which is reached only after
+  // the request line and the headers are complete — so a client that
+  // dribbles its headers holds a socket without spending a token. The
+  // header timeout bounds that wait, and the connection cap bounds the
+  // sockets themselves.
+  server.headersTimeout = 10_000;
+  server.keepAliveTimeout = 5_000;
+  server.maxConnections = 256;
   return server;
 }

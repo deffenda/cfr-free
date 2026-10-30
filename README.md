@@ -198,7 +198,13 @@ defaults to `127.0.0.1` with `CFR_ALLOW_REMOTE=1` required. When you do
 expose it, a per-peer token-bucket rate limit (60-burst, 10 tokens/s) turns on
 automatically. The budget is spent by cost, not by request: a read of the
 local index costs one token, and a route that pulls the whole upstream
-document from eCFR costs ten. Images are published to GHCR on `v*` tags with
+document from eCFR costs ten.
+
+Behind a TLS-terminating proxy, add `Strict-Transport-Security` there
+rather than in the app: the header is a promise about the public hostname,
+and the app does not know it. The app answers with
+`Referrer-Policy: no-referrer` on every route, so a link out of a response
+cannot carry the URL you were reading to the next site. Images are published to GHCR on `v*` tags with
 build-provenance attestations.
 
 Prefer Compose? `docker compose up -d --build` serves the API on
