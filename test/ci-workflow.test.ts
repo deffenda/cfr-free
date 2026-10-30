@@ -223,6 +223,21 @@ const ACTIONLINT_VERSION = 'v1.7.12';
 const ACTIONLINT_INSTALL = 'go install github.com/rhysd/actionlint/cmd/actionlint@';
 
 /**
+ * The semgrep invocation CI and the local sweep both run, exactly.
+ *
+ * The two sides agreeing is not enough: a change that narrowed BOTH of
+ * them — adding `--exclude '**'`, or dropping the rule set — would
+ * agree perfectly and scan nothing. So the invocation is pinned here, to
+ * the one that is known to scan: `--config auto` reads a real rule set,
+ * `--error` turns a finding into a failure, and nothing excludes the
+ * tree the scan reads.
+ *
+ * The local sweep is `tools/security-scan.sh`'s own semgrep line; CI's is
+ * the `semgrep` job's `run:`. Both are compared against this.
+ */
+const SEMGREP_INVOCATION = 'scan --config auto --error --quiet';
+
+/**
  * The scanner jobs, and the step in each that does the scanning.
  *
  * The checkout matters as much as the scan: a scanner job with no
@@ -799,16 +814,6 @@ describe('the workflow files — what the merge gate runs', () => {
       (step.run ?? '').includes('semgrep scan'),
     );
     expect(semgrepStep, 'the semgrep job does not run a semgrep scan').toBeDefined();
-    // The same invocation the local sweep runs, so CI and `npm run scan`
-    // say the same thing about the same tree. Read from the script
-    // itself: two spellings of the same scan can drift into scanning
-    // different things, and the drift would be invisible.
-    const localScan = localSemgrepScan();
-    expect(localScan, 'tools/security-scan.sh no longer runs a semgrep scan').not.toBe('');
-    expect(
-      runOf(semgrepStep),
-      'the CI semgrep scan must be the invocation the local sweep runs',
-    ).toBe(`semgrep ${localScan}`);
     // The same scan the local sweep runs: the tree for dependencies,
     // secrets and misconfiguration.
     const with_ = trivy?.steps.find((step) => step.uses?.includes('trivy-action'));
@@ -844,6 +849,36 @@ describe('the workflow files — what the merge gate runs', () => {
         `ci.yml: job \`${job}\` must check out the code before it scans it`,
       ).toBeLessThan(scanIndex);
     }
+  });
+
+  it('scans with semgrep for real, in CI and in the local sweep', () => {
+    // The guard used to pin that CI and the local sweep AGREE, and to pin
+    // neither side's arguments: adding `--exclude '**'` to BOTH, or
+    // narrowing both to `--severity ERROR`, left the whole suite green.
+    // Two scanners that agree on scanning nothing agree perfectly. The
+    // invocation is pinned to the one known to scan.
+    const localScan = localSemgrepScan();
+    expect(localScan, 'tools/security-scan.sh no longer runs a semgrep scan').not.toBe('');
+    expect(localScan, 'the local sweep must run the pinned semgrep invocation').toBe(
+      SEMGREP_INVOCATION,
+    );
+    const semgrepStep = (jobOf(ci, 'semgrep')?.steps ?? []).find((step) =>
+      (step.run ?? '').includes('semgrep scan'),
+    );
+    expect(runOf(semgrepStep), 'the CI semgrep scan must be the pinned semgrep invocation').toBe(
+      `semgrep ${SEMGREP_INVOCATION}`,
+    );
+    // The pin itself, so it cannot be weakened from here either:
+    // `--config auto` reads a real rule set, `--error` turns a finding
+    // into a failure, and nothing excludes the tree the scan reads.
+    expect(SEMGREP_INVOCATION, 'the pinned invocation must read a rule set').toContain(
+      '--config auto',
+    );
+    expect(SEMGREP_INVOCATION, 'the pinned invocation must fail on a finding').toContain('--error');
+    expect(
+      SEMGREP_INVOCATION,
+      'the pinned invocation must not exclude the tree it scans',
+    ).not.toMatch(/--exclude(?:-rule)?\b/);
   });
 
   it('checks out the tags the release guard reads', () => {
