@@ -572,7 +572,7 @@ function ensureSchemaVersion(db: DatabaseSync, allowSchemaUpgrade: boolean): voi
  * The list mirrors the function words SQLite's tokenizer drops, so the
  * ranking key counts the same words the FTS query actually matched.
  */
-export const STOPWORDS: ReadonlySet<string> = new Set(
+const STOPWORDS: ReadonlySet<string> = new Set(
   (
     'a an and are as at be by cfr cfrs for from had has have how in is it its many much no not of on ' +
     'or that the their there these this to too was were what when where which who whom why will with ' +
@@ -1024,7 +1024,6 @@ export class Store {
     return rows.map((row) => String(row['citation']));
   }
 
-  /** sha256 of every indexed section's text — the pre-sync snapshot. */
   /**
    * SHA-256 of every section's text, keyed by citation. Read in bounded
    * rowid batches: materializing the whole corpus in one `.all()` would

@@ -23,7 +23,7 @@ import { StructureError } from '../core/structure.js';
  * (`error instanceof Error ? error.message : String(error)`, mirroring
  * http-server.ts), so sanitization applies to the wire only.
  */
-export function isClientSafe(error: unknown): error is ServiceError | StructureError {
+function isClientSafe(error: unknown): error is ServiceError | StructureError {
   return error instanceof ServiceError || error instanceof StructureError;
 }
 
