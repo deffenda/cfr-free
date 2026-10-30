@@ -9,6 +9,10 @@ COPY package.json package-lock.json tsconfig.json tsconfig.build.json ./
 # run against an empty source tree and fail. The build is run explicitly below.
 RUN npm ci --ignore-scripts
 COPY src ./src
+# The build copies the browser assets (src/titan/ui-client.js and .css)
+# into dist/ itself — `tsc` compiles TypeScript and copies nothing else —
+# so the copy script has to be in the tree the build runs in.
+COPY scripts ./scripts
 RUN npm run build && npm prune --omit=dev
 
 # --- runtime stage: minimal image, non-root, index in /data -----------------
