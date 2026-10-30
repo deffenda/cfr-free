@@ -1276,25 +1276,37 @@ describe('the workflow files — what the merge gate runs', () => {
     // (measured 2026-10-29: a depth-1 clone of the public repository
     // reports zero tags, so the guard's loop never ran). The jobs that
     // run the gate must therefore check out the full history and its tags.
-    const gateJobs = [
-      { file: 'ci.yml', job: 'quality' },
-      { file: 'release.yml', job: 'ci' },
-    ];
-    for (const target of gateJobs) {
-      const file = workflowFiles.find((entry) => entry.name === target.file);
-      expect(file, `no workflow file named ${target.file}`).toBeDefined();
-      if (file === undefined) continue;
-      const job = workflowJobs(readFileSync(file.path, 'utf8')).find(
-        (entry) => entry.name === target.job,
-      );
-      expect(job, `${target.file} has no ${target.job} job`).toBeDefined();
-      const depth = job === undefined ? undefined : checkoutFetchDepth(job.lines.join('\n'));
-      expect(
-        depth,
-        `${target.file}: the ${target.job} job must check out with fetch-depth: 0 — a shallow ` +
-          'checkout carries no tags, which leaves the release guard asserting nothing',
-      ).toBe('0');
+    //
+    // The job list is DERIVED from the workflows, not named: the jobs
+    // whose run values invoke the shared gate are read out of the files
+    // themselves (`workflowGateConsumers`), so a gate job added later —
+    // one that checks out shallow — fails HERE instead of leaving the
+    // release guard vacuous in that job. Naming the two jobs the
+    // workflows happen to have today would guard those two and nothing
+    // else.
+    let checked = 0;
+    for (const file of workflowFiles) {
+      const text = readFileSync(file.path, 'utf8');
+      const gateJobs = [...new Set(workflowGateConsumers(text).map((entry) => entry.job))];
+      for (const name of gateJobs) {
+        const job = workflowJobs(text).find((entry) => entry.name === name);
+        expect(job, `${file.name} has no ${name} job`).toBeDefined();
+        const depth = job === undefined ? undefined : checkoutFetchDepth(job.lines.join('\n'));
+        expect(
+          depth,
+          `${file.name} job ${name} must check out with fetch-depth: 0 — a shallow ` +
+            'checkout carries no tags, which leaves the release guard asserting nothing',
+        ).toBe('0');
+        checked += 1;
+      }
     }
+    // The guard passes on nothing if the parser saw no gate job at all:
+    // a change that hides every run value would leave the loop empty
+    // and this test green.
+    expect(
+      checked,
+      'no gate job found in any workflow — this guard passes on nothing',
+    ).toBeGreaterThan(0);
   });
 
   it('reads the checkout depth from the checkout step, not a later step', () => {
@@ -1325,6 +1337,17 @@ describe('the workflow files — what the merge gate runs', () => {
       '          fetch-depth: 0',
     ].join('\n');
     expect(checkoutFetchDepth(namedCheckout)).toBeUndefined();
+
+    // A checkout with no `fetch-depth` as the LAST step of a job: no
+    // later step ends the scan, so it falls through to the end of the
+    // job — a path the cases above never reach.
+    const lastStepCheckout = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - uses: actions/checkout@abc123',
+    ].join('\n');
+    expect(checkoutFetchDepth(lastStepCheckout)).toBeUndefined();
 
     const fullHistory = [
       'jobs:',

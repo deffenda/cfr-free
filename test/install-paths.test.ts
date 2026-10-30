@@ -64,10 +64,20 @@ type VersionTriple = readonly [number, number, number];
 
 // A strict three-part version, with no leading zeros — `v01.2.3` and
 // `v1.2.3` would otherwise be the same version to `Number()`, and two tags
-// would claim it.
-const VERSION_PATTERN = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+// would claim it. A pre-release part (`-rc.1`) is part of the version's
+// shape: the release workflow's own `test "$TAG" = "$PKG"` accepts it as
+// long as the manifest declares the very same version.
+const VERSION_PATTERN = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+|)$/;
 /** A release tag: `v` plus a strict three-part version. */
 const RELEASE_TAG_PATTERN = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+/**
+ * A pre-release tag: `v` plus a strict three-part version and a
+ * pre-release part. It is not a release — it claims no version — but it
+ * is a thing a repository can legitimately have.
+ */
+const PRE_RELEASE_TAG_PATTERN = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-[0-9A-Za-z.-]+$/;
+/** A manifest version: three parts, no leading zeros, no `v` prefix. */
+const MANIFEST_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+|)$/;
 
 function parseVersion(raw: string): VersionTriple {
   const match = VERSION_PATTERN.exec(raw);
@@ -123,6 +133,29 @@ function manifestVersionAt(tag: string): string {
   return typeof parsed.version === 'string' ? parsed.version : '';
 }
 
+/**
+ * What the guard requires of the tag a release run is on, given the
+ * version the manifest declares: the findings, empty when they agree.
+ *
+ * A RELEASE tag (`vX.Y.Z`) claims the version — the manifest must be
+ * exactly it, the invariant `release.yml` enforces — so a disagreement is
+ * a finding. A PRE-RELEASE tag (`vX.Y.Z-rc.N`) is legitimate and claims
+ * no version (the rule `parseReleaseTags` already applies to the tag
+ * list), so it is no finding whatever the manifest declares. A tag that
+ * is not a version at all — `vnext`, or `v01.2.3` with its leading zero
+ * — is a finding.
+ */
+function releasingTagFindings(tag: string, version: string): string[] {
+  if (RELEASE_TAG_PATTERN.test(tag)) {
+    return tag.slice(1) === version
+      ? []
+      : [`the releasing tag ${tag} and the manifest version ${version} disagree`];
+  }
+  if (PRE_RELEASE_TAG_PATTERN.test(tag)) return [];
+  return [
+    `${tag} is not a release version — a release tag is vX.Y.Z, optionally with a pre-release part (vX.Y.Z-rc.N)`,
+  ];
+}
 describe('the npm manifest', () => {
   it('builds on prepare, so a git install ships a working binary', () => {
     // npm runs `prepare` when a package is installed from a git URL, and
@@ -616,6 +649,39 @@ describe('the release guard', () => {
     expect(parseReleaseTags(['v0.2.1'])[0]?.version).toEqual([0, 2, 1]);
   });
 
+  it('judges the releasing tag by the same version rule as the tag list', () => {
+    // A RELEASE tag claims the version, so the manifest must be exactly
+    // it; a PRE-RELEASE tag is legitimate and claims no version, so it is
+    // no finding whatever the manifest declares; a tag that is not a
+    // version at all is a finding. The two patterns used to disagree — the
+    // releasing tag was matched against a looser `/^v\d+\.\d+\.\d+$/`, so
+    // `v01.2.3` passed a check the rest of the guard rejects.
+    expect(releasingTagFindings('v0.2.2', '0.2.2')).toEqual([]);
+    expect(releasingTagFindings('v0.2.2', '0.2.3').join(' ')).toContain('disagree');
+    expect(releasingTagFindings('v0.3.0-rc.1', '0.3.0-rc.1')).toEqual([]);
+    expect(releasingTagFindings('v0.3.0-rc.1', '0.3.0')).toEqual([]);
+    // The message matters, not only its count: a tag with a leading zero
+    // is refused as NOT a version, which is a different finding from a
+    // tag that is a version the manifest does not declare.
+    expect(releasingTagFindings('v01.2.3', '0.1.3').join(' ')).toContain('not a release version');
+    expect(releasingTagFindings('vnext', '0.1.0').join(' ')).toContain('not a release version');
+  });
+
+  it('accepts a pre-release version in the manifest, and nothing looser', () => {
+    // A pre-release release publishes the tag `v0.3.0-rc.1` only when the
+    // manifest declares that very version, so a manifest that cannot hold
+    // one would fail here before such a release could run at all. A `v`
+    // prefix and a leading zero stay refused: npm rejects them, and
+    // `Number('01')` is `1`, so `01.2.3` would collide with `1.2.3`.
+    expect('0.3.0-rc.1').toMatch(MANIFEST_VERSION_PATTERN);
+    expect('v0.3.0').not.toMatch(MANIFEST_VERSION_PATTERN);
+    expect('01.2.3').not.toMatch(MANIFEST_VERSION_PATTERN);
+    expect('0.3.0').toMatch(MANIFEST_VERSION_PATTERN);
+    // The comparable triple of a pre-release version is the release part:
+    // `0.3.0-rc.1` is compared as `0.3.0`.
+    expect(parseVersion('0.3.0-rc.1')).toEqual([0, 3, 0]);
+  });
+
   it('has the tags it needs to judge the version', () => {
     // Every check below reads the tag list, so an EMPTY tag list makes them
     // vacuous — they would all pass while asserting nothing. That is not a
@@ -663,16 +729,23 @@ describe('the release guard', () => {
     // failure above).
     const manifest = readManifest();
     const version = manifest.version ?? '';
-    expect(version).toMatch(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
+    // A pre-release version is allowed: the release workflow publishes a
+    // pre-release tag (`v0.3.0-rc.1`) only when the manifest declares
+    // that very version, and a manifest that cannot hold it would make
+    // every pre-release release fail here first.
+    expect(version).toMatch(MANIFEST_VERSION_PATTERN);
     const current = parseVersion(version);
 
     const releasingTag =
       process.env.GITHUB_REF_TYPE === 'tag' ? (process.env.GITHUB_REF_NAME ?? '') : '';
     if (releasingTag) {
       // On the release run itself the manifest must be exactly the tag being
-      // released — the invariant the workflow enforces.
-      expect(releasingTag).toMatch(/^v\d+\.\d+\.\d+$/);
-      expect(version).toBe(releasingTag.slice(1));
+      // released — the invariant the workflow enforces — unless the tag is
+      // a pre-release, which claims no version.
+      expect(
+        releasingTagFindings(releasingTag, version),
+        'the releasing tag and the manifest must agree',
+      ).toEqual([]);
     }
 
     const tags = versionTags();
