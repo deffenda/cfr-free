@@ -42,10 +42,12 @@ import { describe, expect, it } from 'vitest';
  * instead of in a stranger's terminal.
  *
  * The file list is read from the repository root, so this test asserts on
- * the TEXT of four other files (`package.json`, `src/cli.ts`, `Dockerfile`,
- * `scripts/prepare.mjs`). That is deliberate: each assertion below is about
- * an INTER-FILE contract that no single-file test can see, and each names
- * the file it reads.
+ * the TEXT of nine other files (`package.json`, `src/cli.ts`,
+ * `scripts/prepare.mjs`, `scripts/copy-assets.mjs`, `Dockerfile`, `ci.yml`,
+ * `release.yml`, `live-e2e.yml`, `src/titan/ui.ts`; plus the repository's tag
+ * history). That is deliberate: each assertion below is about an INTER-FILE
+ * contract that no single-file test can see, and each names the file it
+ * reads.
  */
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -691,6 +693,16 @@ describe('the build copies the UI assets', () => {
     expect(build, 'the build must run the asset copy').toContain('copy-assets.mjs');
 
     const uiModule = readRepoFile('src/titan/ui.ts');
+    // The UI module must read the browser script from a FILE. If the script
+    // were re-inlined into this module as a template literal while
+    // `src/titan/ui-client.js` stayed on disk, the read below would stop
+    // naming the script, the copy-list loop would no longer cover it, and
+    // the linter would keep checking the clean file on disk while the
+    // browser got the inlined one — the whole gate green over a defective
+    // script. The file must still be the source of the served bytes.
+    expect(uiModule, 'the UI module must read the browser script from a file').toContain(
+      "readAsset('ui-client.js')",
+    );
     const read = [...uiModule.matchAll(/readAsset\('([^']+)'\)/g)].map((match) => match[1] ?? '');
     expect(
       read.length,
