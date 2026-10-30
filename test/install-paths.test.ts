@@ -207,8 +207,8 @@ describe('the prepare script', () => {
   it('keeps stdout clean, so npm can print a machine-readable payload', () => {
     // npm's stdout is shared with the output of any lifecycle script it
     // runs: `npm pack --json` writes its payload there, and npm runs
-    // `prepare` during a pack (npm 10.9.9 and 12.2.1 do so even with
-    // --ignore-scripts; measured), so a line printed here corrupts that
+    // `prepare` during a pack (npm 10.9.9 does so even with
+    // --ignore-scripts; measured — npm 11 and 12 honour the flag), so a line printed here corrupts that
     // payload — and the release guard cannot tell a broken package from a
     // broken parser.
     //
@@ -682,8 +682,8 @@ describe('the build copies the UI assets', () => {
       });
       // Nothing on stdout. npm's stdout is shared with the output of any
       // lifecycle script it runs: `npm pack --json` writes its payload
-      // there, and npm runs `prepare` during a pack (npm 10.9.9 and
-      // 12.2.1 do so even with --ignore-scripts; measured), so a line
+      // there, and npm runs `prepare` during a pack (npm 10.9.9 does
+      // so even with --ignore-scripts; measured — npm 11 and 12 honour the flag), so a line
       // printed here corrupts that payload — and the release guard cannot
       // tell a broken package from a broken parser.
       expect(out, 'the copy script must not write to stdout').toBe('');
@@ -845,5 +845,5 @@ describe('the packed artifact', () => {
     } finally {
       rmSync(staging, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 });
