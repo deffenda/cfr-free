@@ -90,6 +90,20 @@ describe('parseArgs', () => {
     expect(() => parseArgs(['sync', 'extra'])).toThrow(/unexpected arguments/);
   });
 
+  it('rejects an unknown command even when it asks for help', () => {
+    // The `--help` flag is answered BEFORE the command's own parser, so
+    // the command has to be a KNOWN one: `cfr-free bogus --help` must say
+    // the command is unknown, not print a usage block with no entry in
+    // it and exit 0. The set of known commands is load-bearing here, and
+    // nothing else pinned it — dropping the membership test left every
+    // other CLI test green.
+    expect(() => parseArgs(['bogus', '--help'])).toThrow(/unknown command/);
+    expect(() => parseArgs(['bogus', '-h'])).toThrow(/unknown command/);
+    // A KNOWN command still gets its own usage — the membership test
+    // rejects the unknown one, it does not reject the flag.
+    expect(parseArgs(['search', '--help'])).toEqual({ command: 'help', topic: 'search' });
+  });
+
   it('rejects export without exactly one target', () => {
     expect(() => parseArgs(['export'])).toThrow(/exactly one target path/);
     expect(() => parseArgs(['export', '-o'])).toThrow(/exactly one target path/);
@@ -225,6 +239,18 @@ describe('main', () => {
     const code = await main(['bogus'], io);
     expect(code).toBe(2);
     expect(err.join('')).toContain('unknown command');
+  });
+
+  it('returns exit code 2 for an unknown command that asks for help', async () => {
+    // The exit code and the message are the whole point: a user who
+    // mistypes a command and asks for help must be told the command does
+    // not exist, not handed a usage block with no entry for it and a
+    // success status.
+    const { out, err, io } = makeIo();
+    const code = await main(['bogus', '--help'], io);
+    expect(code).toBe(2);
+    expect(err.join('')).toContain('unknown command');
+    expect(out.join(''), 'an unknown command must not print a usage block').toBe('');
   });
 
   it('returns exit code 2 for configuration errors', async () => {

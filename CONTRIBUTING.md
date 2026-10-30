@@ -14,8 +14,9 @@ npm run ci      # the same gate CI runs
 Requires Node ≥ 22.5.
 
 The local gate also needs `actionlint` on PATH — `npm run ci` runs
-`npm run lint:actions`. Install it with `brew install actionlint` or
-`go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12`.
+`npm run lint:actions`. Install the version CI installs — v1.7.12, and by
+COMMIT: `go install github.com/rhysd/actionlint/cmd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca`;
+`brew install actionlint` also works, but its release must be v1.7.12.
 
 Nothing else is needed: the OpenAPI contract suite parses `docs/openapi.yaml`
 with the `yaml` package from this repository's own devDependencies, so no

@@ -151,12 +151,28 @@ jobs:
     # and one more: `--config auto` reads semgrep's rule registry, which is
     # upstream-mutable. A merge floor that depends on a rule set the
     # repository does not pin is a floor that can move under it.
+    #
+    # The scanner runs from the PUBLISHED CONTAINER IMAGE, pinned by
+    # digest — the same scanner the local sweep in `tools/security-scan.sh`
+    # runs, in the job shape semgrep documents for CI. `semgrep/semgrep` is
+    # the CLI's repository, NOT a GitHub Action: it publishes no action
+    # manifest, so `uses: semgrep/semgrep@<sha>` names a repository GitHub
+    # cannot run an action from (verified 2026-10-30: the referenced commit
+    # has no action.yml — HTTP 404 — and the job that referenced it
+    # reported green while scanning nothing).
+    #
+    # The container is JOB-level: GitHub's workflow schema has no
+    # step-level `container` key (`actionlint` rejects one), so the whole
+    # job runs in the image — the checkout included, which is why the image
+    # needs git.
+    container:
+      image: semgrep/semgrep@sha256:2e45517a85e13a9cca14a2a00df6bb48affd66b8ebfae1b0991cd57578362fb0 # 1.183.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: semgrep (general static analysis)
-        uses: semgrep/semgrep@4fe07d805dd2a4b64fed486e95136923f08648d0 # v1.183.0
-        with:
-          config: auto
+        # The same invocation the local sweep runs, so CI and `npm run
+        # scan` say the same thing about the same tree.
+        run: semgrep scan --config auto --error --quiet
 
   docker:
     name: docker

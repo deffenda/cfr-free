@@ -17,11 +17,14 @@
  *    package's own gate says;
  *  - every action is pinned to a commit SHA — a linter does not care what
  *    an action is pinned to;
+ *  - every action reference names an ALLOWLISTED repository, and every
+ *    container image is pinned by digest — a pin says the COMMIT is
+ *    fixed, not that the repository is an action at all;
  *  - the pinned actionlint install is in an EARLIER STEP than the gate
- *    that shells out to it, and GOPATH's bin dir is on PATH for the steps
- *    that follow — `GITHUB_PATH` applies to later steps only, so a fold
- *    that puts them in one step dies with `actionlint: command not found`
- *    however it is ordered inside it;
+ *    that shells out to it, AND than any step that runs actionlint by
+ *    absolute GOPATH path — `GITHUB_PATH` applies to later steps only, so
+ *    a fold that puts them in one step dies with `actionlint: command not
+ *    found` however it is ordered inside it;
  *  - the checkout carries the tags and the history the release guard
  *    reads;
  *  - the workflow still produces every check branch protection requires.
@@ -41,6 +44,7 @@ import { parse as parseYaml } from 'yaml';
 
 const WORKFLOWS_DIR = fileURLToPath(new URL('../.github/workflows/', import.meta.url));
 const PACKAGE_PATH = fileURLToPath(new URL('../package.json', import.meta.url));
+const SECURITY_SCAN_PATH = fileURLToPath(new URL('../tools/security-scan.sh', import.meta.url));
 
 // ---------------------------------------------------------------------------
 // The workflows, parsed.
@@ -67,6 +71,8 @@ interface Job {
   readonly steps: readonly Step[];
   /** The job's matrix, when it has one. */
   readonly matrix: Record<string, unknown> | undefined;
+  /** The container image the job runs in, when it names one. */
+  readonly image: string | undefined;
 }
 
 /** One workflow file, parsed. */
@@ -88,6 +94,19 @@ interface RawJob {
   readonly name?: string;
   readonly steps?: readonly RawStep[];
   readonly strategy?: { readonly matrix?: Record<string, unknown> };
+  readonly container?: string | { readonly image?: string };
+}
+
+/**
+ * The image a job's `container:` names — a bare string, or a mapping
+ * with an `image:` key. Undefined when the job names no container.
+ *
+ * The container is a JOB-level key: GitHub's workflow schema has no
+ * step-level `container`, so a step cannot name an image of its own.
+ */
+function containerImage(container: RawJob['container']): string | undefined {
+  if (typeof container === 'string') return container;
+  return container?.image;
 }
 
 /** Parse one workflow file into its jobs and steps. */
@@ -104,6 +123,7 @@ function loadWorkflow(file: string): Workflow {
       with: step.with ?? {},
     })),
     matrix: job.strategy?.matrix,
+    image: containerImage(job.container),
   }));
   return { file, text, jobs };
 }
@@ -136,6 +156,47 @@ function jobOf(workflow: Workflow, key: string): Job | undefined {
  * subdirectory (`google/osv-scanner-action/osv-scanner-action`).
  */
 const PINNED_ACTION = /^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/;
+
+/**
+ * The action repositories the workflows may reference.
+ *
+ * A SHA pin says the COMMIT is fixed; it says nothing about whether the
+ * repository is an action at all. `semgrep/semgrep` is the semgrep CLI's
+ * repository: it publishes no action manifest, so `uses: semgrep/semgrep@
+ * <sha>` names a repository GitHub cannot run an action from — the job
+ * that referenced it reported green while scanning nothing (the pinned
+ * commit has no action.yml; HTTP 404, verified 2026-10-30). A repository
+ * that is not an action is not on this list, so the reference fails the
+ * check instead of the run.
+ *
+ * The repository is the first TWO segments of the reference: an action
+ * that lives in a subdirectory of its repository (`google/osv-scanner-
+ * action/osv-scanner-action`) is still that repository.
+ */
+const ALLOWED_ACTIONS = new Set([
+  'actions/attest-build-provenance',
+  'actions/checkout',
+  'actions/setup-node',
+  'actions/upload-artifact',
+  'aquasecurity/trivy-action',
+  'docker/build-push-action',
+  'docker/login-action',
+  'docker/metadata-action',
+  'docker/setup-buildx-action',
+  'docker/setup-qemu-action',
+  'gitleaks/gitleaks-action',
+  'google/osv-scanner-action',
+]);
+
+/**
+ * A container image pinned by digest: `name@sha256:<64 hex>`.
+ *
+ * A tag (`semgrep/semgrep:1.183.0`) moves under the pin exactly the way
+ * an action tag does — the image behind the tag can be replaced, and the
+ * version in the comment is then a claim about a moment. The digest
+ * names the image.
+ */
+const DIGEST_PINNED_IMAGE = /^[\w][\w./-]*@sha256:[0-9a-f]{64}$/;
 
 /**
  * The actionlint COMMIT every workflow install pins.
@@ -184,6 +245,13 @@ const REQUIRED_CHECKS = ['quality (22)', 'quality (24)', 'security', 'actionlint
  * finding it can raise is a missing install, never a skipped gate.
  */
 const GATE_COMMAND = /(?:^|[\s;&|(`'"])npm run\s+(?:ci|lint:actions)(?![\w:.-])/;
+
+/**
+ * The gate command as TEXT, without the "in command position" rule: the
+ * question this answers is only whether a workflow NAMES the gate at all,
+ * so a mention in a comment counts.
+ */
+const GATE_NAMED = /npm run\s+(?:ci|lint:actions)(?![\w:.-])/;
 
 /**
  * A command appending GOPATH's bin dir to GITHUB_PATH: the echoed content
@@ -275,6 +343,54 @@ function installSteps(job: Job): number[] {
   return found;
 }
 
+/**
+ * The repository an action reference names: the first TWO segments before
+ * the `@`, because an action that lives in a subdirectory of its
+ * repository is still that repository.
+ */
+function actionRepository(uses: string): string {
+  const before = uses.split('@')[0] ?? '';
+  return before.split('/').slice(0, 2).join('/');
+}
+
+/** The steps of a job that run the shared gate. */
+function gateConsumerSteps(job: Job): number[] {
+  const found: number[] = [];
+  job.steps.forEach((step, index) => {
+    if (GATE_COMMAND.test(step.run ?? '')) found.push(index);
+  });
+  return found;
+}
+
+/** The command a step runs, trimmed, or the empty string. */
+function runOf(step: Step | undefined): string {
+  return step?.run?.trim() ?? '';
+}
+
+/**
+ * The semgrep invocation the local sweep runs, as text: the arguments
+ * after `semgrep` on the sweep's own semgrep line.
+ */
+function localSemgrepScan(): string {
+  const script = readFileSync(SECURITY_SCAN_PATH, 'utf8');
+  return /semgrep (scan --config[^\n]*)/.exec(script)?.[1]?.trim() ?? '';
+}
+
+/**
+ * The text before the first parenthesis that is not inside backticks — a
+ * check name may carry one of its own (`quality (22)`), and the list
+ * ends where the parenthetical begins.
+ */
+function beforeParenthetical(text: string): string {
+  let inCode = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '`') inCode = !inCode;
+    else if (!inCode && char === '(') return text.slice(0, index);
+  }
+  return text;
+}
+
 // ---------------------------------------------------------------------------
 // The checks.
 // ---------------------------------------------------------------------------
@@ -325,6 +441,62 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
       }
     }
     expect(findings, 'a job runs the gate without actionlint on PATH').toEqual([]);
+  });
+
+  it('installs the pinned actionlint before any job runs it by absolute GOPATH path', () => {
+    // Silent failure this prevents: an actionlint run by ABSOLUTE path
+    // (`"$(go env GOPATH)/bin/actionlint"`) reads no PATH, so the
+    // GITHUB_PATH echo does not apply to it — but the BINARY still has to
+    // have been installed by an EARLIER step, or the step dies with "No
+    // such file or directory". This is the rule the gate-consumer rule
+    // above applies, for the other spelling of the same invocation; it
+    // used to be there and was dropped when the guard was rewritten.
+    const findings: string[] = [];
+    let seen = 0;
+    for (const workflow of workflowFiles) {
+      for (const job of workflow.jobs) {
+        const absolute = job.steps.findIndex((step) => ACTIONLINT_BY_PATH.test(step.run ?? ''));
+        if (absolute === -1) continue;
+        seen += 1;
+        const installs = installSteps(job).filter((index) => index < absolute);
+        if (installs.length === 0) {
+          findings.push(
+            `${workflow.file}: job \`${job.key}\`: GOPATH-path actionlint with no pinned install before it`,
+          );
+        }
+      }
+    }
+    expect(seen, 'no GOPATH-path actionlint found — this guard passes on nothing').toBeGreaterThan(
+      0,
+    );
+    expect(
+      findings,
+      'a job runs actionlint by absolute path with no pinned install before it',
+    ).toEqual([]);
+  });
+
+  it('sees a gate consumer in every workflow that names the gate', () => {
+    // Silent failure this prevents: the rules above — the install order,
+    // the GITHUB_PATH echo — hold NOTHING when the guard sees no gate
+    // consumer at all. A detection rule that stopped matching `npm run ci`
+    // would leave every rule below it holding nothing and the whole file
+    // green. The count is asserted per workflow: a workflow that NAMES
+    // the gate must SHOW a consumer, and one that never names it must
+    // show none.
+    for (const workflow of workflowFiles) {
+      const consumers = workflow.jobs.reduce(
+        (count, job) => count + gateConsumerSteps(job).length,
+        0,
+      );
+      if (!GATE_NAMED.test(workflow.text)) {
+        expect(
+          consumers,
+          `${workflow.file}: the guard found a gate consumer in a workflow that names none`,
+        ).toBe(0);
+        continue;
+      }
+      expect(consumers, `${workflow.file}: no gate consumer seen`).toBeGreaterThan(0);
+    }
   });
 
   it('installs one identical actionlint version everywhere it is installed', () => {
@@ -379,6 +551,45 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
       pinned,
       'no pinned actionlint install found — this guard passes on nothing',
     ).toBeGreaterThan(0);
+  });
+
+  it('names the pinned actionlint commit in AGENTS.md and CONTRIBUTING.md', () => {
+    // The local gate and CI have to lint the same way, so the version the
+    // docs tell a developer to install has to be the one the workflows
+    // install. The workflows pin the COMMIT, so the docs name the commit
+    // too: a retagged release would otherwise be what a developer
+    // installs and what CI refuses to run — and the two would differ
+    // silently, because both read as "v1.7.12".
+    for (const file of ['AGENTS.md', 'CONTRIBUTING.md']) {
+      const text = readFileSync(fileURLToPath(new URL(`../${file}`, import.meta.url)), 'utf8');
+      expect(text, `${file} must name the actionlint commit the workflows install`).toContain(
+        `actionlint@${ACTIONLINT_COMMIT}`,
+      );
+    }
+  });
+
+  it('names every required check in docs/SPEC.md', () => {
+    // SPEC.md is the design authority, and it named THREE of the FOUR
+    // checks branch protection requires — the same under-statement the
+    // merge floor had in AGENTS.md. The list is the four, and this keeps
+    // the specification in step with the merge floor it documents.
+    const spec = readFileSync(fileURLToPath(new URL('../docs/SPEC.md', import.meta.url)), 'utf8');
+    const line = spec
+      .split('\n')
+      .find((entry) => entry.includes('Branch protection on') && entry.includes('required checks'));
+    expect(line, 'docs/SPEC.md must state the required checks').toBeDefined();
+    // The LIST, not the sentence: `security` and `actionlint` are named
+    // again in the parenthetical, and `docker` is named as NOT required.
+    const after = (line ?? '').split('required checks ')[1] ?? '';
+    const list = beforeParenthetical(after);
+    const named = list
+      .split(/, |\+ /)
+      .map((part) => /`([^`]+)`/.exec(part)?.[1] ?? '')
+      .filter((name) => name !== '')
+      .sort();
+    expect(named, 'docs/SPEC.md must name exactly the required checks').toEqual(
+      [...REQUIRED_CHECKS].sort(),
+    );
   });
 
   it('names every required check in AGENTS.md', () => {
@@ -462,6 +673,56 @@ describe('the workflow files — what the merge gate runs', () => {
     expect(pinned, 'no `uses:` step found — this guard passes on nothing').toBeGreaterThan(0);
   });
 
+  it('references only allowlisted action repositories', () => {
+    // Silent failure this prevents: a SHA pin says the COMMIT is fixed,
+    // not that the repository is an action at all — the semgrep job that
+    // referenced the CLI's repository as if it were an action reported
+    // green while scanning nothing. The allowlist catches that offline.
+    const findings: string[] = [];
+    let referenced = 0;
+    for (const workflow of workflowFiles) {
+      for (const job of workflow.jobs) {
+        for (const step of job.steps) {
+          if (step.uses === undefined) continue;
+          referenced += 1;
+          const repository = actionRepository(step.uses);
+          if (!ALLOWED_ACTIONS.has(repository)) {
+            findings.push(
+              `${workflow.file}: job \`${job.key}\`: \`${step.uses}\` is not an allowlisted action repository`,
+            );
+          }
+        }
+      }
+    }
+    expect(referenced, 'no `uses:` step found — this guard passes on nothing').toBeGreaterThan(0);
+    expect(findings, 'a workflow references an action repository outside the allowlist').toEqual(
+      [],
+    );
+  });
+
+  it('pins every container image by digest', () => {
+    // Silent failure this prevents: a container image pinned by TAG
+    // (`semgrep/semgrep:1.183.0`) moves under the pin exactly the way an
+    // action tag does — the image behind the tag can be replaced, and the
+    // version in the comment is then a claim about a moment rather than
+    // about the image. The digest names the image.
+    const findings: string[] = [];
+    let images = 0;
+    for (const workflow of workflowFiles) {
+      for (const job of workflow.jobs) {
+        if (job.image === undefined) continue;
+        images += 1;
+        if (!DIGEST_PINNED_IMAGE.test(job.image)) {
+          findings.push(
+            `${workflow.file}: job \`${job.key}\`: container image not pinned by digest — ${job.image}`,
+          );
+        }
+      }
+    }
+    expect(images, 'no container image found — this guard passes on nothing').toBeGreaterThan(0);
+    expect(findings, 'a container image is not pinned by digest').toEqual([]);
+  });
+
   it('keeps gitleaks and osv-scanner in the security job', () => {
     // Silent failure this prevents: the `security` job losing one of its
     // scanners. The check still reports, still passes, and branch
@@ -498,7 +759,27 @@ describe('the workflow files — what the merge gate runs', () => {
       .map((step) => step.uses ?? '')
       .join('\n');
     expect(refs, 'the trivy job does not run trivy').toContain('aquasecurity/trivy-action');
-    expect(refs, 'the semgrep job does not run semgrep').toContain('semgrep/semgrep');
+    // The semgrep job runs the scanner from the PUBLISHED CONTAINER
+    // IMAGE, pinned by digest — not from an action reference to the
+    // CLI's repository, which publishes no action manifest (the allowlist
+    // guard above is what keeps that out).
+    expect(semgrepJob?.image ?? '', 'the semgrep job does not run the semgrep image').toContain(
+      'semgrep/semgrep',
+    );
+    const semgrepStep = (semgrepJob?.steps ?? []).find((step) =>
+      (step.run ?? '').includes('semgrep scan'),
+    );
+    expect(semgrepStep, 'the semgrep job does not run a semgrep scan').toBeDefined();
+    // The same invocation the local sweep runs, so CI and `npm run scan`
+    // say the same thing about the same tree. Read from the script
+    // itself: two spellings of the same scan can drift into scanning
+    // different things, and the drift would be invisible.
+    const localScan = localSemgrepScan();
+    expect(localScan, 'tools/security-scan.sh no longer runs a semgrep scan').not.toBe('');
+    expect(
+      runOf(semgrepStep),
+      'the CI semgrep scan must be the invocation the local sweep runs',
+    ).toBe(`semgrep ${localScan}`);
     // The same scan the local sweep runs: the tree for dependencies,
     // secrets and misconfiguration.
     const with_ = trivy?.steps.find((step) => step.uses?.includes('trivy-action'));

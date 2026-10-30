@@ -208,6 +208,25 @@ describe('the prepare script', () => {
     expect(script, 'the install must not suppress its own audit').not.toMatch(/'--no-audit'/);
   });
 
+  it('selects the locked install at the call site, not only in the prose', () => {
+    // The claim the previous test made was about a PREFERENCE: the locked
+    // install is the one the script picks. Checking that the token `'ci'`
+    // appears somewhere in the file does not check that — the token is in
+    // the prose, and the preference is in a conditional. Inverting the
+    // conditional (`locked ? runInstall(env) : runLockedInstall(env)`), or
+    // replacing the locked call outright, left the old assertion green
+    // while the code did the opposite of what it claimed.
+    //
+    // So the assertion is against the CALL SITE: the conditional that
+    // selects the locked install, and the locked install's own command.
+    expect(script, 'the locked install must be the one the preference selects').toMatch(
+      /locked\s*\?\s*runLockedInstall\(env\)\s*:\s*runInstall\(env\)/,
+    );
+    // The locked install is `npm ci`, as an ARGUMENT: the prose may name
+    // any command it likes.
+    expect(script, 'the locked install must be `npm ci`').toMatch(/run\('npm', \['ci',/);
+  });
+
   it('guards against the fallback install recursing into itself', () => {
     // npm runs `prepare` on every install, so the fallback's own
     // `npm install` would run this script again, which would start another
