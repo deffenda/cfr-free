@@ -1123,16 +1123,31 @@ const BARE_SYMBOL_RE = /^[A-Za-z_$][\w$]*$/;
 /**
  * An inline `file#symbol` anchor in the document's prose.
  *
- * The file part must be a PATH inside the repository — a directory as well
- * as a file — and it must end in a SOURCE or ASSET extension. Without the
- * first, a link with a word fragment (`example.com#intro`) would be read
- * as an anchor, and the suite would fail on a link rather than on a
- * citation. Without the second, a citation of a file the suite cannot
- * read would be skipped in silence — the defect this suite exists to
- * catch.
+ * The file part must name a SOURCE module — a TypeScript or JavaScript
+ * file, whose symbols the resolver can resolve. An anchor whose file is
+ * a document (`README.md`, `openapi.yaml`) or an asset
+ * (`ui-client.css`) names a heading or a rule, not a declaration, and
+ * the resolver would report it as a violation the moment the document
+ * cited one: those extensions are not read as anchors at all.
+ *
+ * The file part must ALSO resolve inside the repository, and that is
+ * what tells a citation (`src/titan/http-server.ts#sendJson`) from a
+ * link with a fragment (`example.com/index.html#intro`). The rule is
+ * applied where the file is resolved — see `anchorIsCitation`.
  */
-const INLINE_ANCHOR_RE =
-  /((?=[\w./-]*\/)[\w./-]+\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json|ya?ml|md|css|html|htm))#([A-Za-z_$][\w$]*)/g;
+const INLINE_ANCHOR_RE = /([\w./-]+\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs))#([A-Za-z_$][\w$]*)/g;
+
+/**
+ * Whether an inline anchor is a citation or a link.
+ *
+ * An anchor whose file does not resolve INSIDE the repository is a
+ * link: a URL with a fragment in the prose must not fail the gate.
+ * An anchor whose file resolves but does not exist is a stale claim,
+ * and the check says so — the two are not the same fact.
+ */
+function anchorIsCitation(file: string): boolean {
+  return citedFilePath(file) !== null;
+}
 
 /** One symbol a citation names, and the file it must be defined in. */
 interface CitedSymbol {
@@ -1250,6 +1265,43 @@ function readSegment(
     symbols.push({ file: inherited, symbol: text, wellFormed: false });
   }
   return { symbols, segments, file: inherited };
+}
+
+/**
+ * The route-binding violation for a cited symbol, or null when the
+ * binding checks out.
+ *
+ * The binding is asked only of the ROUTER: it is a claim about the
+ * router's dispatch, and a citation of another file's symbol is not a
+ * claim about a route — asking it reported "the router has no path
+ * constant" for a file that was never the router.
+ */
+function checkRouteBindingFor(
+  file: string,
+  where: string,
+  source: string,
+  path: string,
+  symbol: string,
+): string | null {
+  if (!isRouterFile(file)) return null;
+  return checkRouteBinding(where, source, path, symbol);
+}
+
+/**
+ * The violation for one cited symbol, or null when it checks out.
+ */
+function checkCitedSymbol(
+  where: string,
+  file: string,
+  symbol: string,
+  path: string | null,
+): string | null {
+  const violation = checkCitation(where, file, symbol);
+  if (violation !== null) return violation;
+  if (path === null) return null;
+  const source = citedSource(file);
+  if (source === null) return null;
+  return checkRouteBindingFor(file, where, source, path, symbol);
 }
 
 /**
@@ -1692,19 +1744,8 @@ describe('OpenAPI source citations (docs/openapi.yaml # source: lines)', () => {
           violations.push(`${where} — not a symbol reference`);
           continue;
         }
-        const violation = checkCitation(where, cited.file, cited.symbol);
-        if (violation !== null) {
-          violations.push(violation);
-          continue;
-        }
-        if (path === null) continue;
-        // The route binding is a claim about the ROUTER's dispatch. A
-        // citation of another file's symbol is not a claim about a
-        // route, so it is not judged against one.
-        if (!isRouterFile(cited.file)) continue;
-        const source = readFileSync(citedFilePath(cited.file) ?? '', 'utf8');
-        const bound = checkRouteBinding(where, source, path, cited.symbol);
-        if (bound !== null) violations.push(bound);
+        const violation = checkCitedSymbol(where, cited.file, cited.symbol, path);
+        if (violation !== null) violations.push(violation);
       }
     }
     expect(citations, 'docs/openapi.yaml must contain # source: citations').toBeGreaterThan(0);
@@ -1723,6 +1764,10 @@ describe('OpenAPI source citations (docs/openapi.yaml # source: lines)', () => {
     const anchors = inlineAnchorsIn(specText);
     for (const anchor of anchors) {
       const where = `docs/openapi.yaml:${anchor.line} cites ${anchor.file}#${anchor.symbol}`;
+      // An anchor whose file does not resolve inside the repository is a
+      // LINK, not a citation: a URL with a fragment in the prose must not
+      // fail the gate.
+      if (!anchorIsCitation(anchor.file)) continue;
       const violation = checkCitation(where, anchor.file, anchor.symbol);
       if (violation !== null) violations.push(violation);
     }
@@ -1883,6 +1928,17 @@ const MEMBER_FIXTURE = [
  */
 const SAME_NAME_FIXTURE = ['function handleSearch(): void {', '  sendJson();', '}', ''].join('\n');
 
+/**
+ * A source fixture that declares a symbol and holds NO path constant:
+ * a file that is not the router has no routes to bind a citation to.
+ */
+const NO_ROUTES_FIXTURE = [
+  'export function handleSearch(): string {',
+  '  return "search";',
+  '}',
+  '',
+].join('\n');
+
 describe('OpenAPI citation resolver: guards pinned against fixtures', () => {
   it("pins the route binding: a citation naming another route's handler is a violation", () => {
     // The router is the authority on which handler serves which route: it
@@ -1972,23 +2028,77 @@ describe('OpenAPI citation resolver: guards pinned against fixtures', () => {
     ).toBeNull();
   });
 
-  it('pins the inline anchor: a URL fragment is not an anchor, and a source file is', () => {
-    // The file part of an inline anchor must end in a SOURCE or ASSET
-    // extension: without that, a link with a word fragment
-    // (`example.com#intro`) would be read as an anchor, and the suite
-    // would fail on a link rather than on a citation. It must also name a
-    // PATH inside the repository — a bare filename names no place.
+  it('pins the inline anchor: a link is not a citation, and a source file is', () => {
+    // The file part of an inline anchor must name a SOURCE module — a
+    // TypeScript or JavaScript file, whose symbols the resolver can
+    // resolve. An anchor whose file is a document (`README.md`) or an
+    // asset (`ui-client.css`) names a heading or a rule, not a
+    // declaration, and the resolver would report it as a violation the
+    // moment the document cited one: those extensions are not read as
+    // anchors at all.
     //
-    // The list is wide enough for the repository's own assets: a citation
-    // of the stylesheet must not be skipped in silence.
+    // And an anchor whose file does not resolve INSIDE the repository is
+    // a LINK: a URL with a fragment must not fail the gate. A file that
+    // resolves but does not exist is a stale claim, and the check says
+    // so — the two are not the same fact.
+    //
+    // A source file at the repository's ROOT is a citation too: the
+    // rule is the FILE, not its depth.
     const spec = [
       'info:',
-      '  description: served by src/titan/http-server.ts#sendJson, styled by src/titan/ui-client.css#bodyRule',
+      '  description: served by src/titan/http-server.ts#sendJson, configured by vitest.config.ts#thresholds',
       '',
     ].join('\n');
-    expect(inlineAnchorsIn(spec).map((anchor) => anchor.symbol)).toEqual(['sendJson', 'bodyRule']);
+    expect(inlineAnchorsIn(spec).map((anchor) => anchor.symbol)).toEqual([
+      'sendJson',
+      'thresholds',
+    ]);
     const linked = ['info:', '  description: see example.com#intro for details', ''].join('\n');
     expect(inlineAnchorsIn(linked)).toEqual([]);
+    const asset = ['info:', '  description: styled by src/titan/ui-client.css#bodyRule', ''].join(
+      '\n',
+    );
+    expect(inlineAnchorsIn(asset)).toEqual([]);
+    // A link is not a citation; a missing file INSIDE the repository is a
+    // stale claim and stays one.
+    expect(anchorIsCitation('src/titan/http-server.ts')).toBe(true);
+    expect(anchorIsCitation('src/titan/missing.ts')).toBe(true);
+    expect(anchorIsCitation('example.com/index.ts')).toBe(true);
+    expect(anchorIsCitation(`/${'/'}example.com/index.ts`)).toBe(false);
+  });
+
+  it('pins the route binding: it is asked of the router alone', () => {
+    // The route binding is a claim about the ROUTER's dispatch. A
+    // citation of another file's symbol is not a claim about a route, so
+    // the check must not be asked of it: asking it reported "the router
+    // has no path constant" for a file that was never the router.
+    expect(
+      checkRouteBindingFor(
+        'src/core/service.ts',
+        'w',
+        NO_ROUTES_FIXTURE,
+        '/api/v1/search',
+        'handleSearch',
+      ),
+    ).toBeNull();
+    expect(
+      checkRouteBindingFor(
+        'src/titan/http-server.ts',
+        'w',
+        ROUTER_FIXTURE,
+        '/api/v1/search',
+        'handleSearch',
+      ),
+    ).toBeNull();
+    expect(
+      checkRouteBindingFor(
+        'src/titan/http-server.ts',
+        'w',
+        ROUTER_FIXTURE,
+        '/api/v1/section',
+        'handleSearch',
+      ),
+    ).not.toBeNull();
   });
 
   it('pins the wrapped citation: a wrapped pair is a citation, a wrapped bare word is prose', () => {
