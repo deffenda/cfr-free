@@ -85,8 +85,12 @@ describe('MCP server (in-memory transport)', () => {
     expect(result.structuredContent?.['total']).toBeGreaterThanOrEqual(2);
     const hits = result.structuredContent?.['hits'] as unknown[];
     expect(Array.isArray(hits)).toBe(true);
-    const parsed = JSON.parse(result.content[0]?.text ?? '{}') as { total: number };
-    expect(parsed.total).toBe(result.structuredContent?.['total']);
+    // The text channel is the same result rendered for a model — NOT a second
+    // JSON copy of the payload (CR-27).
+    const text = result.content[0]?.text ?? '';
+    expect(text).toContain('query: mental disorder');
+    expect(text).toContain(`total: ${String(result.structuredContent?.['total'])}`);
+    expect(text.trimStart().startsWith('{')).toBe(false);
   });
 
   it('search_regulations carries the term grounding', async () => {
@@ -854,8 +858,12 @@ describe('MCP diff_issues tool (ecfr injected)', () => {
         truncated: false,
         notice: POINT_IN_TIME_NOTICE,
       });
-      const parsed = JSON.parse(result.content[0]?.text ?? '{}') as Record<string, unknown>;
-      expect(parsed).toEqual(result.structuredContent);
+      const parsed = result.content[0]?.text ?? '';
+      expect(parsed).toContain(`fromIssueDate: ${FROM_DATE}`);
+      expect(parsed).toContain(`toIssueDate: ${TO_DATE}`);
+      expect(parsed).toContain('changed: 4.125');
+      expect(parsed).toContain('truncated: false');
+      expect(parsed.trimStart().startsWith('{')).toBe(false);
     } finally {
       await probe.close();
     }
@@ -1064,8 +1072,11 @@ describe('MCP redline tool (ecfr injected)', () => {
         coarse: false,
         notice: POINT_IN_TIME_NOTICE,
       });
-      const parsed = JSON.parse(result.content[0]?.text ?? '{}') as Record<string, unknown>;
-      expect(parsed).toEqual(result.structuredContent);
+      const parsed = result.content[0]?.text ?? '';
+      expect(parsed).toContain('status: changed');
+      expect(parsed).toContain('fromText: Original body.');
+      expect(parsed).toContain('toText: Amended body.');
+      expect(parsed.trimStart().startsWith('{')).toBe(false);
     } finally {
       await probe.close();
     }
@@ -1134,6 +1145,121 @@ describe('MCP redline tool (ecfr injected)', () => {
       expect(result.content[0]?.text).not.toContain('HTTP 404');
     } finally {
       await upstream.close();
+    }
+  });
+});
+
+/**
+ * The MCP surface's shared contracts (CR-18, CR-27, CR-28, CR-37, CR-38).
+ *
+ * Each is a property of the WHOLE surface, so each test drives the real
+ * server over the in-memory transport and asserts on the wire.
+ */
+describe('MCP surface contracts', () => {
+  /** An eCFR stub whose every fetch fails with a non-client-safe error. */
+  function stubEcfr(message: string): EcfrApi {
+    return {
+      getFullTitleXml: async () => {
+        throw new Error(message);
+      },
+    } as unknown as EcfrApi;
+  }
+
+  /** A service whose every method fails with a non-client-safe error. */
+  function failingService(message: string): CFRService {
+    return new Proxy({} as CFRService, {
+      get: () => () => {
+        throw new Error(message);
+      },
+    });
+  }
+
+  async function connect(
+    service: CFRService,
+    ecfr?: EcfrApi,
+  ): Promise<{ client: Client; close: () => Promise<void> }> {
+    const server = buildMcpServer(
+      service,
+      createTestLogger(),
+      ecfr === undefined ? undefined : { ecfr },
+    );
+    const client = new Client({ name: 'contract-probe', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    return {
+      client,
+      close: async () => {
+        await client.close();
+        await server.close();
+      },
+    };
+  }
+
+  it('sanitizes the failure of EVERY tool — one error contract (CR-18)', async () => {
+    const secret = 'INTERNAL-DETAIL-DO-NOT-LEAK';
+    const probe = await connect(failingService(secret), stubEcfr(secret));
+    try {
+      const calls: Array<[string, Record<string, unknown>]> = [
+        ['search_regulations', { query: 'mental disorder' }],
+        ['get_section', { citation: '4.125' }],
+        ['browse_title38', {}],
+        ['index_status', {}],
+        ['list_parts', {}],
+        ['health', {}],
+        ['get_section_at', { at_date: '2024-03-10', citation: '4.125' }],
+        ['diff_issues', { from_date: '2026-01-01', to_date: '2026-06-01' }],
+        ['redline', { from_date: '2026-01-01', to_date: '2026-06-01', citation: '4.125' }],
+      ];
+      // The list must cover every registered tool, or the contract is only
+      // proven for the ones it names.
+      const listed = (await probe.client.listTools()).tools.map((tool) => tool.name).sort();
+      expect(calls.map(([name]) => name).sort()).toEqual(listed);
+      expect(listed).toHaveLength(9);
+      for (const [name, args] of calls) {
+        const result = (await probe.client.callTool({ name, arguments: args })) as ToolCallResult;
+        expect(result.isError, name).toBe(true);
+        expect(result.content[0]?.text, name).toContain('Error: ');
+        expect(result.content[0]?.text, name).toContain('internal server error');
+        expect(result.content[0]?.text, name).not.toContain(secret);
+      }
+    } finally {
+      await probe.close();
+    }
+  });
+
+  it('renders a section result once — the text channel is prose, not a second copy (CR-27)', async () => {
+    const body = 'General rating principles apply to every claim under this part. '.repeat(40);
+    const seeded = openTempStore({
+      sections: [
+        makeSection({
+          citation: '4.125',
+          heading: 'Diagnosis of mental disorders.',
+          text: body,
+          markdown: `## Diagnosis of mental disorders.\n\n${body}`,
+        }),
+      ],
+    });
+    const probe = await connect(new CFRService(seeded.store, 7));
+    try {
+      const result = (await probe.client.callTool({
+        name: 'get_section',
+        arguments: { citation: '4.125' },
+      })) as ToolCallResult;
+      expect(result.isError).toBeFalsy();
+      const text = result.content[0]?.text ?? '';
+      // The body is rendered ONCE in the text channel: the two renderings of
+      // it (markdown and text) are not both shipped a second time.
+      expect(text.split(body).length - 1).toBe(1);
+      // It is prose, not a JSON dump of the payload.
+      expect(text.trimStart().startsWith('{')).toBe(false);
+      expect(text).toContain('citation: 4.125');
+      expect(text).toContain('heading: Diagnosis of mental disorders.');
+      // The structured channel still carries the whole payload.
+      expect(result.structuredContent?.['text']).toBe(body);
+      expect(result.structuredContent?.['markdown']).toContain(body);
+    } finally {
+      await probe.close();
+      seeded.cleanup();
     }
   });
 });

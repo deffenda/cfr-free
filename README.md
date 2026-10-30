@@ -264,8 +264,9 @@ printf '%s\n%s\n%s\n' \
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_section","arguments":{"citation":"38 C.F.R. § 4.130"}}}' \
   | node dist/cli.js mcp | tail -1 | head -c 120
-# -> {"result":{"content":[{"type":"text","text":"{\n  \"citation\": \"4.130\"...
-# (note: the DOTTED display citation resolves — P1-03)
+# -> {"result":{"content":[{"type":"text","text":"citation: 4.130\nkind: section\nheadi...
+# (note: the DOTTED display citation resolves — P1-03; the text channel is a
+#  human-readable rendering, the machine contract is `structuredContent`)
 
 # 6. export: the whole corpus, offline
 node dist/cli.js export /tmp/smoke.jsonl jsonl

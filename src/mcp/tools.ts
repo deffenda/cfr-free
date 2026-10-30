@@ -7,7 +7,7 @@ import type { EcfrApi } from '../core/ecfr.js';
 import { redlineSection } from '../core/redline.js';
 import { ARCHIVE_FLOOR, historicalSection } from '../core/historical.js';
 import type { CFRService } from '../core/service.js';
-import { clientSafeMessage } from './client-safe.js';
+import { renderToolText, runTool } from './tool-result.js';
 
 /**
  * MCP tool registrations. Every tool is read-only (never destructive,
@@ -228,10 +228,6 @@ type HealthOutput = z.infer<typeof healthOutputSchema>;
 type ChangeReportOutput = z.infer<typeof changeReportOutputSchema>;
 type RedlineOutput = z.infer<typeof redlineOutputSchema>;
 
-function textContent(payload: unknown): string {
-  return JSON.stringify(payload, null, 2);
-}
-
 /** Register all tools on the server; `deps.ecfr` gates the three eCFR-backed tools (get_section_at, diff_issues, redline). */
 export function registerTools(
   server: McpServer,
@@ -308,8 +304,8 @@ export function registerTools(
       outputSchema: searchOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async (args) => {
-      try {
+    async (args) =>
+      runTool(logger, 'search_regulations', async () => {
         const response = service.search({
           query: args.query,
           page: args.page,
@@ -325,19 +321,10 @@ export function registerTools(
           hits: response.hits.map((hit) => ({ ...hit, matches: [...hit.matches] })),
         };
         return {
-          content: [{ type: 'text', text: textContent(structuredContent) }],
+          content: [{ type: 'text', text: renderToolText(structuredContent) }],
           structuredContent,
         };
-      } catch (error) {
-        logger.error('tool search_regulations failed', {
-          message: error instanceof Error ? error.message : String(error),
-        });
-        return {
-          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-          isError: true,
-        };
-      }
-    },
+      }),
   );
 
   server.registerTool(
@@ -354,8 +341,8 @@ export function registerTools(
       outputSchema: sectionOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async (args) => {
-      try {
+    async (args) =>
+      runTool(logger, 'get_section', async () => {
         const section = service.getSection(args.citation);
         const result: SectionOutput = {
           ...section,
@@ -363,19 +350,10 @@ export function registerTools(
           citedBy: [...section.citedBy],
         };
         return {
-          content: [{ type: 'text', text: textContent(result) }],
+          content: [{ type: 'text', text: renderToolText(result, ['markdown', 'text']) }],
           structuredContent: result,
         };
-      } catch (error) {
-        logger.error('tool get_section failed', {
-          message: error instanceof Error ? error.message : String(error),
-        });
-        return {
-          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-          isError: true,
-        };
-      }
-    },
+      }),
   );
 
   server.registerTool(
@@ -400,8 +378,8 @@ export function registerTools(
       outputSchema: browseOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async (args) => {
-      try {
+    async (args) =>
+      runTool(logger, 'browse_title38', async () => {
         const response = service.browse({
           chapter: args.chapter,
           part: args.part,
@@ -414,19 +392,10 @@ export function registerTools(
           children: [...response.children],
         };
         return {
-          content: [{ type: 'text', text: textContent(structuredContent) }],
+          content: [{ type: 'text', text: renderToolText(structuredContent) }],
           structuredContent,
         };
-      } catch (error) {
-        logger.error('tool browse_title38 failed', {
-          message: error instanceof Error ? error.message : String(error),
-        });
-        return {
-          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-          isError: true,
-        };
-      }
-    },
+      }),
   );
 
   server.registerTool(
@@ -441,8 +410,8 @@ export function registerTools(
       outputSchema: statusOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async () => {
-      try {
+    async () =>
+      runTool(logger, 'index_status', async () => {
         const status = service.status();
         const result: StatusOutput = {
           ...status,
@@ -457,19 +426,10 @@ export function registerTools(
                 },
         };
         return {
-          content: [{ type: 'text', text: textContent(result) }],
+          content: [{ type: 'text', text: renderToolText(result) }],
           structuredContent: result,
         };
-      } catch (error) {
-        logger.error('tool index_status failed', {
-          message: error instanceof Error ? error.message : String(error),
-        });
-        return {
-          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-          isError: true,
-        };
-      }
-    },
+      }),
   );
 
   server.registerTool(
@@ -483,26 +443,17 @@ export function registerTools(
       outputSchema: listPartsOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async () => {
-      try {
+    async () =>
+      runTool(logger, 'list_parts', async () => {
         const parts = service.listParts();
         const structuredContent: ListPartsOutput = {
           parts: parts.map((row) => ({ ...row })),
         };
         return {
-          content: [{ type: 'text', text: textContent(structuredContent) }],
+          content: [{ type: 'text', text: renderToolText(structuredContent) }],
           structuredContent,
         };
-      } catch (error) {
-        logger.error('tool list_parts failed', {
-          message: error instanceof Error ? error.message : String(error),
-        });
-        return {
-          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-          isError: true,
-        };
-      }
-    },
+      }),
   );
 
   server.registerTool(
@@ -517,23 +468,14 @@ export function registerTools(
       outputSchema: healthOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async () => {
-      try {
+    async () =>
+      runTool(logger, 'health', async () => {
         const structuredContent: HealthOutput = service.health();
         return {
-          content: [{ type: 'text', text: textContent(structuredContent) }],
+          content: [{ type: 'text', text: renderToolText(structuredContent) }],
           structuredContent,
         };
-      } catch (error) {
-        logger.error('tool health failed', {
-          message: error instanceof Error ? error.message : String(error),
-        });
-        return {
-          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-          isError: true,
-        };
-      }
-    },
+      }),
   );
 
   // Registered only when an eCFR client is injected: without one there is no
@@ -574,8 +516,8 @@ export function registerTools(
         outputSchema: historicalOutputSchema,
         annotations: DIFF_ANNOTATIONS,
       },
-      async (args) => {
-        try {
+      async (args) =>
+        runTool(logger, 'get_section_at', async () => {
           const section = await historicalSection({ ecfr, logger }, args.at_date, args.citation);
           const structuredContent = {
             requestedDate: section.requestedDate,
@@ -592,19 +534,12 @@ export function registerTools(
             sourceUrlAtRequestedDate: section.sourceUrlAtRequestedDate,
           };
           return {
-            content: [{ type: 'text', text: textContent(structuredContent) }],
+            content: [
+              { type: 'text', text: renderToolText(structuredContent, ['markdown', 'text']) },
+            ],
             structuredContent,
           };
-        } catch (error) {
-          logger.error('tool get_section_at failed', {
-            message: error instanceof Error ? error.message : String(error),
-          });
-          return {
-            content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-            isError: true,
-          };
-        }
-      },
+        }),
     );
 
     server.registerTool(
@@ -628,8 +563,8 @@ export function registerTools(
         outputSchema: changeReportOutputSchema,
         annotations: DIFF_ANNOTATIONS,
       },
-      async (args) => {
-        try {
+      async (args) =>
+        runTool(logger, 'diff_issues', async () => {
           const diff = await diffIssues({ ecfr, logger }, args.from_date, args.to_date);
           const structuredContent: ChangeReportOutput = {
             fromIssueDate: diff.fromIssueDate,
@@ -644,19 +579,10 @@ export function registerTools(
             notice: diff.notice,
           };
           return {
-            content: [{ type: 'text', text: textContent(structuredContent) }],
+            content: [{ type: 'text', text: renderToolText(structuredContent) }],
             structuredContent,
           };
-        } catch (error) {
-          logger.error('tool diff_issues failed', {
-            message: error instanceof Error ? error.message : String(error),
-          });
-          return {
-            content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-            isError: true,
-          };
-        }
-      },
+        }),
     );
 
     server.registerTool(
@@ -687,8 +613,8 @@ export function registerTools(
         outputSchema: redlineOutputSchema,
         annotations: DIFF_ANNOTATIONS,
       },
-      async (args) => {
-        try {
+      async (args) =>
+        runTool(logger, 'redline', async () => {
           const redline = await redlineSection(
             { ecfr, logger },
             args.from_date,
@@ -710,19 +636,10 @@ export function registerTools(
             notice: redline.notice,
           };
           return {
-            content: [{ type: 'text', text: textContent(structuredContent) }],
+            content: [{ type: 'text', text: renderToolText(structuredContent) }],
             structuredContent,
           };
-        } catch (error) {
-          logger.error('tool redline failed', {
-            message: error instanceof Error ? error.message : String(error),
-          });
-          return {
-            content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-            isError: true,
-          };
-        }
-      },
+        }),
     );
   }
 }
