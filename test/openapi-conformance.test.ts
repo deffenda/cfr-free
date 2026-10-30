@@ -1451,6 +1451,25 @@ interface PathConstant {
 }
 
 /**
+ * How the router's dispatch compares the path against a constant: an
+ * EXACT route (`pathname === SEARCH_PATH`) serves that path and no other,
+ * a PREFIX route (`pathname.startsWith(SECTIONS_PREFIX)`) serves every
+ * path under the constant.
+ */
+type RouteKind = 'exact' | 'prefix';
+
+/**
+ * One branch of the router's dispatch: the handler it calls, and how it
+ * compares the path against the constant it tests.
+ */
+interface Branch {
+  /** The symbols the branch calls. */
+  readonly calls: ReadonlySet<string>;
+  /** How the branch compares the path against the constant. */
+  readonly kind: RouteKind;
+}
+
+/**
  * The parsed form of a cited file: the compiler's tree, the names it
  * declares, the path constants it holds, and what each of those
  * constants' branches calls.
@@ -1465,8 +1484,8 @@ interface CitedFile {
   readonly names: ReadonlyMap<string, DeclarationFacts>;
   /** The path constants the file holds. */
   readonly paths: readonly PathConstant[];
-  /** The symbols each path constant's branch calls. */
-  readonly branches: ReadonlyMap<string, ReadonlySet<string>>;
+  /** The branches that test each path constant. */
+  readonly branches: ReadonlyMap<string, readonly Branch[]>;
 }
 
 const citedFiles = new Map<string, CitedFile>();
@@ -1483,7 +1502,7 @@ function citedFile(source: string): CitedFile {
   );
   const names = new Map<string, DeclarationFacts>();
   const paths: { name: string; path: string }[] = [];
-  const branches = new Map<string, Set<string>>();
+  const branches = new Map<string, Branch[]>();
   const visit = (node: ts.Node): void => {
     const name = declaredName(node);
     if (name !== null && !names.has(name)) names.set(name, factsOf(node));
@@ -1503,10 +1522,12 @@ function citedFile(source: string): CitedFile {
         ts.forEachChild(current, inner);
       };
       inner(node.thenStatement);
+      const kind: RouteKind = isPrefixTest(node.expression) ? 'prefix' : 'exact';
       for (const constant of identifierNames(node.expression)) {
         const existing = branches.get(constant);
-        if (existing === undefined) branches.set(constant, new Set(called));
-        else for (const name of called) existing.add(name);
+        const branch: Branch = { calls: called, kind };
+        if (existing === undefined) branches.set(constant, [branch]);
+        else existing.push(branch);
       }
     }
     ts.forEachChild(node, visit);
@@ -1547,7 +1568,46 @@ function identifierNames(node: ts.Node): readonly string[] {
 }
 
 /**
- * True when the router's branch for `constant` calls `symbol`.
+ * True when the router's condition tests the path with `startsWith` — a
+ * PREFIX route, which serves every path under the constant.
+ */
+function isPrefixTest(expression: ts.Expression): boolean {
+  let prefix = false;
+  const walk = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === 'startsWith'
+    ) {
+      prefix = true;
+    }
+    ts.forEachChild(node, walk);
+  };
+  walk(expression);
+  return prefix;
+}
+
+/**
+ * The branch of `constant` that serves `wanted`, or undefined when none
+ * of them does.
+ *
+ * A branch that compares the path with `===` serves that path and no
+ * other; a branch that compares it with `startsWith` serves every path
+ * under the constant.
+ */
+function servingBranch(
+  branches: readonly Branch[],
+  path: string,
+  wanted: string,
+): Branch | undefined {
+  return branches.find((branch) =>
+    branch.kind === 'prefix' ? wanted.startsWith(path) : wanted === path,
+  );
+}
+
+/**
+ * True when the router's branch for `constant` calls `symbol` on the
+ * route `wanted`.
  *
  * The router is the authority on which handler serves which route: it
  * compares the path against a constant and calls one handler. A citation
@@ -1555,8 +1615,14 @@ function identifierNames(node: ts.Node): readonly string[] {
  * checked against the router's own branch — which is what makes a citation
  * repointed at another route's handler fail.
  */
-function branchCalls(source: string, constant: string, symbol: string): boolean {
-  return citedFile(source).branches.get(constant)?.has(symbol) ?? false;
+function branchCalls(
+  source: string,
+  constant: PathConstant,
+  wanted: string,
+  symbol: string,
+): boolean {
+  const branches = citedFile(source).branches.get(constant.name) ?? [];
+  return servingBranch(branches, constant.path, wanted)?.calls.has(symbol) ?? false;
 }
 
 /** The repository root — a cited path may not leave it. */
@@ -1665,7 +1731,20 @@ function checkCitation(
  * wins.
  */
 function pathConstantFor(source: string, wanted: string): PathConstant | undefined {
-  return citedFile(source).paths.find((entry) => entry.path === wanted);
+  const file = citedFile(source);
+  let best: PathConstant | undefined;
+  for (const entry of file.paths) {
+    const branches = file.branches.get(entry.name) ?? [];
+    // A constant no branch tests serves its own path only — the router
+    // holds it, so the citation can be checked against it.
+    const served =
+      branches.length === 0
+        ? entry.path === wanted
+        : servingBranch(branches, entry.path, wanted) !== undefined;
+    if (!served) continue;
+    if (best === undefined || entry.path.length > best.path.length) best = entry;
+  }
+  return best;
 }
 
 /**
@@ -1687,7 +1766,7 @@ function checkRouteBinding(
     // checked — and a check that cannot be run must say so, not pass.
     return `${where} — the router has no path constant for ${path}, so the citation cannot be checked`;
   }
-  if (branchCalls(source, constant.name, symbol)) return null;
+  if (branchCalls(source, constant, wanted, symbol)) return null;
   return `${where} — ${path} is served by the router, not by ${symbol}`;
 }
 
@@ -2122,6 +2201,39 @@ const RES_END_FIXTURE = [
 ].join('\n');
 
 /**
+ * A router fixture whose constant is a PREFIX of the route it serves.
+ */
+const PREFIX_ROUTER_FIXTURE = [
+  "const FOO_PATH = '/api/v1/foo';",
+  '',
+  'function handleFoo(): void {',
+  '  service.search({});',
+  '}',
+  '',
+  'function dispatch(pathname: string): void {',
+  '  if (pathname.startsWith(FOO_PATH)) {',
+  '    handleFoo();',
+  '  }',
+  '}',
+  '',
+].join('\n');
+
+/**
+ * A router fixture whose constant is the ROOT path — which serves the root,
+ * not every route.
+ */
+const ROOT_ROUTER_FIXTURE = [
+  "const UI_PATH = '/';",
+  '',
+  'function dispatch(pathname: string): void {',
+  '  if (pathname === UI_PATH) {',
+  '    handleUi();',
+  '  }',
+  '}',
+  '',
+].join('\n');
+
+/**
  * A router fixture whose constant NO branch tests.
  */
 const UNTESTED_ROUTER_FIXTURE = [
@@ -2516,7 +2628,24 @@ describe('OpenAPI citation resolver: guards pinned against fixtures', () => {
     expect(citationsIn(deep)[0]?.path).toBeNull();
   });
 
-  it('pins the path constant: the constant the router holds serves its own path', () => {
+  it('pins the path constants: a route binds to the constant that serves it', () => {
+    // A router may serve `/api/v1/foo/bar` under the constant
+    // `/api/v1/foo`, and the citation of that route must bind to it
+    // rather than be told the router holds no constant for it.
+    expect(
+      checkRouteBinding('w', PREFIX_ROUTER_FIXTURE, '/api/v1/foo/bar', 'handleFoo'),
+    ).toBeNull();
+    const violation = checkRouteBinding(
+      'w',
+      PREFIX_ROUTER_FIXTURE,
+      '/api/v1/foo/bar',
+      'handleSearch',
+    );
+    expect(violation).not.toBeNull();
+    // The root constant serves the root, not every route.
+    expect(checkRouteBinding('w', ROOT_ROUTER_FIXTURE, '/api/v1/search', 'handleSearch')).toContain(
+      'no path constant',
+    );
     // A constant no branch tests serves its own path only: the router
     // holds it, so the citation can be checked against it.
     const orphan = checkRouteBinding('w', UNTESTED_ROUTER_FIXTURE, '/api/v1/orphan', 'handleOther');
