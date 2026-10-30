@@ -1098,17 +1098,33 @@ function citedSymbols(tail: string): CitedSymbol[] {
  * claims the construct exists, not that it once did.
  */
 function definitionLine(lines: readonly string[], symbol: string): number | null {
-  // `export`, `default` and `async` sit before the keyword, so the keyword
-  // alone is enough to find the definition — and a flat pattern keeps the
-  // security plugin's unsafe-regex check satisfied.
-  const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(`(?:function|class|const|let|var)\\s+${escaped}\\b`);
   for (const [index, line] of lines.entries()) {
     const trimmed = line.trim();
     if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
-    if (pattern.test(line)) return index + 1;
+    if (definesSymbol(line, symbol)) return index + 1;
   }
   return null;
+}
+
+/** The keywords a declaration can start with. */
+const DECLARATION_KEYWORDS = new Set(['function', 'class', 'const', 'let', 'var']);
+
+/**
+ * True when the line declares the named symbol.
+ *
+ * The declaration keyword and the symbol are read as WORDS rather than
+ * matched with a pattern built from the symbol: a pattern built at run
+ * time from a value read out of a document is the shape the security
+ * scanners flag, and the rule here needs no pattern at all.
+ */
+function definesSymbol(line: string, symbol: string): boolean {
+  const words = line.split(/[^A-Za-z0-9_$]+/);
+  for (let index = 0; index + 1 < words.length; index += 1) {
+    const word = words[index] ?? '';
+    if (!DECLARATION_KEYWORDS.has(word)) continue;
+    if (words[index + 1] === symbol) return true;
+  }
+  return false;
 }
 
 /**
