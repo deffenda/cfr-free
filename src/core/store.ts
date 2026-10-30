@@ -501,6 +501,41 @@ function ftsParts(terms: readonly QueryTerm[]): string[] {
 }
 
 /**
+ * The two FTS5 queries one parsed query yields.
+ *
+ * The candidate tier (OR) and the AND-tier membership query are the SAME
+ * fragments joined differently, so both come from ONE parse of the query.
+ */
+export interface FtsQueries {
+  /** The candidate tier: a document matches if it matches ANY fragment. */
+  readonly or: string;
+  /** The membership tier: a document matches only if it matches ALL fragments. */
+  readonly and: string;
+}
+
+/**
+ * Build both FTS5 queries from ONE parse of the query.
+ *
+ * CR-15 found the FTS query string built on two paths: `search()` re-implemented
+ * the join inline while `toFtsQuery()` exported the canonical builder. The
+ * `inResults` flag on a pinned hit came from `hasSearchMatch` (the canonical
+ * path) while the hits themselves came from `search()` (the inline path), so a
+ * change to the FTS-building rules — a new escape, a new synonym expansion —
+ * would have made the two disagree, and `inResults` would have become wrong
+ * silently rather than loudly.
+ *
+ * Now there is ONE builder. `search()` and `toFtsQuery()` both call it, so
+ * they cannot drift.
+ *
+ * @returns `null` when the query has no usable terms — no candidate set.
+ */
+export function buildFtsQueries(terms: readonly QueryTerm[]): FtsQueries | null {
+  const parts = ftsParts(terms);
+  if (parts.length === 0) return null;
+  return { or: parts.join(' OR '), and: parts.join(' AND ') };
+}
+
+/**
  * Translate free text into a safe FTS5 match string.
  *
  * Quoted spans become phrase queries (exact token sequence, prefix on the
@@ -512,9 +547,9 @@ function ftsParts(terms: readonly QueryTerm[]): string[] {
  * bound parameter, never concatenated into SQL.
  */
 export function toFtsQuery(raw: string, mode: MatchMode): string | null {
-  const parts = ftsParts(queryTerms(raw));
-  if (parts.length === 0) return null;
-  return parts.join(mode === 'and' ? ' AND ' : ' OR ');
+  const queries = buildFtsQueries(queryTerms(raw));
+  if (queries === null) return null;
+  return mode === 'and' ? queries.and : queries.or;
 }
 
 /**
@@ -1096,13 +1131,14 @@ export class Store {
     // ONE parse of the query feeds both tiers: the candidate query (OR) and
     // the AND-tier membership query (AND) are the same fragments joined
     // differently, so a query with no usable terms has no candidate set.
+    // The builder is the SAME one `toFtsQuery` uses, so the hits and the
+    // `inResults` membership check can never disagree (CR-15).
     const terms = queryTerms(query.query);
-    const parts = ftsParts(terms);
-    if (parts.length === 0) {
+    const queries = buildFtsQueries(terms);
+    if (queries === null) {
       return { hits: [], total: 0, page: query.page, perPage, matchMode: 'or' };
     }
-    const orQuery = parts.join(' OR ');
-    const andQuery = parts.join(' AND ');
+    const { or: orQuery, and: andQuery } = queries;
 
     const total = this.countMatches(orQuery, filters);
     if (total === 0) {

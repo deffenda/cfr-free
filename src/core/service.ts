@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ServiceError } from './errors.js';
 import { normalizeCitation } from './citations.js';
+import { datedSourceUrlFor, sourceUrlFor } from './urls.js';
 import { extractReferences } from './references.js';
 import type { SyncChanges } from './changes.js';
 import { diffIssues, type IssueDiff } from './diff.js';
@@ -362,14 +363,6 @@ function toServiceError(error: unknown, hints: Hints): never {
   throw error;
 }
 
-/** Permalink to the section on ecfr.gov (verified redirect pattern). */
-function sourceUrlFor(kind: 'section' | 'appendix', citation: string): string {
-  if (kind === 'appendix') {
-    return `https://www.ecfr.gov/search?searchTerm=${encodeURIComponent(citation)}&titles=38`;
-  }
-  return `https://www.ecfr.gov/current/title-38/section-${encodeURIComponent(citation)}`;
-}
-
 /**
  * Permalink to the SAME provision at a DATED revision on ecfr.gov — the
  * `/on/<date>/…` form, which keeps the date in the canonical path (the
@@ -383,15 +376,10 @@ function sourceUrlFor(kind: 'section' | 'appendix', citation: string): string {
  * answers 404):
  *   /on/2026-10-16/title-38/appendix-Appendix%20A%20to%20Part%204
  *     -> /on/2026-10-16/title-38/chapter-I/part-4/appendix-Appendix%20A%20to%20Part%204
+ *
+ * The URL shapes themselves live in `src/core/urls.ts` (CR-16), shared with
+ * the point-in-time read in `src/core/historical.ts`.
  */
-function datedSourceUrlFor(
-  kind: 'section' | 'appendix',
-  citation: string,
-  issueDate: string,
-): string {
-  const kindSegment = kind === 'appendix' ? 'appendix' : 'section';
-  return `https://www.ecfr.gov/on/${issueDate}/title-38/${kindSegment}-${encodeURIComponent(citation)}`;
-}
 
 /** Sections are numeric citations; everything else is an appendix name. */
 function kindForCitation(citation: string): 'section' | 'appendix' {
@@ -562,8 +550,8 @@ export class CFRService {
     return {
       ...rest,
       citationDisplay: displayCitation(kind, hit.citation),
-      sourceUrl: sourceUrlFor(kind, hit.citation),
-      sourceUrlAtIndexDate: datedSourceUrlFor(kind, hit.citation, issueDate),
+      sourceUrl: sourceUrlFor(hit.citation, kind),
+      sourceUrlAtIndexDate: datedSourceUrlFor(hit.citation, kind, issueDate),
       direct,
       inResults,
       partTitle: partTitleValue,
@@ -587,7 +575,7 @@ export class CFRService {
     const base =
       `no indexed content for citation ${citation} — it may be reserved, removed, ` +
       'or outside Title 38 as of the local issue date';
-    const verify = `verify it on eCFR: ${sourceUrlFor(kindForCitation(citation), citation)}`;
+    const verify = `verify it on eCFR: ${sourceUrlFor(citation, kindForCitation(citation))}`;
     if (mentions.length === 0) return `${base}; ${verify}`;
     return `${base}; ${verify}. Indexed sections that mention it: ${mentions.join(', ')}`;
   }
@@ -619,8 +607,8 @@ export class CFRService {
       issueDate: row.issueDate,
       markdown: row.markdown,
       text: row.text,
-      sourceUrl: sourceUrlFor(row.kind, row.citation),
-      sourceUrlAtIndexDate: datedSourceUrlFor(row.kind, row.citation, row.issueDate),
+      sourceUrl: sourceUrlFor(row.citation, row.kind),
+      sourceUrlAtIndexDate: datedSourceUrlFor(row.citation, row.kind, row.issueDate),
       references: extractReferences(row.text).map((citation) => ({
         citation,
         available: this.store.hasSection(citation),
