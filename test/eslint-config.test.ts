@@ -66,7 +66,11 @@ describe('the ESLint configuration', () => {
   async function rulesFor(filePath: string, source: string): Promise<string[]> {
     const [result] = await eslint.lintText(source, { filePath });
     if (result === undefined) throw new Error(`eslint returned no result for ${filePath}`);
-    return result.messages.map((message) => message.ruleId);
+    // A message with no rule ID is a PARSE error, not a rule firing, and
+    // it has no name to compare against.
+    return result.messages
+      .map((message) => message.ruleId)
+      .filter((ruleId): ruleId is string => ruleId !== null);
   }
 
   it('carries every security rule into the `.mjs` files', async () => {
