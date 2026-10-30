@@ -17,6 +17,10 @@ The local gate also needs `actionlint` on PATH — `npm run ci` runs
 `npm run lint:actions`. Install it with `brew install actionlint` or
 `go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12`.
 
+Nothing else is needed: the OpenAPI contract suite parses `docs/openapi.yaml`
+with the `yaml` package from this repository's own devDependencies, so no
+Python interpreter or PyYAML is involved.
+
 ## Workflow
 
 1. Open an issue first for anything beyond small fixes.
@@ -60,6 +64,20 @@ The local gate also needs `actionlint` on PATH — `npm run ci` runs
   inject fetch/sleep through `HttpClient` options.
 - Keep the coverage thresholds green (`npm run test:coverage`); they are
   floors, not targets — prefer tests over exclusions.
+
+## Releases
+
+The release guard (`test/install-paths.test.ts`) compares `package.json`'s
+version with the repository's tags, so the rule is: **the version must move
+past the newest released tag.** Between releases `main` holds the version it
+just published; the first change on top of that must bump `package.json` to
+a new version (`0.2.2` → `0.2.3`), and the tag you cut must equal
+`package.json` exactly — the release workflow refuses to publish otherwise
+(`test "$TAG" = "$PKG"`).
+
+The guard reads `git tag`, so a checkout without tags leaves it asserting
+nothing. CI checks out with `fetch-depth: 0`; a shallow local clone needs
+`git fetch --tags` before the suite can judge the version.
 
 ## Reviews
 

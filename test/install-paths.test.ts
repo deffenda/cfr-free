@@ -59,6 +59,52 @@ function readRepoFile(relativePath: string): string {
   return readFileSync(path.join(ROOT, relativePath), 'utf8');
 }
 
+/** A semantic version as a comparable triple; the `v` prefix is optional. */
+type VersionTriple = readonly [number, number, number];
+
+const VERSION_PATTERN = /^v?(\d+)\.(\d+)\.(\d+)$/;
+
+function parseVersion(raw: string): VersionTriple {
+  const match = VERSION_PATTERN.exec(raw);
+  if (match === null) {
+    throw new Error(`not a vX.Y.Z version: ${raw}`);
+  }
+  return [Number(match[1] ?? '0'), Number(match[2] ?? '0'), Number(match[3] ?? '0')];
+}
+
+function compareVersions(a: VersionTriple, b: VersionTriple): number {
+  for (let index = 0; index < 3; index += 1) {
+    const left = a[index] ?? 0;
+    const right = b[index] ?? 0;
+    if (left !== right) return left < right ? -1 : 1;
+  }
+  return 0;
+}
+
+function git(...args: string[]): string {
+  return execFileSync('git', args, { encoding: 'utf8' });
+}
+
+interface VersionTag {
+  readonly tag: string;
+  readonly version: VersionTriple;
+}
+
+/** Every `v`-prefixed tag in the checkout, parsed. */
+function versionTags(): VersionTag[] {
+  return git('tag')
+    .split('\n')
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.startsWith('v'))
+    .map((tag) => ({ tag, version: parseVersion(tag) }));
+}
+
+/** The version the manifest declared at the given tag's commit. */
+function manifestVersionAt(tag: string): string {
+  const parsed = JSON.parse(git('show', `${tag}:package.json`)) as { version?: unknown };
+  return typeof parsed.version === 'string' ? parsed.version : '';
+}
+
 describe('the npm manifest', () => {
   it('builds on prepare, so a git install ships a working binary', () => {
     // npm runs `prepare` when a package is installed from a git URL, and
@@ -536,49 +582,100 @@ describe('the release workflow', () => {
 });
 
 describe('the release guard', () => {
-  it('declares a version that is not already taken by a tag', () => {
+  it('has the tags it needs to judge the version', () => {
+    // Every check below reads the tag list, so an EMPTY tag list makes them
+    // vacuous — they would all pass while asserting nothing. That is not a
+    // hypothetical: `actions/checkout` clones with `--depth 1` by default and
+    // fetches no tags, so in CI this guard never ran (verified against the
+    // public repository on 2026-10-29: a depth-1 clone reports zero tags).
+    // The gate must therefore FAIL on an empty tag list rather than pass
+    // silently; the workflows that run it check out with `fetch-depth: 0`.
+    const tags = versionTags();
+    expect(
+      tags.length,
+      'no v-prefixed git tag found — the release guard cannot run. A checkout ' +
+        'without tags (actions/checkout defaults to --depth 1) makes every check ' +
+        'below vacuous, so the suite fails instead of passing silently. CI must ' +
+        'check out with fetch-depth: 0.',
+    ).toBeGreaterThan(0);
+  });
+
+  it('declares a version past every released tag', () => {
     // The release workflow refuses to publish when the tag and package.json
     // disagree: `test "$TAG" = "$PKG"`. A version that an existing tag
     // already uses cannot be re-tagged, so the next release would have to
     // fail the guard. This happened: the tag v0.2.0 was cut while
     // package.json still said 0.1.0, so the tree at that tag says 0.1.0
     // while `main` says 0.2.0 — and the next tag could satisfy neither.
-    // The version must therefore move PAST every existing tag.
+    // The version must therefore move PAST every released tag.
     //
-    // The one run where this version legitimately equals a tag is the
-    // tag-triggered release itself: the workflow checks out the pushed tag
-    // and requires tag == package.json, so without an exemption the guard
-    // would fail every release by construction (observed on v0.2.1,
-    // 2026-10-29 UTC). Only the tag the runner reports as being released
-    // is exempt — GITHUB_REF_TYPE is "tag" solely on tag-triggered runs,
-    // and GitHub does not let a workflow overwrite that default — so
-    // branch and PR runs ("branch", or unset locally) still cover every
-    // tag. The exemption is an env-var signal, not a verification that
-    // refs/tags/$GITHUB_REF_NAME is HEAD; the workflow's own
-    // `test "$TAG" = "$PKG"` checks, which run in jobs needing this one,
-    // carry that burden. When the exemption applies, the vacuous
-    // "not equal to any tag" loop below is replaced by a positive
-    // assertion that the checked-out version IS the released tag.
+    // The invariant is stated against the NEWEST release, not against every
+    // tag. An earlier form — "the version must differ from every tag" —
+    // contradicted the release workflow: release.yml requires
+    // `tag == package.json` at the moment of release and a release changes
+    // no file, so `main` is guaranteed to hold `version == latest tag`
+    // between releases, exactly the state that form forbade. The gate was
+    // therefore red locally (0.2.1 against tag v0.2.1) and green in CI
+    // (where it never ran at all).
+    //
+    // What the version may equal, then, is the newest release's version —
+    // on ONE tree: the commit that release was cut from. The release itself
+    // (a tag push) checks out exactly that commit, so the release run and
+    // the tree it published agree; once anything else lands on `main`, the
+    // version must move past it again. The tag must also be self-consistent
+    // — its tree must have declared the same version — or the release that
+    // tag names is not the release this manifest describes (the v0.2.0
+    // failure above).
     const manifest = readManifest();
     const version = manifest.version ?? '';
     expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+    const current = parseVersion(version);
 
     const releasingTag =
       process.env.GITHUB_REF_TYPE === 'tag' ? (process.env.GITHUB_REF_NAME ?? '') : '';
     if (releasingTag) {
-      // On the release run itself, replace the vacuous loop below with the
-      // invariant the workflow enforces: the checked-out manifest must be
-      // exactly the tag being released.
+      // On the release run itself the manifest must be exactly the tag being
+      // released — the invariant the workflow enforces.
       expect(releasingTag).toMatch(/^v\d+\.\d+\.\d+$/);
       expect(version).toBe(releasingTag.slice(1));
     }
-    const tags = execFileSync('git', ['tag'], { encoding: 'utf8' })
-      .split('\n')
-      .map((tag) => tag.trim())
-      .filter((tag) => tag.startsWith('v') && tag !== releasingTag);
-    for (const tag of tags) {
-      const tagged = tag.slice(1);
-      expect(version, `package.json ${version} is already used by tag ${tag}`).not.toBe(tagged);
+
+    const tags = versionTags();
+    expect(
+      tags.length,
+      'no v-prefixed git tag found — the release guard cannot run; see the ' +
+        'companion assertion in this describe block.',
+    ).toBeGreaterThan(0);
+
+    const newest = tags.reduce((a, b) => (compareVersions(b.version, a.version) > 0 ? b : a));
+    const relation = compareVersions(current, newest.version);
+
+    if (relation < 0) {
+      throw new Error(
+        `package.json ${version} is BEHIND the released tag ${newest.tag} — the version ` +
+          'must move forward; a release cannot reuse or rewind a published version.',
+      );
+    }
+
+    if (relation === 0) {
+      // The manifest declares the newest release's version. That is
+      // legitimate only on the tree the release was cut from.
+      const atTag = manifestVersionAt(newest.tag);
+      if (atTag !== version) {
+        throw new Error(
+          `tag ${newest.tag} was cut from a tree whose package.json says ${atTag}, not ` +
+            `${version} — the release names a version this manifest does not declare.`,
+        );
+      }
+      const head = git('rev-parse', 'HEAD').trim();
+      const tagCommit = git('rev-parse', `${newest.tag}^{commit}`).trim();
+      if (head !== tagCommit) {
+        throw new Error(
+          `package.json ${version} is the version of the released tag ${newest.tag}, but ` +
+            'this tree is not the commit that release was cut from — bump package.json to ' +
+            `a version above ${newest.tag.slice(1)} before publishing again.`,
+        );
+      }
     }
   });
 });

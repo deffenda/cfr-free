@@ -381,6 +381,25 @@ function jobBlock(text: string, jobName: string): string {
 }
 
 /**
+ * The `fetch-depth` a job's checkout step asks for, or undefined when the
+ * step does not ask for one — `actions/checkout`'s default is a depth-1
+ * clone, which carries no tags.
+ */
+function checkoutFetchDepth(jobText: string): string | undefined {
+  const lines = jobText.split('\n');
+  const checkout = lines.findIndex((line) => /uses:\s*actions\/checkout@/.test(line));
+  if (checkout === -1) return undefined;
+  const indent = /^\s*/.exec(lines[checkout] ?? '')?.[0] ?? '';
+  for (const line of lines.slice(checkout + 1)) {
+    // The next step begins — nothing below it belongs to this one.
+    if (line.startsWith(`${indent}- `)) return undefined;
+    const found = /^\s*fetch-depth:\s*(\S+)\s*$/.exec(line);
+    if (found !== null) return found[1];
+  }
+  return undefined;
+}
+
+/**
  * The actionlint version every WORKFLOW install pins. One version across
  * the workflows — ci.yml's quality job, ci.yml's `actionlint` job and
  * release's `ci` job — or a change is green on one leg and red on
@@ -1231,6 +1250,35 @@ describe('the workflow files — what the merge gate runs', () => {
     expect(security, 'ci.yml has no `security` job').not.toBe('');
     expect(steps.join('\n'), 'the security job no longer runs gitleaks').toContain(gitleaks);
     expect(steps.join('\n'), 'the security job no longer runs osv-scanner').toContain(osv);
+  });
+
+  it('checks out the tags the release guard reads', () => {
+    // Silent failure this prevents: `actions/checkout` clones with
+    // `--depth 1` and fetches NO tags by default, so `git tag` returns
+    // nothing and the release guard (test/install-paths.test.ts) asserts
+    // nothing at all. It stayed green in CI for exactly that reason
+    // (measured 2026-10-29: a depth-1 clone of the public repository
+    // reports zero tags, so the guard's loop never ran). The jobs that
+    // run the gate must therefore check out the full history and its tags.
+    const gateJobs = [
+      { file: 'ci.yml', job: 'quality' },
+      { file: 'release.yml', job: 'ci' },
+    ];
+    for (const target of gateJobs) {
+      const file = workflowFiles.find((entry) => entry.name === target.file);
+      expect(file, `no workflow file named ${target.file}`).toBeDefined();
+      if (file === undefined) continue;
+      const job = workflowJobs(readFileSync(file.path, 'utf8')).find(
+        (entry) => entry.name === target.job,
+      );
+      expect(job, `${target.file} has no ${target.job} job`).toBeDefined();
+      const depth = job === undefined ? undefined : checkoutFetchDepth(job.lines.join('\n'));
+      expect(
+        depth,
+        `${target.file}: the ${target.job} job must check out with fetch-depth: 0 — a shallow ` +
+          'checkout carries no tags, which leaves the release guard asserting nothing',
+      ).toBe('0');
+    }
   });
 
   it('keeps a comment inside the security job from ending the block', () => {

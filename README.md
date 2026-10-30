@@ -112,7 +112,7 @@ filename together to pick another release.
 ### 4. From GitHub (no publish step)
 
 ```bash
-npx -y github:deffenda/cfr-free version    # -> 0.2.1
+npx -y github:deffenda/cfr-free version    # -> 0.2.2
 npx -y github:deffenda/cfr-free serve      # HTTP API on http://127.0.0.1:8787
 ```
 
@@ -153,7 +153,7 @@ cd cfr-free
 npm ci                  # install the pinned dependencies
 npm run build           # compile to dist/ (the CLI entry point is dist/cli.js)
 
-node dist/cli.js version        # -> 0.2.1   (verifies the build)
+node dist/cli.js version        # -> 0.2.2   (verifies the build)
 node dist/cli.js sync           # build the local index (~2-3 MB download, ~5 s)
 node dist/cli.js serve          # HTTP API on http://127.0.0.1:8787
 # or
@@ -238,7 +238,7 @@ fetch.
 export CFR_INDEX_PATH=/tmp/smoke.sqlite   # never your real index
 
 # 1. the build is what you think it is
-node dist/cli.js version                  # -> 0.2.1
+node dist/cli.js version                  # -> 0.2.2
 
 # 2. network: build the index (~2-3 MB, ~5 s)
 node dist/cli.js sync
