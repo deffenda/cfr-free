@@ -45,7 +45,8 @@ info:
     | `/api/v1/diff`, `/api/v1/redline` — they pull the complete Title 38 document from eCFR (~2 MB on the wire, ~16 MB parsed) | 10 |
     | every other path — the index-backed reads, `/health`, `/metrics`, the web UI and its assets | 1 |
     | a request the router refuses BEFORE it can price the route — a method other than GET/HEAD (`405`), a URL over 2048 bytes (`414`), a malformed URL (`400`) | 1 |
-    | a request the router rejects AFTER it has priced the route — the route's own validation (a malformed date) or a param cap (`q` over 800 bytes) | the route's own price (10 on `/api/v1/diff` and `/api/v1/redline`) |
+    | a request the router rejects AFTER it has priced the route — a param cap (`q` over 800 bytes) on an index-backed read | 1 |
+    | a request the router rejects AFTER it has priced the route — the route's own validation (a malformed date) or a param cap (`q` over 800 bytes) on `/api/v1/diff` or `/api/v1/redline` | 10 |
 
     The bucket is checked FIRST, so an exhausted budget answers `429
     rate_limited` even to a request that would have been refused with

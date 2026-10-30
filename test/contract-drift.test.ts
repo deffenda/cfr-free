@@ -287,11 +287,31 @@ describe('published contract: the upstream fetch path is not "stateless"', () =>
     // green, and the document then lied about the budget the router
     // spends.
     const rows = publishedTokenCosts('docs/openapi.yaml');
-    const expensive = rows.find((row) => row.label.includes('/api/v1/diff'));
+    const expensive = rows.find((row) => row.label.startsWith('`/api/v1/diff`'));
     expect(expensive, 'the API description must publish the cost of the diff route').toBeDefined();
     expect(expensive?.cells.at(-1)).toBe(String(EXPENSIVE_ROUTE_COST));
     const cheap = rows.find((row) => row.label.includes('every other path'));
     expect(cheap?.cells.at(-1)).toBe('1');
+    // A request the router rejects AFTER it priced the route is charged
+    // the route's OWN price, and the two classes of route charge
+    // different prices. The table has to publish BOTH: the row that said
+    // so could be deleted, and nothing said it had to be there.
+    const rejectedCheap = rows.find(
+      (row) => row.label.includes('`q` over 800 bytes') && row.label.includes('index-backed read'),
+    );
+    expect(
+      rejectedCheap,
+      'the API description must publish what an oversized `q` costs on an index-backed read',
+    ).toBeDefined();
+    expect(rejectedCheap?.cells.at(-1)).toBe('1');
+    const rejectedExpensive = rows.find(
+      (row) => row.label.includes('`q` over 800 bytes') && row.label.includes('/api/v1/diff'),
+    );
+    expect(
+      rejectedExpensive,
+      'the API description must publish what an oversized `q` costs on the upstream routes',
+    ).toBeDefined();
+    expect(rejectedExpensive?.cells.at(-1)).toBe(String(EXPENSIVE_ROUTE_COST));
     // Every price the table publishes must be one the router charges: a
     // row quoting a third price would contradict the rows beside it, and
     // the diff row's pin would not see it. EVERY cell is checked, not
