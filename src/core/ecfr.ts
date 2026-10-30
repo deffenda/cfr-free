@@ -39,12 +39,6 @@ export function isIssueDateString(value: string): boolean {
 }
 
 /**
- * Thin client for the public eCFR versioner API.
- *
- * The base URL is fixed by construction — callers only ever pass validated
- * date segments, so no user input reaches the URL (no SSRF surface).
- */
-/**
  * How many upstream document fetches may be in flight at once, how many
  * may wait for a permit, and how long a fetched document is reused.
  *
@@ -91,6 +85,12 @@ interface MemoEntry {
   readonly expiresAtMs: number;
 }
 
+/**
+ * Thin client for the public eCFR versioner API.
+ *
+ * The base URL is fixed by construction — callers only ever pass validated
+ * date segments, so no user input reaches the URL (no SSRF surface).
+ */
 export class EcfrApi {
   private readonly http: HttpClient;
   private readonly baseUrl: string;

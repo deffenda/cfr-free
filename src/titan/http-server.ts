@@ -586,10 +586,6 @@ export interface DiskSnapshot {
   readonly totalBytes: number;
 }
 
-/**
- * Method, rate, and size gates that run before routing. Returns the parsed
- * URL, or null when the request was already answered with an error.
- */
 /** The request's URL, or null when it does not parse. */
 function parseRequestUrl(raw: string | undefined): URL | null {
   try {
@@ -628,6 +624,10 @@ function requestCost(pathname: string): number {
  */
 const REFUSED_REQUEST_COST = 1;
 
+/**
+ * Method, rate, and size gates that run before routing. Returns the parsed
+ * URL, or null when the request was already answered with an error.
+ */
 function precheck(
   req: http.IncomingMessage,
   res: http.ServerResponse,

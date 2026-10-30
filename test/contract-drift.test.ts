@@ -185,29 +185,32 @@ function spellings(value: number, words: Readonly<Record<number, string>>): stri
 /** One row of the published token-cost table. */
 interface TokenCostRow {
   readonly label: string;
-  /** The last cell: a bare number, or a phrase that names one. */
-  readonly cell: string;
+  /** Every cell of the row: the label first, then the prices. */
+  readonly cells: readonly string[];
 }
 
 /**
  * The token-cost table published in a document's API description.
  *
  * The table is MARKDOWN inside the description string, so it is read as
- * text: a row is a label and a cell, and the cell is the price the router
- * charges.
+ * text: a row is a label and its cells, and the cells are the prices the
+ * router charges.
  */
 function publishedTokenCosts(doc: string): readonly TokenCostRow[] {
   const description = parseDocument(readDoc(doc)).getIn(['info', 'description']);
   if (typeof description !== 'string') return [];
   const rows: TokenCostRow[] = [];
   for (const line of description.split('\n')) {
-    const match = /^\|\s*(.+?)\s*\|\s*([^|]+?)\s*\|$/.exec(line.trim());
-    if (match === null) continue;
-    const label = match[1] ?? '';
-    const cell = match[2] ?? '';
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) continue;
+    const cells = trimmed
+      .slice(1, -1)
+      .split('|')
+      .map((cell) => cell.trim());
+    const label = cells[0] ?? '';
     // The header and the separator are not rows.
     if (label === 'request' || label === '---') continue;
-    rows.push({ label, cell });
+    rows.push({ label, cells });
   }
   return rows;
 }
@@ -286,18 +289,21 @@ describe('published contract: the upstream fetch path is not "stateless"', () =>
     const rows = publishedTokenCosts('docs/openapi.yaml');
     const expensive = rows.find((row) => row.label.includes('/api/v1/diff'));
     expect(expensive, 'the API description must publish the cost of the diff route').toBeDefined();
-    expect(expensive?.cell).toBe(String(EXPENSIVE_ROUTE_COST));
+    expect(expensive?.cells.at(-1)).toBe(String(EXPENSIVE_ROUTE_COST));
     const cheap = rows.find((row) => row.label.includes('every other path'));
-    expect(cheap?.cell).toBe('1');
-    // Every OTHER price the table names must be one the router charges
-    // too: a row that quoted a third number would contradict the rows
-    // beside it, and the diff row's pin would not see it.
+    expect(cheap?.cells.at(-1)).toBe('1');
+    // Every price the table publishes must be one the router charges: a
+    // row quoting a third price would contradict the rows beside it, and
+    // the diff row's pin would not see it. EVERY cell is checked, not
+    // only the last — a price in a middle column is a price too.
     for (const row of rows) {
-      for (const [, digits] of row.cell.matchAll(/\b(\d+)\b/g)) {
-        expect(
-          [1, EXPENSIVE_ROUTE_COST],
-          `the token-cost table must publish only 1 or ${EXPENSIVE_ROUTE_COST}: "${row.label}" quotes ${digits}`,
-        ).toContain(Number(digits));
+      for (const cell of row.cells.slice(1)) {
+        for (const [, digits] of cell.matchAll(/\b(\d+)\b/g)) {
+          expect(
+            [1, EXPENSIVE_ROUTE_COST],
+            `the token-cost table must publish only 1 or ${EXPENSIVE_ROUTE_COST}: "${row.label}" quotes ${digits}`,
+          ).toContain(Number(digits));
+        }
       }
     }
   });

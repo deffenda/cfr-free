@@ -659,6 +659,56 @@ describe('Titan HTTP rate limiting', () => {
     expect(served).toBe(9);
   });
 
+  it('charges an expensive route its own price for a request the router rejects', async () => {
+    // The oversized-parameter cap is one of the router's byte caps, and it
+    // fires AFTER the bucket was spent. The price still follows the path
+    // the request would have taken: a diff request costs the route's ten
+    // even though the router refused it, because the route was already
+    // identified. The token-cost table publishes this, and it is pinned
+    // here so the table cannot drift from the code.
+    server = createHttpServer(
+      new CFRService(temp.store, 7, diffEcfr(), createTestLogger()),
+      createTestLogger(),
+      { rateLimit: { capacity: 10, refillPerSec: 0.1 } },
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const refused = await fetch(`${base}/api/v1/diff?q=${'x'.repeat(801)}`);
+    expect(refused.status).toBe(400);
+    // The whole budget is gone: the request cost the route's price.
+    let served = 0;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const response = await fetch(`${base}/health`);
+      if (response.status !== 200) break;
+      served += 1;
+    }
+    expect(served).toBe(0);
+  });
+
+  it('charges a cheap route one token for the same rejection', async () => {
+    // The same rejection on a route that reads the index: the cap is the
+    // router's, but the price is the route's — and that route costs one.
+    server = createHttpServer(
+      new CFRService(temp.store, 7, diffEcfr(), createTestLogger()),
+      createTestLogger(),
+      { rateLimit: { capacity: 10, refillPerSec: 0.1 } },
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const refused = await fetch(`${base}/api/v1/search?q=${'x'.repeat(801)}`);
+    expect(refused.status).toBe(400);
+    // Nine tokens are left: the request cost one.
+    let served = 0;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const response = await fetch(`${base}/health`);
+      if (response.status !== 200) break;
+      served += 1;
+    }
+    expect(served).toBe(9);
+  });
+
   it('answers 503 when the upstream queue is full', async () => {
     // The fetch queue was full: the request is refused at once instead of
     // being parked behind the fetches already in flight.
