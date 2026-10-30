@@ -25,8 +25,16 @@ export function createEcfrApi(): EcfrApi {
  *
  * Only an upstream failure is rewritten. A parse failure ("eCFR XML format
  * may have changed") says something different and keeps its own message.
+ *
+ * `nextStep` is the caller's advice, and the two callers are in different
+ * places: the `cfr-free sync` command must not be told to run itself, while
+ * an automatic sync during `serve` can be.
  */
-export async function syncWithGuidance(deps: SyncDeps, logger: Logger): Promise<SyncReport> {
+export async function syncWithGuidance(
+  deps: SyncDeps,
+  logger: Logger,
+  nextStep: string,
+): Promise<SyncReport> {
   try {
     return await syncIndex(deps);
   } catch (error) {
@@ -37,9 +45,10 @@ export async function syncWithGuidance(deps: SyncDeps, logger: Logger): Promise<
       status: failure.status ?? null,
       message: failure.detail,
     });
+    const advice = failure.advice === '' ? '' : ` ${failure.advice}`;
+    const step = nextStep === '' ? '' : ` ${nextStep}`;
     throw new CommandError(
-      `could not build the index from eCFR — ${failure.reason}. Check your network connection ` +
-        'and run `cfr-free sync` again, or set CFR_AUTO_SYNC=0 and sync later.',
+      `could not build the index from eCFR — ${failure.reason}.${advice}${step}`,
       EXIT.ERROR,
     );
   }
@@ -60,7 +69,8 @@ export interface EnsureIndexDeps {
  * fail with an actionable error.
  *
  * @throws {CommandError} (exit 3) when the index is empty and auto-sync is
- *   off; `SyncError` when a sync attempt itself fails.
+ *   off; `CommandError` (exit 1) when the initial sync fails and the index
+ *   is still empty.
  */
 export async function ensureIndex(
   store: Store,
@@ -80,7 +90,11 @@ export async function ensureIndex(
       );
     }
     logger.info('index empty, running initial sync', { index: config.indexPath });
-    await syncWithGuidance({ ecfr: createEcfr(), store, logger }, logger);
+    await syncWithGuidance(
+      { ecfr: createEcfr(), store, logger },
+      logger,
+      'Run `cfr-free sync` to build the index.',
+    );
     return 'synced';
   }
 
@@ -90,7 +104,11 @@ export async function ensureIndex(
       maxAgeDays: config.maxAgeDays,
     });
     try {
-      await syncWithGuidance({ ecfr: createEcfr(), store, logger }, logger);
+      await syncWithGuidance(
+        { ecfr: createEcfr(), store, logger },
+        logger,
+        'Run `cfr-free sync` to build the index.',
+      );
       return 'synced';
     } catch (error) {
       logger.warn('refresh failed, serving existing index', {

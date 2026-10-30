@@ -4,12 +4,33 @@ import { HttpError } from '../core/http-client.js';
 export interface UpstreamFailure {
   /** One clause a reader can act on. */
   readonly reason: string;
+  /** What to do next, or empty when nothing the reader does will help. */
+  readonly advice: string;
   /** The upstream path, for the log. */
   readonly url: string;
   /** The upstream status, when there was one. */
   readonly status: number | undefined;
   /** The raw message, for the log. */
   readonly detail: string;
+}
+
+/**
+ * What the reader can do next, given what eCFR answered.
+ *
+ * The advice must not blame the reader's network when eCFR answered: a
+ * status means the request reached eCFR and came back. Telling someone to
+ * "check your network connection" because eCFR answered 404 is how a reader
+ * spends an hour unplugging a router that was never the problem.
+ *
+ * - no answer at all: the network is the only suspect;
+ * - 5xx: eCFR is unwell, and waiting is the only move;
+ * - 4xx: eCFR answered and refused. Retrying changes nothing, so no advice
+ *   is offered — the reason alone says what happened.
+ */
+function adviceFor(status: number | undefined): string {
+  if (status === undefined) return 'Check your network connection and try again.';
+  if (status >= 500) return 'The service is unavailable, so try again later.';
+  return '';
 }
 
 /**
@@ -28,13 +49,12 @@ export interface UpstreamFailure {
  */
 export function upstreamFailure(error: unknown): UpstreamFailure | null {
   if (!(error instanceof HttpError)) return null;
+  const status = error.status;
   return {
-    reason:
-      error.status === undefined
-        ? 'eCFR could not be reached'
-        : `eCFR answered HTTP ${error.status}`,
+    reason: status === undefined ? 'eCFR could not be reached' : `eCFR answered HTTP ${status}`,
+    advice: adviceFor(status),
     url: error.url,
-    status: error.status,
+    status,
     detail: error.message,
   };
 }

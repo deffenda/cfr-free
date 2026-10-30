@@ -5,7 +5,8 @@ import { CHANGE_LIST_CAP } from '../core/changes.js';
 import { diffIssues } from '../core/diff.js';
 import type { EcfrApi } from '../core/ecfr.js';
 import { redlineSection } from '../core/redline.js';
-import { ARCHIVE_FLOOR, historicalSection } from '../core/historical.js';
+import { ARCHIVE_FLOOR } from '../core/archive.js';
+import { historicalSection } from '../core/historical.js';
 import {
   SEARCH_QUERY_MAX_LENGTH,
   SEARCH_QUERY_MIN_LENGTH,

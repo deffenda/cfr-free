@@ -1,3 +1,4 @@
+import { fetchFullTitleXml } from './archive.js';
 import { assertIssueDate } from './diff.js';
 import { normalizeCitation } from './citations.js';
 import { ServiceError } from './service.js';
@@ -16,7 +17,8 @@ import type { Logger } from '../logger.js';
  *
  * Archive floor (measured 2026-10-20): the versioner answers 404 for
  * dates before 2017 (`full/2016-06-01/…` -> 404, `full/2017-01-01/…` -> 200).
- * That is surfaced as a clean not_found, not as an upstream failure.
+ * That is surfaced as a usage error (`invalid_input`), not as an upstream
+ * failure — `archive.ts` owns that translation for every date-keyed read.
  */
 
 export interface HistoricalSection {
@@ -42,9 +44,6 @@ export interface HistoricalDeps {
   readonly ecfr: EcfrApi;
   readonly logger: Logger;
 }
-
-/** The earliest date eCFR's point-in-time archive serves (measured 2026-10-20). */
-export const ARCHIVE_FLOOR = '2017-01-01';
 
 /** Permalink to the CURRENT text, and to the same provision at a date. */
 function urlsFor(
@@ -84,8 +83,8 @@ function findProvision(
  * Read one provision as it stood at a requested date.
  *
  * @throws {ServiceError} `invalid_input` for a malformed date or citation
- *   (before any fetch), `not_found` when the date predates eCFR's archive
- *   or the provision does not exist at that date.
+ *   (before any fetch), and for a date that predates eCFR's archive;
+ *   `not_found` when the provision does not exist at that date.
  */
 export async function historicalSection(
   deps: HistoricalDeps,
@@ -103,22 +102,7 @@ export async function historicalSection(
   }
 
   deps.logger.info('fetching historical title XML', { requestedDate: date });
-  let xml: string;
-  try {
-    xml = await deps.ecfr.getFullTitleXml(date);
-  } catch (error) {
-    const status = (error as { status?: number }).status;
-    if (status === 404) {
-      // A date before the archive is a bad argument, not a missing
-      // provision: it must exit 2 (usage), not 1 (a service failure a
-      // script would retry forever).
-      throw new ServiceError(
-        `eCFR serves no revision for ${date} — its point-in-time archive starts at ${ARCHIVE_FLOOR}`,
-        'invalid_input',
-      );
-    }
-    throw error;
-  }
+  const xml = await fetchFullTitleXml(deps.ecfr, date);
 
   const sections = parseTitleXml(xml);
   if (sections.length === 0) {
