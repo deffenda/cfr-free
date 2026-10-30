@@ -83,6 +83,72 @@ export default tseslint.config(
     },
   },
   {
+    // The repository's OWN scripts run child processes, and CR-36 named the
+    // one at `scripts/prepare.mjs`. The `security` plugin's
+    // `detect-child-process` rule reports `exec()` with a non-literal
+    // argument and nothing else, so it reported NOTHING at the `spawnSync`
+    // call the review cited (verified 2026-10-30): the remediation reached
+    // the `.mjs` files and missed the call.
+    //
+    // Two rules close that gap:
+    //
+    //  - the SHELL forms cannot be imported at all. `exec`/`execSync` take
+    //    a command STRING and run it through /bin/sh, so a value that
+    //    reaches them runs as code;
+    //  - a spawn/execFile call must NAME its command. The first argument
+    //    has to be a literal — or this script's own `process.execPath`, which
+    //    is Node's binary and not a value anything supplies — so a script
+    //    cannot run a command it computed at runtime.
+    //
+    // The child-process functions must be imported BY NAME, so the lint can
+    // see which one a script calls: a default or namespace import would
+    // hide the call behind `cp.exec(...)`.
+    files: ['scripts/**/*.mjs'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['child_process', 'node:child_process'],
+              importNames: ['exec', 'execSync'],
+              message:
+                'scripts/ must not run a command through a shell: exec/execSync take a command STRING and run it via /bin/sh. Use spawn/execFile with an argument array.',
+            },
+            {
+              group: ['child_process', 'node:child_process'],
+              importNames: ['default', 'namespace'],
+              message:
+                'scripts/ must import the child-process functions it uses BY NAME, so the lint can see which one it calls.',
+            },
+          ],
+        },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            'CallExpression[callee.name=/^(spawn|spawnSync|execFile|execFileSync)$/][arguments.0.type!="Literal"]:not(CallExpression[arguments.0.object.name="process"][arguments.0.property.name="execPath"])',
+          message:
+            'scripts/ must run a command it NAMES: the first argument of a spawn/execFile call must be a literal.',
+        },
+      ],
+    },
+  },
+  {
+    // The ONE legitimate caller, named: `scripts/prepare.mjs`'s `run()`
+    // helper forwards the command it was given, and the only two commands
+    // it is given are named at its call sites — 'npm' and this script's own
+    // Node binary. Only the computed-command rule is exempt here; the
+    // shell-form ban above still applies to this file.
+    //
+    // This is the only exemption in scripts/, and a guard
+    // (`test/eslint-config.test.ts`) pins it: a second exempt file fails the
+    // suite.
+    files: ['scripts/prepare.mjs'],
+    rules: { 'no-restricted-syntax': 'off' },
+  },
+  {
     // The browser script: a classic script (not a module) that runs in the
     // operator's browser, not in Node. It gets the same correctness rules
     // as the server code, with the browser's globals.
