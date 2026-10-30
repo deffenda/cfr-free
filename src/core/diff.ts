@@ -1,4 +1,5 @@
 import type { Logger } from '../logger.js';
+import { fetchFullTitleXml } from './archive.js';
 import { diffHashes, hashContent } from './changes.js';
 import { isIssueDateString, type EcfrApi } from './ecfr.js';
 import { POINT_IN_TIME_NOTICE } from './point-in-time.js';
@@ -112,8 +113,8 @@ export async function diffIssues(
   logger.info('fetching full title XML', { issueDate: fromDate });
   logger.info('fetching full title XML', { issueDate: toDate });
   const [fromXml, toXml] = await Promise.all([
-    ecfr.getFullTitleXml(fromDate),
-    ecfr.getFullTitleXml(toDate),
+    fetchFullTitleXml(ecfr, fromDate),
+    fetchFullTitleXml(ecfr, toDate),
   ]);
 
   logger.info('parsing and hashing provisions', { fromDate, toDate });
