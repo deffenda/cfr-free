@@ -1659,3 +1659,202 @@ describe('OpenAPI source citations (docs/openapi.yaml # source: lines)', () => {
     expect(citedSymbols('src/titan/http-server.ts#dispatch, (the router)')).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Suite 4 — the citation resolver's GUARDS, pinned.
+//
+// Every guard in the resolver above is load-bearing: remove it and the
+// suite must go red. A guard that nothing pins is a comment, not a check,
+// and a comment does not stop a citation from drifting.
+//
+// Each pin below is written against a FIXTURE, not against the repository's
+// own files: the pin then says something about the GUARD rather than about
+// the repository's current contents, and it can fail on purpose. Each pin
+// was mutation-checked — the guard was broken on purpose, the pin was seen
+// to fail, and the guard was put back.
+// ---------------------------------------------------------------------------
+
+/**
+ * A router fixture: the path constants, and the dispatch branches that
+ * compare the path against them.
+ */
+const ROUTER_FIXTURE = [
+  "const SEARCH_PATH = '/api/v1/search';",
+  "const SECTION_PATH = '/api/v1/section';",
+  '',
+  'function dispatch(pathname: string): void {',
+  '  if (pathname === SEARCH_PATH) {',
+  '    handleSearch();',
+  '  }',
+  '  if (pathname === SECTION_PATH) {',
+  '    handleSection();',
+  '  }',
+  '}',
+  '',
+].join('\n');
+
+/**
+ * A source fixture whose definition of `handleSearch` is COMMENTED OUT, next
+ * to a symbol that is really there.
+ */
+const COMMENTED_FIXTURE = [
+  '// function handleSearch(query: string): string {',
+  '//   return service.search(query);',
+  '// }',
+  '',
+  'function handleOther(query: string): string {',
+  '  sendJson();',
+  '}',
+  '',
+].join('\n');
+
+/**
+ * A source fixture that declares a method in every place a method can live:
+ * a class body, an object literal, an interface, a type literal, an enum.
+ */
+const MEMBER_FIXTURE = [
+  'class Router {',
+  '  handleClass(): string {',
+  '    return "class";',
+  '  }',
+  '}',
+  '',
+  'const literal = {',
+  '  handleObject(): string {',
+  '    return "object";',
+  '  }',
+  '};',
+  '',
+  'interface Api {',
+  '  handleInterface(): string;',
+  '}',
+  '',
+  'type Handlers = {',
+  '  handleType(): string;',
+  '};',
+  '',
+  'enum Modes {',
+  '  handleEnum,',
+  '}',
+  '',
+].join('\n');
+
+/**
+ * A source fixture whose `handleSearch` carries `sendJson` — a construct of
+ * the GENERAL list, and not of the router's own list for that symbol.
+ */
+const SAME_NAME_FIXTURE = ['function handleSearch(): void {', '  sendJson();', '}', ''].join('\n');
+
+describe('OpenAPI citation resolver: guards pinned against fixtures', () => {
+  it("pins the route binding: a citation naming another route's handler is a violation", () => {
+    // The router is the authority on which handler serves which route: it
+    // compares the path against a constant and calls one handler. A citation
+    // inside a path item claims a handler for that route, so a citation
+    // repointed at the handler of another route must be reported — and the
+    // claim that DOES match must still pass, or the pin would be satisfied
+    // by a check that always complains.
+    expect(checkRouteBinding('w', ROUTER_FIXTURE, '/api/v1/search', 'handleSearch')).toBeNull();
+    const violation = checkRouteBinding('w', ROUTER_FIXTURE, '/api/v1/section', 'handleSearch');
+    expect(violation).not.toBeNull();
+    expect(violation).toContain('/api/v1/section');
+    expect(violation).toContain('handleSearch');
+  });
+
+  it('pins the repository boundary: a cited path outside the repository is refused', () => {
+    // A cited path is read out of a document, so a document must not be able
+    // to point the suite at the rest of the filesystem: a path that leaves
+    // the repository resolves to nothing, and the citation says so.
+    expect(citedFilePath('../outside.ts')).toBeNull();
+    expect(citedFilePath('src/../../etc/passwd')).toBeNull();
+    expect(citedFilePath('../../etc/passwd')).toBeNull();
+    const inside = citedFilePath('src/titan/http-server.ts');
+    expect(inside).not.toBeNull();
+    expect(inside?.startsWith(`${REPO_ROOT}${sep}`)).toBe(true);
+    expect(existsSync(inside ?? '')).toBe(true);
+    expect(checkCitation('w', '../outside.ts', 'dispatch')).toContain(
+      'resolves outside the repository',
+    );
+    expect(checkCitation('w', 'src/../../etc/passwd', 'dispatch')).toContain(
+      'resolves outside the repository',
+    );
+  });
+
+  it('pins the commented-out declaration: a commented definition is not a declaration', () => {
+    // The declarations are the TypeScript compiler's own, which is what
+    // makes the check exact: a definition that is commented out is not in
+    // the tree at all, so it is not a declaration and a citation of it does
+    // not check out. The same symbol defined for real IS found.
+    expect(declarationText(COMMENTED_FIXTURE, 'handleSearch')).toBeNull();
+    expect(declarationText(COMMENTED_FIXTURE, 'handleOther')).not.toBeNull();
+    expect(checkDeclaration('w', 'src/core/other.ts', COMMENTED_FIXTURE, 'handleSearch')).toContain(
+      'declares no symbol named handleSearch',
+    );
+    expect(checkDeclaration('w', 'src/core/other.ts', COMMENTED_FIXTURE, 'handleOther')).toBeNull();
+  });
+
+  it('pins the member declaration: a method is a declaration wherever it lives', () => {
+    // A member counts: a method is a declaration wherever it lives — a class
+    // body, an object literal, an interface, a type literal, an enum — so a
+    // citation stays resolvable when the code around it is reorganised.
+    for (const symbol of [
+      'handleClass',
+      'handleObject',
+      'handleInterface',
+      'handleType',
+      'handleEnum',
+    ]) {
+      expect(declarationText(MEMBER_FIXTURE, symbol), symbol).not.toBeNull();
+    }
+  });
+
+  it('pins the construct scoping: the per-symbol expectations belong to the router alone', () => {
+    // The per-symbol expectations were chosen for the ROUTER, so they apply
+    // only there: a same-named symbol in another file is held to the general
+    // list, not to the router's contract. The same source is a violation in
+    // the router and a pass elsewhere.
+    expect(expectedConstructs('src/titan/http-server.ts', 'handleSearch')).toEqual([
+      'service.search',
+    ]);
+    expect(expectedConstructs('src/core/other.ts', 'handleSearch')).toEqual(GENERAL_CONSTRUCTS);
+    expect(
+      checkDeclaration('w', 'src/titan/http-server.ts', SAME_NAME_FIXTURE, 'handleSearch'),
+    ).toContain('service.search');
+    expect(
+      checkDeclaration('w', 'src/core/other.ts', SAME_NAME_FIXTURE, 'handleSearch'),
+    ).toBeNull();
+  });
+
+  it('pins the inline anchor: a URL fragment is not an anchor', () => {
+    // The file part of an inline anchor must end in a SOURCE extension:
+    // without that, a link with a word fragment (`example.com#intro`) would
+    // be read as an anchor, and the suite would fail on a link rather than
+    // on a citation.
+    const spec = ['info:', '  description: served by src/titan/http-server.ts#sendJson', ''].join(
+      '\n',
+    );
+    expect(inlineAnchorsIn(spec).map((anchor) => anchor.symbol)).toEqual(['sendJson']);
+    const linked = ['info:', '  description: see example.com#intro for details', ''].join('\n');
+    expect(inlineAnchorsIn(linked)).toEqual([]);
+  });
+
+  it('pins the wrapped citation: a wrapped pair is a citation, a wrapped bare word is prose', () => {
+    // The rule for which is which is the PAIR: a wrapped segment names a
+    // symbol when it carries a `file#symbol` pair, because a pair says which
+    // file it is about. A wrapped bare word carries no file, so it cannot be
+    // checked against one — it is prose, and it stays prose.
+    const pair = { file: 'src/titan/http-server.ts', symbol: 'dispatch', wellFormed: true };
+    expect(citedSymbols('(src/titan/http-server.ts#dispatch)')).toEqual([pair]);
+    expect(citedSymbols('src/titan/http-server.ts#dispatch (the router)')).toEqual([pair]);
+    expect(citedSymbols('src/titan/http-server.ts#dispatch, (the router)')).toEqual([pair]);
+    expect(citedSymbols('src/titan/http-server.ts#dispatch, (router)')).toEqual([pair]);
+  });
+
+  it('pins the unchecked citation: a route with no path constant is reported, not skipped', () => {
+    // The router holds no constant for this path, so the claim cannot be
+    // checked — and a check that cannot be run must say so, not pass.
+    const violation = checkRouteBinding('w', ROUTER_FIXTURE, '/api/v1/nosuchroute', 'handleSearch');
+    expect(violation).not.toBeNull();
+    expect(violation).toContain('no path constant');
+    expect(violation).toContain('/api/v1/nosuchroute');
+  });
+});
