@@ -943,6 +943,45 @@ describe('the workflow files — what the merge gate runs', () => {
     );
   });
 
+  it('scans the built image in the docker job', () => {
+    // CR-35's prescribed fix covers "the filesystem and the built image".
+    // The filesystem half is the `trivy` job; the image half is here,
+    // because the docker job is the only one that has the image.
+    //
+    // The scan reads the base image's OS packages (`vuln-type: os`), and
+    // the reason is measured rather than assumed: the runtime image
+    // carries `package.json` but NOT `package-lock.json`, so a
+    // whole-image scan resolves the manifest's devDependencies against
+    // the registry and reports them as shipped. On the image built from
+    // this tree that is ten HIGH findings, none of them in the image
+    // (measured 2026-10-30). The image's Node layer is covered by the
+    // committed lockfile instead — `npm audit` and the `trivy` job's
+    // filesystem scan both read it — and the Dockerfile by the `misconfig`
+    // scanner.
+    const docker = jobOf(ci, 'docker');
+    expect(docker, 'ci.yml has no `docker` job').toBeDefined();
+    const steps = docker?.steps ?? [];
+    const scanIndex = steps.findIndex((step) => step.uses?.includes('trivy-action'));
+    expect(scanIndex, 'the docker job does not scan the image it builds').toBeGreaterThanOrEqual(0);
+    const scan = steps[scanIndex];
+    expect(String(scan?.with['scan-type'] ?? ''), 'the docker job must scan the image').toBe(
+      'image',
+    );
+    expect(
+      String(scan?.with['image-ref'] ?? ''),
+      'the docker job must scan the image it builds',
+    ).toBe('cfr-free:ci');
+    expect(
+      String(scan?.with['vuln-type'] ?? ''),
+      'the image scan must read the base image’s OS packages',
+    ).toBe('os');
+    // The build has to come first: the scan reads the image the build
+    // produced.
+    const buildIndex = steps.findIndex((step) => (step.run ?? '').includes('docker build'));
+    expect(buildIndex, 'the docker job does not build the image').toBeGreaterThanOrEqual(0);
+    expect(scanIndex, 'the docker job must scan the image it builds').toBeGreaterThan(buildIndex);
+  });
+
   it('checks out the full history the gates read', () => {
     // Silent failure this prevents: `actions/checkout` clones with
     // `--depth 1` and fetches NO tags by default, so `git tag` returns

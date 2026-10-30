@@ -205,3 +205,30 @@ jobs:
           echo "$out"
           test "$code" -eq 3
           echo "$out" | grep -F 'cfr-free sync'
+      # The BUILT IMAGE, scanned for the base image's OS packages — the half
+      # of CR-35 the filesystem scan cannot reach. The docker job is the only
+      # job that has the image, so the image is scanned here.
+      #
+      # `vuln-type: os`, and not the action's default `os,library`, because
+      # the runtime image carries `package.json` but NOT `package-lock.json`:
+      # a whole-image scan then resolves the manifest's devDependencies
+      # against the registry and reports them as shipped. On the image built
+      # from this tree that is ten HIGH findings, and not one of them is in
+      # the image — `brace-expansion`, `pacote`, `picomatch` and `sigstore`
+      # are pruned from it, and the `ip-address` it reports (10.1.0) is not
+      # the version it carries (10.7.4). Measured 2026-10-30.
+      #
+      # What covers the image's Node layer instead: the committed lockfile,
+      # which `npm audit --audit-level=high` and the `trivy` job's
+      # filesystem scan both read — the image's dependency tree is that
+      # lockfile's production subset. The Dockerfile itself is covered by
+      # the `trivy` job's `misconfig` scanner.
+      - name: trivy (image, base OS packages)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: cfr-free:ci
+          vuln-type: os
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          exit-code: '1'
