@@ -8,11 +8,27 @@ async function waitFor(predicate: () => boolean): Promise<void> {
   }
 }
 
+/** Let every pending microtask and timer callback run. */
+async function settle(): Promise<void> {
+  for (let tick = 0; tick < 5; tick += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
+
 describe('Semaphore', () => {
-  it('runs at most `permits` tasks at a time', async () => {
+  it('never runs more than `permits` tasks at once', async () => {
     // The bound this exists for: the upstream document fetches must not
     // pile up, whatever the request rate is.
-    const semaphore = new Semaphore(2);
+    //
+    // The mutation this pins is a release that hands the permit to the
+    // next waiter AND counts it as available again: the permit is given
+    // out twice, and a task that starts afterwards finds a phantom
+    // permit and runs without waiting. Releasing the holders in pairs
+    // hid it — the waiter took over exactly as the other holder left —
+    // so they are released ONE AT A TIME here, and a fresh task starts
+    // after each release.
+    const permits = 2;
+    const semaphore = new Semaphore(permits);
     let running = 0;
     let peak = 0;
     const release: Array<() => void> = [];
@@ -25,22 +41,35 @@ describe('Semaphore', () => {
         running -= 1;
       });
 
-    const started = [task(), task(), task(), task()];
-    // Two permits are free, so two tasks are running and two are waiting.
-    await waitFor(() => running === 2);
-    expect(running).toBe(2);
-    expect(peak).toBe(2);
+    // More tasks than permits: the surplus must WAIT.
+    const started: Promise<void>[] = [task(), task(), task(), task(), task(), task()];
+    await waitFor(() => release.length === permits);
+    expect(running).toBe(permits);
+    expect(peak).toBe(permits);
 
-    release.splice(0).forEach((resolve) => resolve());
-    await waitFor(() => running === 2 && release.length === 2);
-    expect(running).toBe(2);
+    for (let round = 0; round < 4; round += 1) {
+      const resolve = release.shift();
+      expect(resolve, 'a running task must be waiting to be released').toBeDefined();
+      resolve?.();
+      await settle();
+      expect(running).toBeLessThanOrEqual(permits);
+      expect(peak).toBeLessThanOrEqual(permits);
+      // A task that starts NOW must find no free permit: the one that
+      // was just handed over is the only permit there is.
+      started.push(task());
+      await settle();
+      expect(running).toBeLessThanOrEqual(permits);
+      expect(peak).toBeLessThanOrEqual(permits);
+    }
 
-    release.splice(0).forEach((resolve) => resolve());
-    await waitFor(() => running === 0);
-
+    // Drain the rest: every queued task still gets its permit.
+    while (release.length > 0) {
+      release.shift()?.();
+      await settle();
+    }
     await Promise.all(started);
     expect(running).toBe(0);
-    expect(peak).toBe(2);
+    expect(peak).toBe(permits);
   });
 
   it('releases its permit when the task fails', async () => {
