@@ -108,6 +108,20 @@ describe('the ESLint configuration', () => {
       ),
       'a spawn call whose command is a literal must pass',
     ).not.toContain('no-restricted-syntax');
+    // An ALIAS defeats the selector above, which matches `callee.name`:
+    // `import { spawnSync as s }` … `s(command)` reported nothing at all
+    // (verified 2026-10-30). The configuration's own rule is that these
+    // functions are imported BY NAME, so the lint can see which one a
+    // script calls — so the alias is banned AT THE IMPORT.
+    for (const name of ['spawnSync', 'execFileSync']) {
+      expect(
+        await rulesFor(
+          probe,
+          `import { ${name} as runner } from 'node:child_process';\nrunner(command, []);\n`,
+        ),
+        `an aliased import of ${name} must be reported`,
+      ).toContain('no-restricted-syntax');
+    }
   }, 60_000);
 
   it('bans the shell forms of the child-process API', async () => {

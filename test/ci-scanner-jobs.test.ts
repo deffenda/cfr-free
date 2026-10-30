@@ -16,6 +16,11 @@
  *    nothing and exits 0 (ci.yml:164-165);
  *  - two scanners that AGREE can agree on scanning nothing, so the
  *    invocation is pinned, not merely compared;
+ *  - a scanner that scans for nothing at all — the scanner SET is
+ *    pinned on both sides, and so is the exit code that turns a finding
+ *    into a failure;
+ *  - a job whose `if:` switches the whole scan off;
+ *  - a local sweep that stopped failing;
  *  - a digest pin says WHICH image; the comment beside it says which
  *    RELEASE, and the two can drift apart;
  *  - the semgrep job runs in an Alpine container, which the runner
@@ -27,13 +32,17 @@
  * `ci-workflow.test.ts`. This file is the scanning jobs, as their own
  * unit, so that a change to CI's scanning surface reads as one.
  */
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { ci, jobOf, type Step } from './workflows.js';
 
 const SECURITY_SCAN_PATH = fileURLToPath(new URL('../tools/security-scan.sh', import.meta.url));
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 /**
  * The scanner jobs, and the step in each that does the scanning.
@@ -100,6 +109,107 @@ function localSemgrepScan(): string {
   return /semgrep (scan --config[^\n]*)/.exec(script)?.[1]?.trim() ?? '';
 }
 
+/**
+ * The trivy invocation the local sweep runs, as one line of arguments.
+ *
+ * The script writes it across several lines with a trailing backslash, so
+ * the continuation lines are joined before the arguments are read. The
+ * lines are walked rather than matched: a regular expression over them
+ * would nest a quantifier inside a quantifier, and the lint refuses one.
+ */
+function localTrivyScan(): string {
+  const lines = readFileSync(SECURITY_SCAN_PATH, 'utf8').split('\n');
+  const start = lines.findIndex((line) => line.includes('trivy fs'));
+  if (start < 0) return '';
+  const parts: string[] = [];
+  for (const line of lines.slice(start)) {
+    parts.push(line.replace(/\\\s*$/, ''));
+    if (!line.trimEnd().endsWith('\\')) break;
+  }
+  return parts.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+/** The trivy step that scans the working tree, or undefined. */
+function trivyFsStep(): Step | undefined {
+  return (jobOf(ci, 'trivy')?.steps ?? []).find(
+    (step) => step.uses?.includes('trivy-action') === true && step.with['scan-type'] === 'fs',
+  );
+}
+
+/**
+ * The scanners CI runs, and the job each runs in, as the WORKFLOW says.
+ *
+ * The sweep's header states the same mapping; the guard compares the two,
+ * so the header cannot drift into prose that names the wrong job.
+ */
+function scannerJobs(): Record<string, string> {
+  const jobRunning = (matches: (step: Step) => boolean): string =>
+    ci.jobs.find((job) => job.steps.some(matches))?.key ?? '(no job runs it)';
+  return {
+    'npm audit': jobRunning((step) => (step.run ?? '').includes('scan:audit')),
+    gitleaks: jobRunning((step) => (step.uses ?? '').includes('gitleaks/gitleaks-action')),
+    'osv-scanner': jobRunning((step) => (step.uses ?? '').includes('osv-scanner-action')),
+    'trivy (fs)': jobRunning(
+      (step) => step.uses?.includes('trivy-action') === true && step.with['scan-type'] === 'fs',
+    ),
+    'trivy (image)': jobRunning(
+      (step) => step.uses?.includes('trivy-action') === true && step.with['scan-type'] === 'image',
+    ),
+    semgrep: jobRunning((step) => (step.run ?? '').includes('semgrep scan')),
+  };
+}
+
+/**
+ * The mapping the sweep's header states, as its `scanner -> job` lines.
+ */
+function headerJobs(): Record<string, string> {
+  const header = readFileSync(SECURITY_SCAN_PATH, 'utf8').split('# Usage:')[0] ?? '';
+  const entries: Record<string, string> = {};
+  for (const line of header.split('\n')) {
+    const match = /^\s*#\s*(.+?)\s*->\s*(\S+)\s*$/.exec(line);
+    if (match?.[1] !== undefined && match[2] !== undefined) entries[match[1]] = match[2];
+  }
+  return entries;
+}
+
+/**
+ * The local sweep, run with STUB scanners on PATH.
+ *
+ * Each stub is a shell script that exits with the given code, so the
+ * sweep exercises its own accounting — the FAIL line, the failure count
+ * and the exit code — without a network, a real scanner or a real
+ * `npm audit`. The `curl` stub answers the reachability probes, so the
+ * network-scanner branches run too and nothing reaches the network.
+ */
+function runLocalSweep(exitCodes: Record<string, number>): {
+  status: number | null;
+  stdout: string;
+} {
+  const stubDir = mkdtempSync(join(tmpdir(), 'cfr-scan-'));
+  try {
+    const codes = {
+      npm: 0,
+      gitleaks: 0,
+      'osv-scanner': 0,
+      trivy: 0,
+      semgrep: 0,
+      curl: 0,
+      ...exitCodes,
+    };
+    for (const [name, code] of Object.entries(codes)) {
+      writeFileSync(join(stubDir, name), `#!/bin/sh\nexit ${code}\n`, { mode: 0o755 });
+    }
+    const result = spawnSync('bash', [SECURITY_SCAN_PATH], {
+      cwd: ROOT,
+      env: { ...process.env, PATH: `${stubDir}:${process.env['PATH'] ?? ''}` },
+      encoding: 'utf8',
+    });
+    return { status: result.status, stdout: result.stdout };
+  } finally {
+    rmSync(stubDir, { recursive: true, force: true });
+  }
+}
+
 describe('the CI scanning jobs', () => {
   it('keeps gitleaks and osv-scanner in the security job', () => {
     // Silent failure this prevents: the `security` job losing one of its
@@ -158,6 +268,31 @@ describe('the CI scanning jobs', () => {
     ).toBe('HIGH,CRITICAL');
   });
 
+  it('scans with trivy for real, in CI and in the local sweep', () => {
+    // The same hole the semgrep guard closes, one scanner over: a scanner
+    // set that BOTH sides narrow together — to `vuln` alone — agrees
+    // perfectly and scans nothing but dependencies. The secret and the
+    // Dockerfile-misconfiguration coverage is the whole point of the
+    // container half of CR-35, so the set is pinned on both sides.
+    //
+    // The exit code is pinned with it: `exit-code: '0'` (or `--exit-code
+    // 0`) reports green over a HIGH finding, which is the "reported green
+    // over a scan that never happened" failure this branch exists to
+    // remove.
+    const local = localTrivyScan();
+    expect(local, 'tools/security-scan.sh no longer runs a trivy scan').not.toBe('');
+    expect(local, 'the local sweep must scan for secrets and misconfiguration too').toContain(
+      '--scanners vuln,secret,misconfig',
+    );
+    expect(local, 'the local sweep must fail on a finding').toContain('--exit-code 1');
+    const step = trivyFsStep();
+    expect(
+      String(step?.with['scanners'] ?? ''),
+      'the trivy job must scan for secrets and misconfiguration too',
+    ).toBe('vuln,secret,misconfig');
+    expect(String(step?.with['exit-code'] ?? ''), 'the trivy job must fail on a finding').toBe('1');
+  });
+
   it('checks out the code each scanner job scans', () => {
     // Silent failure this prevents: a scanner job with NO checkout scans
     // an empty workspace, finds nothing and exits 0 — the "reported green
@@ -202,17 +337,22 @@ describe('the CI scanning jobs', () => {
     expect(runOf(semgrepStep), 'the CI semgrep scan must be the pinned semgrep invocation').toBe(
       `semgrep ${SEMGREP_INVOCATION}`,
     );
-    // The pin itself, so it cannot be weakened from here either:
-    // `--config auto` reads a real rule set, `--error` turns a finding
-    // into a failure, and nothing excludes the tree the scan reads.
-    expect(SEMGREP_INVOCATION, 'the pinned invocation must read a rule set').toContain(
-      '--config auto',
-    );
-    expect(SEMGREP_INVOCATION, 'the pinned invocation must fail on a finding').toContain('--error');
-    expect(
-      SEMGREP_INVOCATION,
-      'the pinned invocation must not exclude the tree it scans',
-    ).not.toMatch(/--exclude(?:-rule)?\b/);
+    // The properties the pin has to keep — checked against the FILES, not
+    // against the constant: a change that narrowed both sides together
+    // (the constant, ci.yml and the sweep) would otherwise agree
+    // perfectly and scan nothing. `--config auto` reads a real rule set,
+    // `--error` turns a finding into a failure, and nothing excludes the
+    // tree the scan reads.
+    for (const [label, invocation] of [
+      ['the local sweep', localScan],
+      ['the CI semgrep scan', runOf(semgrepStep)],
+    ]) {
+      expect(invocation, `${label} must read a rule set`).toContain('--config auto');
+      expect(invocation, `${label} must fail on a finding`).toContain('--error');
+      expect(invocation, `${label} must not exclude the tree it scans`).not.toMatch(
+        /--exclude(?:-rule)?\b/,
+      );
+    }
   });
 
   it('pins the semgrep image to the digest the comment names', () => {
@@ -278,10 +418,71 @@ describe('the CI scanning jobs', () => {
       String(scan?.with['vuln-type'] ?? ''),
       'the image scan must read the base image’s OS packages',
     ).toBe('os');
+    // The scanner set, the severities and the exit code are pinned with
+    // the rest of the image scan: `severity: LOW` reports nothing and no
+    // check objects, `scanners: secret` scans the wrong thing, and
+    // `exit-code: '0'` reports green over a HIGH finding in the image.
+    expect(
+      String(scan?.with['scanners'] ?? ''),
+      'the image scan must read the image’s vulnerabilities',
+    ).toBe('vuln');
+    expect(
+      String(scan?.with['severity'] ?? ''),
+      'the image scan must scan the same severities',
+    ).toBe('HIGH,CRITICAL');
+    expect(String(scan?.with['exit-code'] ?? ''), 'the image scan must fail on a finding').toBe(
+      '1',
+    );
     // The build has to come first: the scan reads the image the build
     // produced.
     const buildIndex = steps.findIndex((step) => (step.run ?? '').includes('docker build'));
     expect(buildIndex, 'the docker job does not build the image').toBeGreaterThanOrEqual(0);
     expect(scanIndex, 'the docker job must scan the image it builds').toBeGreaterThan(buildIndex);
+  });
+
+  it('runs the docker job on pull requests', () => {
+    // The image scan lives in the docker job, so a job-level `if:` that
+    // never matches switches the whole scan off — and every check still
+    // reports green, because a job that does not run reports nothing.
+    const docker = jobOf(ci, 'docker');
+    expect(docker?.if, 'the docker job must run on pull requests').toBe(
+      "github.event_name == 'pull_request'",
+    );
+  });
+
+  it('fails the local sweep when a scanner finds something', () => {
+    // `npm run scan` is the local gate (AGENTS.md:48) and is NOT part of
+    // `npm run ci`, so nothing in CI would notice a sweep that stopped
+    // failing. The sweep runs here with STUB scanners on PATH: the stubs
+    // stand in for the scanners, so the test is hermetic, fast, and never
+    // runs a real scanner or reaches the network.
+    //
+    // The two failure paths are exercised SEPARATELY, because each counts
+    // its own failure: the `run_or_skip` helper and the osv-scanner
+    // branch have a counter each, and a sweep with one of them broken
+    // still fails through the other.
+    for (const codes of [{ npm: 1 }, { 'osv-scanner': 3 }]) {
+      const failing = runLocalSweep(codes);
+      expect(
+        failing.status,
+        `the sweep must fail when ${Object.keys(codes)[0] ?? 'a scanner'} reports findings`,
+      ).not.toBe(0);
+      expect(failing.stdout, 'the sweep must say that a scanner failed').toContain('FAIL');
+    }
+    // The control: the same sweep, with every stub passing, exits 0 —
+    // so the assertions above are a failure and not a permanent non-zero.
+    const passing = runLocalSweep({});
+    expect(passing.status, 'the sweep must pass when every scanner passes').toBe(0);
+  }, 30_000);
+
+  it('names the CI jobs the sweep’s header names', () => {
+    // The header says where CI runs each scanner. It was prose — "the
+    // first three in the `quality` and `security` jobs" — and prose is not
+    // checkable: npm audit runs in `quality` and gitleaks and osv-scanner
+    // in `security`, and nothing said so. The header now states the
+    // mapping, and the WORKFLOW is the truth it is compared against.
+    expect(headerJobs(), 'the sweep’s header must name the job CI runs each scanner in').toEqual(
+      scannerJobs(),
+    );
   });
 });

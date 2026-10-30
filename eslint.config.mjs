@@ -28,6 +28,16 @@ const CORRECTNESS_RULES = {
   'security/detect-non-literal-require': 'error',
 };
 
+/**
+ * The child-process functions `scripts/` may call.
+ *
+ * `exec`/`execSync` are NOT among them: they take a command STRING and run
+ * it through a shell, and `no-restricted-imports` below bans them outright.
+ * These four take an argument array and run no shell, so the only thing
+ * left to police is WHICH command they are given.
+ */
+const CHILD_PROCESS_FUNCTIONS = ['spawn', 'spawnSync', 'execFile', 'execFileSync'];
+
 export default tseslint.config(
   {
     ignores: ['dist/**', 'coverage/**', 'node_modules/**', 'data/**'],
@@ -132,6 +142,17 @@ export default tseslint.config(
           message:
             'scripts/ must run a command it NAMES: the first argument of a spawn/execFile call must be a literal.',
         },
+        // An ALIASED import hides the call from the selector above: that
+        // selector matches `callee.name`, and an alias renames the callee
+        // — so `import { spawnSync as s }` … `s(command)` reported nothing
+        // (verified 2026-10-30). The rule this config states is that these
+        // functions are imported BY NAME, so the lint can see which one a
+        // script calls; an alias is therefore banned AT THE IMPORT, where
+        // the rename is visible, and under any name.
+        ...CHILD_PROCESS_FUNCTIONS.map((name) => ({
+          selector: `ImportDeclaration[source.value=/^(node:)?child_process$/] > ImportSpecifier[imported.name="${name}"][local.name!="${name}"]`,
+          message: `scripts/ must import ${name} under its own name, so the lint can see the call.`,
+        })),
       ],
     },
   },
@@ -139,8 +160,9 @@ export default tseslint.config(
     // The ONE legitimate caller, named: `scripts/prepare.mjs`'s `run()`
     // helper forwards the command it was given, and the only two commands
     // it is given are named at its call sites — 'npm' and this script's own
-    // Node binary. Only the computed-command rule is exempt here; the
-    // shell-form ban above still applies to this file.
+    // Node binary. Only the computed-command rule is exempt here — with it
+    // the alias ban too, since ESLint exempts a RULE per file and not an
+    // entry of it; the shell-form ban above still applies to this file.
     //
     // This is the only exemption in scripts/, and a guard
     // (`test/eslint-config.test.ts`) pins it: a second exempt file fails the

@@ -47,6 +47,14 @@ export interface Job {
   readonly image: string | undefined;
   /** The runner label the job runs on — a label, or a list of them. */
   readonly runsOn: string | undefined;
+  /**
+   * The job's condition, as the document writes it.
+   *
+   * A job-level `if:` decides whether the job runs at all, so it decides
+   * whether the steps inside it run — an `if: false` switches a whole
+   * scan off while every check still reports green.
+   */
+  readonly if: string | undefined;
 }
 
 /** One workflow file, parsed. */
@@ -70,6 +78,7 @@ interface RawJob {
   readonly strategy?: { readonly matrix?: Record<string, unknown> };
   readonly container?: string | { readonly image?: string };
   readonly 'runs-on'?: string | readonly string[];
+  readonly if?: string;
 }
 
 /**
@@ -112,6 +121,7 @@ export function loadWorkflow(file: string): Workflow {
     matrix: job.strategy?.matrix,
     image: containerImage(job.container),
     runsOn: runnerLabel(job['runs-on']),
+    if: job.if,
   }));
   return { file, text, jobs };
 }

@@ -6,11 +6,18 @@
 # script works on any machine. Scanners that need the network (osv-scanner,
 # trivy, semgrep) are additionally skipped when their backend is unreachable,
 # with a clear note — an offline machine should not fail the gate silently.
-# CI runs npm audit + gitleaks + osv-scanner + trivy + semgrep on every PR:
-# the first three in the `quality` and `security` jobs, the last two in
-# their own `trivy` and `semgrep` jobs (not required checks — the database
-# and the rule registry they read both move without this repository
-# changing).
+#
+# CI runs these scanners on every pull request, in these jobs:
+#
+#   npm audit     -> quality
+#   gitleaks      -> security
+#   osv-scanner   -> security
+#   trivy (fs)    -> trivy
+#   trivy (image) -> docker
+#   semgrep       -> semgrep
+#
+# The `trivy` and `semgrep` jobs are not required checks — the database and
+# the rule registry they read both move without this repository changing.
 #
 # Usage: npm run scan
 set -u
