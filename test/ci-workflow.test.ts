@@ -223,6 +223,27 @@ const ACTIONLINT_VERSION = 'v1.7.12';
 const ACTIONLINT_INSTALL = 'go install github.com/rhysd/actionlint/cmd/actionlint@';
 
 /**
+ * The scanner jobs, and the step in each that does the scanning.
+ *
+ * The checkout matters as much as the scan: a scanner job with no
+ * checkout scans an EMPTY workspace, finds nothing and exits 0 — the
+ * "reported green over a scan that never happened" failure this branch
+ * exists to remove (ci.yml:164-165).
+ */
+const SCANNER_JOBS = [
+  {
+    job: 'trivy',
+    /** The step that runs the scanner. */
+    scan: (step: Step): boolean => step.uses?.includes('trivy-action') ?? false,
+  },
+  {
+    job: 'semgrep',
+    /** The step that runs the scanner. */
+    scan: (step: Step): boolean => (step.run ?? '').includes('semgrep scan'),
+  },
+] as const;
+
+/**
  * The checks branch protection on `main` requires. Keep in step with it.
  *
  * The list is FOUR checks, not three: `actionlint` is a required check too
@@ -796,6 +817,33 @@ describe('the workflow files — what the merge gate runs', () => {
       String(with_?.with['severity'] ?? ''),
       'the trivy job must scan the same severities',
     ).toBe('HIGH,CRITICAL');
+  });
+
+  it('checks out the code each scanner job scans', () => {
+    // Silent failure this prevents: a scanner job with NO checkout scans
+    // an empty workspace, finds nothing and exits 0 — the "reported green
+    // over a scan that never happened" failure this branch exists to
+    // remove (ci.yml:164-165). The checkout has to come BEFORE the scan
+    // as well: a scan step above the checkout reads the workspace before
+    // the code is in it, and reports the same clean result.
+    for (const { job, scan } of SCANNER_JOBS) {
+      const found = jobOf(ci, job);
+      expect(found, `ci.yml has no \`${job}\` job`).toBeDefined();
+      const steps = found?.steps ?? [];
+      const scanIndex = steps.findIndex(scan);
+      expect(scanIndex, `ci.yml: job \`${job}\` does not run its scanner`).toBeGreaterThanOrEqual(
+        0,
+      );
+      const checkoutIndex = steps.findIndex((step) => step.uses?.startsWith('actions/checkout'));
+      expect(
+        checkoutIndex,
+        `ci.yml: job \`${job}\` has no checkout step — it would scan an empty workspace`,
+      ).toBeGreaterThanOrEqual(0);
+      expect(
+        checkoutIndex,
+        `ci.yml: job \`${job}\` must check out the code before it scans it`,
+      ).toBeLessThan(scanIndex);
+    }
   });
 
   it('checks out the tags the release guard reads', () => {
