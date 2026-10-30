@@ -1,12 +1,13 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Logger } from '../logger.js';
-import { CHANGE_LIST_CAP } from '../core/changes.js';
+import { CHANGE_LIST_CAP, CORPUS_RECEIPT_LIMIT } from '../core/changes.js';
 import { diffIssues } from '../core/diff.js';
 import type { EcfrApi } from '../core/ecfr.js';
 import { redlineSection } from '../core/redline.js';
 import { ARCHIVE_FLOOR, historicalSection } from '../core/historical.js';
 import type { CFRService } from '../core/service.js';
+import { UNTRUSTED_DATA_NOTE } from './posture.js';
 import { renderToolText, runTool } from './tool-result.js';
 
 /**
@@ -31,6 +32,33 @@ const DIFF_ANNOTATIONS = {
   ...READ_ONLY_ANNOTATIONS,
   openWorldHint: true,
 } as const;
+
+/**
+ * The MCP wire's size bound on ONE provision's body, in characters.
+ *
+ * `diff_issues` bounds its citation lists at {@link CHANGE_LIST_CAP} and
+ * reports a `truncated` flag; a provision is one text, so the bound is a
+ * character count. 100 000 characters ≈ 25k tokens: a large provision
+ * (§ 4.130 is tens of KB) still fits a context, and a pathological one
+ * cannot blow it. The parser's own guard (MAX_SECTION_CHARS = 400 000 in
+ * src/core/xml.ts) is the upstream ceiling — this is the wire's, and it
+ * applies to the MCP surface only: the HTTP API and the export command
+ * serve the whole corpus on purpose.
+ */
+export const PROVISION_TEXT_CAP = 100_000;
+
+/**
+ * Cut one provision body at {@link PROVISION_TEXT_CAP} characters and
+ * report whether it was cut. The cut never splits a surrogate pair: half a
+ * character is not a character.
+ */
+function capProvision(body: string): { body: string; truncated: boolean } {
+  if (body.length <= PROVISION_TEXT_CAP) return { body, truncated: false };
+  let cut = body.slice(0, PROVISION_TEXT_CAP);
+  const last = cut.charCodeAt(cut.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1);
+  return { body: cut, truncated: true };
+}
 
 const searchOutputSchema = z.object({
   query: z.string(),
@@ -79,6 +107,11 @@ const sectionOutputSchema = z.object({
   citedBy: z.array(z.string()),
   indexStale: z.boolean(),
   notice: z.string().nullable(),
+  truncated: z
+    .boolean()
+    .describe(
+      `true when the provision body was cut at the ${PROVISION_TEXT_CAP}-character cap — the text below is incomplete`,
+    ),
 });
 
 const structureEntrySchema = z.object({
@@ -161,6 +194,11 @@ const historicalOutputSchema = z.object({
   markdown: z.string(),
   sourceUrl: z.string(),
   sourceUrlAtRequestedDate: z.string(),
+  truncated: z
+    .boolean()
+    .describe(
+      `true when the provision body was cut at the ${PROVISION_TEXT_CAP}-character cap — the text below is incomplete`,
+    ),
 });
 
 const changeReportOutputSchema = z.object({
@@ -263,7 +301,8 @@ export function registerTools(
         "Read each hit's heading and fetch its full text with get_section before you cite it. " +
         "Each response also carries matchedTerms and unmatchedTerms: the query's content words (stopwords, single characters and bare numerals removed), split into those the returned hits answered and those they did not. " +
         'A non-empty unmatchedTerms means the returned text does not speak to that part of your question — the governing provision may be a later hit, may be reachable only under different wording, or may not be in this index. ' +
-        'Never cite a provision you have not read in full, and never state that Title 38 does not address a question on the basis of this response alone.',
+        'Never cite a provision you have not read in full, and never state that Title 38 does not address a question on the basis of this response alone. ' +
+        UNTRUSTED_DATA_NOTE,
       inputSchema: {
         query: z
           .string()
@@ -334,7 +373,10 @@ export function registerTools(
       description:
         'Fetch the full text of one Title 38 CFR section or appendix as markdown. Accepts flexible citations: ' +
         '"4.125", "§ 4.125", "38 CFR 4.125", or appendix names like "Appendix A to Part 4". ' +
-        'Returns heading, hierarchy path, issue date and an ecfr.gov permalink.',
+        'Returns heading, hierarchy path, issue date and an ecfr.gov permalink. ' +
+        `The body is capped at ${PROVISION_TEXT_CAP} characters; a body that was cut sets \`truncated: true\`, ` +
+        'and the truncated text is incomplete — read the rest from the sourceUrl. ' +
+        UNTRUSTED_DATA_NOTE,
       inputSchema: {
         citation: z.string().min(1).max(120).describe('the citation to read, e.g. "38 CFR 4.125"'),
       },
@@ -344,8 +386,13 @@ export function registerTools(
     async (args) =>
       runTool(logger, 'get_section', async () => {
         const section = service.getSection(args.citation);
+        const text = capProvision(section.text);
+        const markdown = capProvision(section.markdown);
         const result: SectionOutput = {
           ...section,
+          text: text.body,
+          markdown: markdown.body,
+          truncated: text.truncated || markdown.truncated,
           references: section.references.map((reference) => ({ ...reference })),
           citedBy: [...section.citedBy],
         };
@@ -405,7 +452,9 @@ export function registerTools(
       description:
         'Report how current the local Title 38 index is: eCFR issue date, last sync time, row counts, the ' +
         'corpus receipt hash (a sha256 over the sorted per-provision (citation, text+heading) pairs at ' +
-        'rebuild time, null on older indexes) and ' +
+        'rebuild time, null on older indexes — ' +
+        CORPUS_RECEIPT_LIMIT +
+        ') and ' +
         'whether the index is stale relative to CFR_MAX_AGE_DAYS. Check this before relying on search results.',
       outputSchema: statusOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,
@@ -497,7 +546,10 @@ export function registerTools(
           "every call — no local index, no cache. eCFR's point-in-time archive starts at " +
           `${ARCHIVE_FLOOR}; a date before that is rejected as not_found. Use this for ` +
           'date-of-claim and CUE questions ("what did this section say when the claim was ' +
-          'filed?"); for the CURRENT text use get_section.',
+          'filed?"); for the CURRENT text use get_section. ' +
+          `The body is capped at ${PROVISION_TEXT_CAP} characters; a body that was cut sets \`truncated: true\`, ` +
+          'and the truncated text is incomplete — read the rest from the sourceUrl. ' +
+          UNTRUSTED_DATA_NOTE,
         inputSchema: {
           // at_date is a REQUESTED date, not an issue date: eCFR serves the
           // revision in force then and never reports which issue date it
@@ -519,6 +571,8 @@ export function registerTools(
       async (args) =>
         runTool(logger, 'get_section_at', async () => {
           const section = await historicalSection({ ecfr, logger }, args.at_date, args.citation);
+          const text = capProvision(section.text);
+          const markdown = capProvision(section.markdown);
           const structuredContent = {
             requestedDate: section.requestedDate,
             citation: section.citation,
@@ -528,10 +582,11 @@ export function registerTools(
             part: section.part,
             subpart: section.subpart,
             path: section.path,
-            text: section.text,
-            markdown: section.markdown,
+            text: text.body,
+            markdown: markdown.body,
             sourceUrl: section.sourceUrl,
             sourceUrlAtRequestedDate: section.sourceUrlAtRequestedDate,
+            truncated: text.truncated || markdown.truncated,
           };
           return {
             content: [
@@ -600,7 +655,8 @@ export function registerTools(
           'citation missing from BOTH dates is a not_found error after the fetches. Stateless: both ' +
           "dates' full-title XML is fetched from eCFR per call — no local index needed, no cache. " +
           "When either side exceeds the core's line cap the per-line walk is replaced by two whole-text " +
-          "coarse blocks (`coarse: true`) — passed through uncapped here, the core's own bound.",
+          "coarse blocks (`coarse: true`) — passed through uncapped here, the core's own bound. " +
+          UNTRUSTED_DATA_NOTE,
         inputSchema: {
           from_date: dateArgSchema,
           to_date: dateArgSchema,
