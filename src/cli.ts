@@ -283,8 +283,16 @@ export function failureMessage(error: unknown): string {
  * An invalid input is a usage mistake, not a service failure. The README's
  * exit-code table gives code 2 to usage errors, and a script that retries
  * on 1 would otherwise retry a typo forever.
+ *
+ * Only `invalid_input` is a usage mistake. `unavailable` is a DEPLOYMENT
+ * fault — the service was wired without the client it needs — so it exits 1
+ * with every other service failure: a script must not retry a misconfigured
+ * server as if the reader had made a typo.
+ *
+ * Exported so the mapping can be pinned on its own; `main()` only reaches
+ * it through a throw.
  */
-function exitCodeFor(error: unknown): number {
+export function exitCodeFor(error: unknown): number {
   if (error instanceof CommandError) return error.exitCode;
   if (error instanceof ServiceError && error.code === 'invalid_input') return EXIT.USAGE;
   return error instanceof ConfigError ? EXIT.USAGE : EXIT.ERROR;
