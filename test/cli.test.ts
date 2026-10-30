@@ -2,12 +2,14 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { CliError, failureMessage, main, parseArgs } from '../src/cli.js';
+import { CliError, exitCodeFor, failureMessage, main, parseArgs } from '../src/cli.js';
 import { HttpError } from '../src/core/http-client.js';
 import { formatIssueDiff } from '../src/commands/diff.js';
 import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
 import { formatSearchResults } from '../src/commands/search.js';
 import { Store } from '../src/core/store.js';
+import { ServiceError } from '../src/core/service.js';
+import { EXIT } from '../src/exit-codes.js';
 import type { FetchLike } from '../src/core/http-client.js';
 import { VERSION } from '../src/version.js';
 import type { Logger } from '../src/logger.js';
@@ -342,6 +344,21 @@ function makeSyncFetch(getXml: () => string): FetchLike {
     return new Response('not found', { status: 404 });
   };
 }
+
+describe('exitCodeFor', () => {
+  it('maps a usage mistake to 2 and a deployment fault to 1', () => {
+    // A `ServiceError` carrying `invalid_input` is the READER's mistake, so
+    // it exits 2 (usage). `unavailable` is a DEPLOYMENT fault — the service
+    // was wired without the client it needs — and must exit 1: a script
+    // that treats it as a usage error retries a misconfigured server as if
+    // the reader had made a typo.
+    expect(exitCodeFor(new ServiceError('bad input', 'invalid_input'))).toBe(EXIT.USAGE);
+    expect(exitCodeFor(new ServiceError('no eCFR client injected', 'unavailable'))).toBe(
+      EXIT.ERROR,
+    );
+    expect(exitCodeFor(new ServiceError('missing provision', 'not_found'))).toBe(EXIT.ERROR);
+  });
+});
 
 describe('main: sync output', () => {
   it('reports the provision-level change counts', async () => {
@@ -689,25 +706,46 @@ describe('cfr-free search', () => {
     expect(() => parseArgs(['search', '--limit', '5'])).toThrow(/unknown option for search/);
   });
 
-  it('refuses a query the index could never match, before opening it', async () => {
+  it('refuses a query the index could never match, and accepts one at either bound', () => {
     // The service enforces the same rule, but it runs after the index is
     // built — and building it may pull a 2-3 MB sync. A rejected query
-    // must not cost the user a download: the index is never opened, and
-    // the exit code is 2 (usage), not 1 (service failure).
+    // must not cost the user a download, so the CLI refuses it first.
     expect(() => parseArgs(['search', 'ab'])).toThrow(/at least 3 characters/);
     expect(() => parseArgs(['search', 'x'.repeat(201)])).toThrow(/at most 200 characters/);
+    // The ACCEPT side is pinned too, and it is a separate property from the
+    // reject side: a 3- or 200-character query is one the index WOULD
+    // match. Without these two assertions the guard's bounds are unpinned —
+    // turning `<` into `<=` (or `>` into `>=`) refuses a valid query and
+    // leaves the suite green.
+    expect(() => parseArgs(['search', 'abc'])).not.toThrow();
+    expect(() => parseArgs(['search', 'x'.repeat(200)])).not.toThrow();
+  });
 
+  it('opens no index and downloads nothing for a rejected query', async () => {
+    // CR-05's core property, in a block of its own so it can fail on its
+    // own: a rejected query must cost the user no index download. The
+    // assertions are ORDERED so the index one fires first — if a refactor
+    // moved the validation after `ensureIndex`, the index file would exist
+    // and this block would fail on THAT assertion instead of being masked
+    // by the exit code (which the parseArgs block above already covers).
     const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-cli-'));
     const indexPath = path.join(dir, 'index.sqlite');
+    const fetched: string[] = [];
+    vi.stubGlobal('fetch', (input: unknown) => {
+      fetched.push(String(input));
+      throw new Error('a rejected query must not reach the network');
+    });
     const { err, io } = makeIo({ CFR_INDEX_PATH: indexPath, CFR_LOG_LEVEL: 'error' });
     try {
       const code = await main(['search', 'ab'], io);
-      expect(code).toBe(2);
-      expect(err.join('')).toContain('at least 3 characters');
       expect(existsSync(indexPath), 'the index must not be opened for a rejected query').toBe(
         false,
       );
+      expect(fetched, 'a rejected query must not cost the user a download').toEqual([]);
+      expect(code).toBe(2);
+      expect(err.join('')).toContain('at least 3 characters');
     } finally {
+      vi.unstubAllGlobals();
       rmSync(dir, { recursive: true, force: true });
     }
   });

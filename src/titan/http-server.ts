@@ -441,9 +441,9 @@ async function handleRedline(
 
 function statusFor(error: ServiceError | StructureError): { status: number; code: string } {
   if (error instanceof StructureError) return { status: 404, code: 'not_found' };
-  return error.code === 'not_found'
-    ? { status: 404, code: 'not_found' }
-    : { status: 400, code: 'invalid_input' };
+  if (error.code === 'unavailable') return { status: 500, code: 'internal_error' };
+  if (error.code === 'not_found') return { status: 404, code: 'not_found' };
+  return { status: 400, code: 'invalid_input' };
 }
 
 function gauge(name: string, help: string, value: number): string {
@@ -705,7 +705,7 @@ export function createHttpServer(
     // answers its own errors synchronously and never throws), then `await
     // dispatch` puts async rejections in front of the SAME catch the sync
     // handlers have always used — ServiceError/StructureError → statusFor
-    // (400/404 + client-safe message), anything else → logged + generic 500.
+    // (400/404/500 + client-safe message), anything else → logged + generic 500.
     void (async () => {
       const url = precheck(req, res, limiter);
       if (url === null) return;
