@@ -214,6 +214,24 @@ describe('CFRService.search', () => {
     });
   });
 
+  it('explains a rejected input in plain language', () => {
+    // The validation library's own phrasing — "Too small: expected string
+    // to have >=3 characters", "Invalid string: must match pattern" — is
+    // developer-facing. The people reading this tool are claims
+    // practitioners, so a rejected input says what to type instead.
+    withService((service) => {
+      expect(() => service.search({ query: 'ab' })).toThrow(
+        /invalid input: the query needs at least 3 characters/,
+      );
+      expect(() => service.search({ query: 'mental disorder', chapter: '4' })).toThrow(
+        /invalid input: the chapter must be a Roman numeral such as I, II or IV/,
+      );
+      expect(() => service.search({ query: 'mental disorder', kind: 'policy' as never })).toThrow(
+        /invalid input: the kind must be `section` or `appendix`/,
+      );
+    });
+  });
+
   it('constrains ranked results by kind and chapter', () => {
     withService((service) => {
       const appendixOnly = service.search({ query: 'rating schedule', kind: 'appendix' });

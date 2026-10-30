@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -163,6 +163,17 @@ describe('main', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('returns exit code 2 for an invalid input, not 1', async () => {
+    // The README's exit-code table gives code 2 to usage errors, and a
+    // script that retries on 1 would otherwise retry a typo forever. A
+    // malformed citation is a usage mistake: it is refused before any
+    // fetch, so nothing here touches the network.
+    const { err, io } = makeIo({ CFR_LOG_LEVEL: 'error' });
+    const code = await main(['historical', '2026-01-01', 'not a citation'], io);
+    expect(code).toBe(2);
+    expect(err.join('')).toContain('not a citation');
   });
 });
 
@@ -538,6 +549,29 @@ describe('cfr-free search', () => {
   it('refuses a search with no query, and a dash-prefixed option', () => {
     expect(() => parseArgs(['search'])).toThrow(CliError);
     expect(() => parseArgs(['search', '--limit', '5'])).toThrow(/unknown option for search/);
+  });
+
+  it('refuses a query the index could never match, before opening it', async () => {
+    // The service enforces the same rule, but it runs after the index is
+    // built — and building it may pull a 2-3 MB sync. A rejected query
+    // must not cost the user a download: the index is never opened, and
+    // the exit code is 2 (usage), not 1 (service failure).
+    expect(() => parseArgs(['search', 'ab'])).toThrow(/at least 3 characters/);
+    expect(() => parseArgs(['search', 'x'.repeat(201)])).toThrow(/at most 200 characters/);
+
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-cli-'));
+    const indexPath = path.join(dir, 'index.sqlite');
+    const { err, io } = makeIo({ CFR_INDEX_PATH: indexPath, CFR_LOG_LEVEL: 'error' });
+    try {
+      const code = await main(['search', 'ab'], io);
+      expect(code).toBe(2);
+      expect(err.join('')).toContain('at least 3 characters');
+      expect(existsSync(indexPath), 'the index must not be opened for a rejected query').toBe(
+        false,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('prints the stale-index notice when the index is past its freshness limit', () => {
