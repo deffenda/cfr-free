@@ -35,7 +35,23 @@ info:
     `allow: GET, HEAD`. The two eCFR-fetching routes answer `503
     upstream_busy` when the upstream fetch queue is full — the request is
     refused at once instead of being parked behind the fetches already in
-    flight. All schema fields listed under `required` are always
+    flight. Rate limiting (armed only when `CFR_ALLOW_REMOTE=1`; loopback
+    never throttles) charges a request what it COSTS, not what it is: the
+    per-peer token bucket is spent in `precheck`, BEFORE the router, so the
+    price follows the path the request would take.
+
+    | request | tokens |
+    | --- | --- |
+    | `/api/v1/diff`, `/api/v1/redline` — they pull the complete Title 38 document from eCFR (~2 MB on the wire, ~16 MB parsed) | 10 |
+    | every other path — the index-backed reads, `/health`, `/metrics`, the web UI and its assets | 1 |
+    | a request the router will REFUSE — a method other than GET/HEAD (`405`), a URL over 2048 bytes (`414`), a malformed URL (`400`) | 1 |
+
+    The bucket is checked FIRST, so an exhausted budget answers `429
+    rate_limited` even to a request that would have been refused with
+    `405`/`414`/`400` anyway: a refusal is never free to repeat. A refused
+    request costs the refusal price, not the price of the route it aimed
+    at — a `POST` to `/api/v1/diff` costs one token, not ten. All schema
+    fields listed under `required` are always
     present (the optional `Health.diskFree`/`diskTotal` and
     `RedlineResult.fromText`/`toText` are the deliberate exceptions); nullable
     ones use OpenAPI 3.1 `type: [string, "null"]` (never `nullable: true`).
@@ -527,7 +543,7 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
     RateLimited:
       # source: src/titan/http-server.ts#precheck
-      description: '{ error: "rate_limited", message } — per-peer token bucket exhausted (armed only when CFR_ALLOW_REMOTE=1; loopback never throttles).'
+      description: '{ error: "rate_limited", message } — per-peer token bucket exhausted (armed only when CFR_ALLOW_REMOTE=1; loopback never throttles). The bucket is spent BEFORE the router: a diff or a redline costs 10 tokens, every other path 1, and a request the router would refuse (405/414/400) 1 — so an exhausted budget answers 429 even to a request that would have been refused anyway. See the token-cost table in the API description.'
       headers:
         retry-after: { description: Seconds to wait., schema: { type: integer } }
       content:

@@ -769,6 +769,14 @@ const ERROR_PROBES: readonly ErrorProbeRow[] = [
     url: `/api/v1/diff?from=${BUSY_DATE}&to=2026-06-01`,
     expectedStatus: 503,
   },
+  {
+    label: 'redline GET when the upstream fetch queue is full',
+    specPath: '/api/v1/redline',
+    operation: 'get',
+    method: 'GET',
+    url: `/api/v1/redline?from=${BUSY_DATE}&to=2026-06-01&citation=4.125`,
+    expectedStatus: 503,
+  },
 ];
 
 describe('OpenAPI response conformance (in-process server vs spec)', () => {
