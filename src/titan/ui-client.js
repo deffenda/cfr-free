@@ -21,12 +21,14 @@
   const searchForm = byId('search-form');
   const qInput = byId('q');
   const kindSelect = byId('kind');
+  const partInput = byId('part');
   const chapterInput = byId('chapter');
   const perPageSelect = byId('per-page');
   const statusLine = byId('search-status');
   const cautionLine = byId('search-caution');
   const hitsList = byId('search-hits');
   const pager = byId('search-pager');
+  const announcer = byId('view-announcer');
   const sectionError = byId('section-error');
   const sectionHeading = byId('section-heading');
   const copyButton = byId('copy-citation');
@@ -40,6 +42,9 @@
   // Incremented on every navigation; a response may only mutate the DOM
   // while the generation it captured is still current.
   let routeGeneration = 0;
+  // The view that was showing before this navigation; null until the first
+  // render has happened. The keyboard moves only when the VIEW changes.
+  let lastView = null;
   const browseView = byId('browse-view');
   const browseError = byId('browse-error');
   const browseCrumbs = byId('browse-crumbs');
@@ -75,6 +80,38 @@
     return value;
   }
 
+  /**
+   * Plain-error messages, in the reader's words.
+   *
+   * The service's message already names the rule that was broken — "the
+   * chapter must be a Roman numeral such as I, II or IV". What a claims
+   * practitioner must not be shown is the label the API puts on it, or a
+   * validation library's own phrasing. The code is for a program; the
+   * message is for the reader.
+   */
+  function plainErrorMessage(code, message) {
+    const text = String(message === undefined || message === null ? '' : message);
+    if (code !== 'invalid_input') return text;
+    const prefix = 'invalid input: ';
+    return text.indexOf(prefix) === 0 ? text.slice(prefix.length) : text;
+  }
+
+  /** The heading each view's keyboard focus moves to. */
+  const VIEW_HEADINGS = {
+    search: 'search-heading',
+    section: 'section-heading',
+    browse: 'browse-heading',
+    redline: 'redline-heading',
+  };
+
+  /** What the live region says when a view opens. */
+  const VIEW_LABELS = {
+    search: 'Search.',
+    section: 'Provision.',
+    browse: 'Browse.',
+    redline: 'Redline.',
+  };
+
   function parseHash() {
     const hash = window.location.hash;
     // Single browse route: no query params — the tree state stays in the click
@@ -103,6 +140,7 @@
       view: 'search',
       q: params.get('q') === null ? '' : params.get('q'),
       kind: params.get('kind') === null ? '' : params.get('kind'),
+      part: params.get('part') === null ? '' : params.get('part'),
       chapter: params.get('chapter') === null ? '' : params.get('chapter'),
       page: clampInt(params.get('page'), 1, 10000),
       perPage: clampInt(params.get('per_page'), 10, 20),
@@ -113,6 +151,7 @@
     const params = new URLSearchParams();
     if (state.q !== '') params.set('q', state.q);
     if (state.kind === 'section' || state.kind === 'appendix') params.set('kind', state.kind);
+    if (state.part !== '') params.set('part', state.part);
     if (state.chapter !== '') params.set('chapter', state.chapter);
     if (state.page > 1) params.set('page', String(state.page));
     if (state.perPage !== 10) params.set('per_page', String(state.perPage));
@@ -125,6 +164,7 @@
       view: 'search',
       q: state.q,
       kind: state.kind,
+      part: state.part,
       chapter: state.chapter,
       page: page,
       perPage: state.perPage,
@@ -135,6 +175,7 @@
     const params = new URLSearchParams();
     params.set('q', state.q);
     if (state.kind === 'section' || state.kind === 'appendix') params.set('kind', state.kind);
+    if (state.part !== '') params.set('part', state.part);
     if (state.chapter !== '') params.set('chapter', state.chapter);
     params.set('page', String(state.page));
     params.set('per_page', String(state.perPage));
@@ -300,8 +341,7 @@
     if (!ok || typeof body.error === 'string') {
       clear(cautionLine);
       cautionLine.hidden = true;
-      statusLine.textContent =
-        'Search failed (' + String(body.error) + '): ' + String(body.message);
+      statusLine.textContent = 'Search failed: ' + plainErrorMessage(body.error, body.message);
       return;
     }
     const total = typeof body.total === 'number' ? body.total : 0;
@@ -415,7 +455,7 @@
         if (requestId !== redlineRequestId) return;
         if (!result.ok || typeof result.body.error === 'string') {
           showRedlineError(
-            'Redline failed (' + String(result.body.error) + '): ' + String(result.body.message),
+            'Redline failed: ' + plainErrorMessage(result.body.error, result.body.message),
           );
           return;
         }
@@ -458,6 +498,7 @@
     clearRedline();
     qInput.value = state.q;
     kindSelect.value = state.kind === 'section' || state.kind === 'appendix' ? state.kind : '';
+    partInput.value = state.part;
     chapterInput.value = state.chapter;
     perPageSelect.value = String(state.perPage);
     clear(hitsList);
@@ -490,6 +531,147 @@
       });
   }
 
+  /** The cells of one pipe row, with the escaped pipes unescaped. */
+  function tableCells(line) {
+    const trimmed = line.trim();
+    if (trimmed.indexOf('|') === -1) return [];
+    const inner = trimmed.replace(/^\|/, '').replace(/\|$/, '');
+    const cells = [];
+    let current = '';
+    for (let index = 0; index < inner.length; index += 1) {
+      const char = inner.charAt(index);
+      // A cell's own pipe is escaped by the parser; the separator row and
+      // the cell boundary are not.
+      if (char === '\\' && inner.charAt(index + 1) === '|') {
+        current += '|';
+        index += 1;
+        continue;
+      }
+      if (char === '|') {
+        cells.push(current.trim());
+        current = '';
+        continue;
+      }
+      current += char;
+    }
+    cells.push(current.trim());
+    return cells;
+  }
+
+  /** True when the line is a markdown table row. */
+  function isPipeRow(line) {
+    return line.trim().indexOf('|') === 0;
+  }
+
+  /** True when the row is the table's separator (a row of dashes). */
+  function isSeparatorRow(line) {
+    const cells = tableCells(line);
+    // The alignment colons are part of the dialect: the repository's own
+    // table parser accepts `| :--- | ---: |`, so the renderer does too.
+    return cells.length > 0 && cells.every((cell) => /^:?-+:?$/.test(cell));
+  }
+
+  /**
+   * True when the line at `index` starts a markdown table.
+   *
+   * A table is a header row and a separator row. A line that merely
+   * begins with a pipe is a paragraph that happens to start with one, and
+   * rendering it as a table would show a table with no body — and no way
+   * to read what the line said.
+   */
+  function isTableStart(lines, index) {
+    if (!isPipeRow(lines[index] ?? '')) return false;
+    return isSeparatorRow(lines[index + 1] ?? '');
+  }
+
+  /** One markdown table, as a real table. */
+  function renderTable(rows) {
+    const table = el('table', 'rating-table');
+    const head = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    for (const cell of tableCells(rows[0] ?? '')) headRow.appendChild(el('th', '', cell));
+    head.appendChild(headRow);
+    table.appendChild(head);
+    const body = document.createElement('tbody');
+    // The parser emits a separator row under the header; a table without one
+    // has no row to skip.
+    const bodyRows =
+      rows.length > 1 && isSeparatorRow(rows[1] ?? '') ? rows.slice(2) : rows.slice(1);
+    for (const line of bodyRows) {
+      const row = document.createElement('tr');
+      for (const cell of tableCells(line)) row.appendChild(el('td', '', cell));
+      body.appendChild(row);
+    }
+    table.appendChild(body);
+    return table;
+  }
+
+  /**
+   * Render a provision's markdown into the DOM.
+   *
+   * A provision arrives in TWO renderings: `text` (pipe-joined rows with no
+   * separator) and `markdown` (a real markdown table). The UI used the
+   * first, so § 4.130's rating tables — the most-read provision for this
+   * audience — came out as an unaligned run-on block that wrapped
+   * unpredictably on a narrow screen. The structured rendering was already
+   * in the payload; the UI just did not use it.
+   *
+   * This renders the three shapes the parser emits — headings, paragraphs
+   * and tables — with `createElement` and `textContent`, like everything
+   * else here, so the no-HTML-sink posture holds: regulatory text never
+   * reaches one.
+   */
+  function renderMarkdown(container, markdown) {
+    clear(container);
+    // CRLF is one line break, not two: a carriage left at the end of a
+    // heading is a character the reader sees.
+    const lines = String(markdown === undefined || markdown === null ? '' : markdown).split(
+      /\r?\n/,
+    );
+    let index = 0;
+    while (index < lines.length) {
+      const line = lines[index] ?? '';
+      if (line.trim() === '') {
+        index += 1;
+        continue;
+      }
+      if (isTableStart(lines, index)) {
+        index = renderTableBlock(container, lines, index);
+        continue;
+      }
+      if (/^###\s/.test(line)) {
+        container.appendChild(el('h3', '', line.replace(/^###\s+/, '')));
+        index += 1;
+        continue;
+      }
+      index = renderParagraphBlock(container, lines, index);
+    }
+  }
+
+  /** The table at `index`, and the index of the first line after it. */
+  function renderTableBlock(container, lines, index) {
+    const rows = [];
+    while (index < lines.length && isPipeRow(lines[index] ?? '')) {
+      rows.push(lines[index] ?? '');
+      index += 1;
+    }
+    container.appendChild(renderTable(rows));
+    return index;
+  }
+
+  /** The paragraph at `index`, and the index of the first line after it. */
+  function renderParagraphBlock(container, lines, index) {
+    const paragraph = [];
+    while (index < lines.length) {
+      const next = lines[index] ?? '';
+      if (next.trim() === '' || isTableStart(lines, index) || /^###\s/.test(next)) break;
+      paragraph.push(next);
+      index += 1;
+    }
+    if (paragraph.length > 0) container.appendChild(el('p', '', paragraph.join('\n')));
+    return index;
+  }
+
   function fillSection(section) {
     sectionHeading.textContent = String(section.heading);
     const crumbs = [];
@@ -510,7 +692,12 @@
     if (typeof section.notice === 'string' && section.notice !== '') {
       sectionMeta.appendChild(document.createTextNode(' — ' + section.notice));
     }
-    sectionText.textContent = String(section.text);
+    // The markdown is the structured rendering — the one with the rating
+    // tables intact. The text is the fallback, for a payload that does not
+    // carry it. A markdown body that is only whitespace carries nothing
+    // either, and the text is what the reader should see.
+    const markdown = typeof section.markdown === 'string' ? section.markdown : '';
+    renderMarkdown(sectionText, markdown.trim() === '' ? String(section.text) : markdown);
     fillCitationBlock(section);
     fillReferences(section);
     fillCitedBy(section);
@@ -629,10 +816,8 @@
           sectionError.textContent =
             'Failed to load ' +
             citation +
-            ' (' +
-            String(result.body.error) +
-            '): ' +
-            String(result.body.message);
+            ': ' +
+            plainErrorMessage(result.body.error, result.body.message);
           return;
         }
         fillSection(result.body);
@@ -788,7 +973,7 @@
         if (generation !== routeGeneration) return;
         if (!result.ok || typeof result.body.error === 'string') {
           showBrowseError(
-            'Browse failed (' + String(result.body.error) + '): ' + String(result.body.message),
+            'Browse failed: ' + plainErrorMessage(result.body.error, result.body.message),
           );
           return;
         }
@@ -827,6 +1012,7 @@
       view: 'search',
       q: qInput.value.trim(),
       kind: kindSelect.value,
+      part: partInput.value.trim(),
       chapter: chapterInput.value.trim(),
       page: 1,
       perPage: clampInt(perPageSelect.value, 10, 20),
@@ -860,7 +1046,69 @@
     }
   }
 
+  /**
+   * Move the keyboard to the view that just opened.
+   *
+   * The heading takes the focus, and it takes it WITHOUT becoming a tab
+   * stop: `tabindex="-1"` makes an element focusable on demand without
+   * putting it in the tab order.
+   */
+  function moveFocusTo(view) {
+    const target = byId(VIEW_HEADINGS[view]);
+    if (target === null || typeof target.focus !== 'function') return;
+    target.focus();
+  }
+
+  /**
+   * Say which view opened.
+   *
+   * The live region carries the change of view, because a screen-reader
+   * user gets no other signal that the page they were on is gone.
+   */
+  function announceView(view) {
+    if (announcer === null) return;
+    announcer.textContent = VIEW_LABELS[view] || '';
+  }
+
+  /**
+   * True when the fragment is one of this app's routes.
+   *
+   * Everything else — the skip link's `#main`, an anchor someone typed —
+   * is a fragment, not a destination, and must not change the view.
+   */
+  function isRouteHash(hash) {
+    return hash === '' || hash.indexOf('#/') === 0;
+  }
+
+  /**
+   * The skip link reaches the content — it does not navigate.
+   *
+   * The link points at `#main`, and a router that reads every fragment as a
+   * route would throw away the view the reader was in — and the query they
+   * had typed — to show them the search form again. So the click is handled
+   * here: the fragment never changes, and the focus lands on the content
+   * the link names.
+   */
+  function wireSkipLink() {
+    const link = byId('skip-link');
+    if (link === null || typeof link.addEventListener !== 'function') return;
+    link.addEventListener('click', (event) => {
+      if (event && typeof event.preventDefault === 'function') event.preventDefault();
+      const main = byId('main');
+      if (main === null || typeof main.focus !== 'function') return;
+      main.focus();
+    });
+  }
+
   function renderRoute() {
+    // A fragment that is not one of this app's routes is not a navigation.
+    // The skip link points at `#main`, and a router that treated that as a
+    // route would throw away the view the reader was in — and the query
+    // they had typed — to show them the search form again.
+    //
+    // The first render is exempt: a page loaded AT `#main` must still show
+    // something.
+    if (lastView !== null && !isRouteHash(window.location.hash)) return;
     // Route ownership: every navigation (including an empty search, the
     // browse tree and a repeat of the same route) invalidates the work
     // started by the previous one. A response may only touch the DOM while
@@ -875,8 +1123,22 @@
     else if (state.view === 'browse') renderBrowse(generation);
     else if (state.view === 'redline') renderRedline();
     else renderSearch(state, generation);
+    // The keyboard follows the view. The focused element was inside the
+    // view that was just hidden, so focus fell back to the body: a keyboard
+    // or screen-reader user was dumped at the top of the document with no
+    // announcement of the new view and nowhere to go next.
+    //
+    // Only when the VIEW changed: the first render is not a navigation, and
+    // a second search on the same view updates in place — moving the
+    // keyboard there would take it away from the field being typed in.
+    if (lastView !== null && lastView !== state.view) {
+      moveFocusTo(state.view);
+      announceView(state.view);
+    }
+    lastView = state.view;
   }
 
   window.addEventListener('hashchange', renderRoute);
+  wireSkipLink();
   renderRoute();
 })();

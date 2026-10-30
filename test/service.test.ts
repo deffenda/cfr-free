@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { CFRService, ServiceError } from '../src/core/service.js';
-import { StructureError } from '../src/core/structure.js';
+import { CFRService } from '../src/core/service.js';
+import { ServiceError } from '../src/core/errors.js';
+import { StructureError } from '../src/core/errors.js';
 import { syncIndex } from '../src/core/sync.js';
 import type { EcfrApi } from '../src/core/ecfr.js';
 import {
@@ -102,7 +103,7 @@ describe('CFRService.search', () => {
 
   it('orders a heading-phrase match ahead of a body-heavy match', () => {
     // bm25 weighs term frequency WITHIN a column, so the section whose body
-    // repeats the phrase ranks first on its own. SPEC §13 row 4 promises
+    // repeats the phrase ranks first on its own. delivery log §13 row 4 promises
     // that a heading match outranks a body-only match, so the heading-phrase
     // key puts § 3.350 ahead.
     const temp = openTempStore({
@@ -1232,12 +1233,15 @@ describe('CFRService.diffBetween (diff facade)', () => {
     }
   });
 
-  it('fails closed with a mapped invalid_input when no eCFR client was injected', async () => {
+  it('fails closed with a mapped unavailable when no eCFR client was injected', async () => {
     const temp = openTempStore();
     try {
       // Plain 2-arg construction (tests, index readers): the facade must not
       // reach into an undefined client — it throws a clean ServiceError the
       // HTTP layer maps through statusFor instead of crashing the handler.
+      // The code is `unavailable`, NOT `invalid_input`: the fault is the
+      // deployment's (no eCFR client was wired in), not the reader's, so it
+      // must not be reported as a usage error.
       const service = new CFRService(temp.store, 7);
       const error = await service.diffBetween(FROM_DATE, TO_DATE).then(
         () => {
@@ -1246,7 +1250,7 @@ describe('CFRService.diffBetween (diff facade)', () => {
         (thrown: unknown) => thrown,
       );
       expect(error).toBeInstanceOf(ServiceError);
-      expect((error as ServiceError).code).toBe('invalid_input');
+      expect((error as ServiceError).code).toBe('unavailable');
       expect((error as ServiceError).message).toBe('diff unavailable — no eCFR client injected');
     } finally {
       temp.cleanup();

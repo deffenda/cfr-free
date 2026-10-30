@@ -45,7 +45,15 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { ci, jobOf, loadWorkflow, release, workflowFiles, type Job } from './workflows.js';
+import {
+  ci,
+  jobOf,
+  loadWorkflow,
+  parseWorkflow,
+  release,
+  workflowFiles,
+  type Job,
+} from './workflows.js';
 
 const PACKAGE_PATH = fileURLToPath(new URL('../package.json', import.meta.url));
 
@@ -151,7 +159,34 @@ const REQUIRED_CHECKS = ['quality (22)', 'quality (24)', 'security', 'actionlint
  * that may run the gate as one that does is the safe direction, since the
  * finding it can raise is a missing install, never a skipped gate.
  */
-const GATE_COMMAND = /(?:^|[\s;&|(`'"])npm run\s+(?:ci|lint:actions)(?![\w:.-])/;
+const NPM_RUN_COMMAND = /(?:^|[\s;&|(`'"])npm run\s+([\w:.-]+)/g;
+
+/**
+ * A bare `npm test` in command position: npm's own spelling of the `test`
+ * script, which the `npm run <script>` form does not match. The word
+ * `test` must END there, so `npm run test:coverage` — a different script,
+ * matched by the form above — is not read as the bare form.
+ */
+const NPM_TEST_COMMAND = /(?:^|[\s;&|(`'"])npm test\b/g;
+
+/**
+ * The scripts a run value invokes, in the order they sit: the `npm run
+ * <script>` forms and the bare `npm test`, which npm resolves to the
+ * `test` script.
+ */
+function invokedScripts(run: string): string[] {
+  const found = [
+    ...[...run.matchAll(NPM_RUN_COMMAND)].map((match) => ({
+      index: match.index ?? 0,
+      script: match[1] ?? '',
+    })),
+    ...[...run.matchAll(NPM_TEST_COMMAND)].map((match) => ({
+      index: match.index ?? 0,
+      script: 'test',
+    })),
+  ];
+  return found.sort((a, b) => a.index - b.index).map((entry) => entry.script);
+}
 
 /**
  * The gate command as TEXT, without the "in command position" rule: the
@@ -181,6 +216,55 @@ function localGateCommands(script: string): string[] {
     .filter((command) => command.length > 0)
     .map((command) => command.replace(/^npm run /, ''));
 }
+
+/**
+ * The scripts that make a job a GATE job: `npm run ci` itself and every
+ * step the `ci` script runs, plus the two scripts that run the whole test
+ * suite on their own.
+ *
+ * DERIVED from package.json, not hard-coded. The hard-coded list was
+ * `ci|lint:actions`, and it went stale the moment the gate grew a step:
+ * a job that runs only `npm run test:coverage` — which runs the release
+ * guard, and so needs the tags a shallow checkout does not carry — was
+ * not a gate job at all, so the checkout-depth guard never saw it. A
+ * step of the `ci` script that is no script of its own (a raw command)
+ * invokes no gate command and is not one.
+ *
+ * `test` and `validate` are added on top of that derivation, because the
+ * `ci` script names NEITHER of them: it runs `test:coverage`. Both run
+ * the test file that holds the release guard — `test` runs the whole
+ * vitest suite, `validate` runs the suite over the changed set — so a
+ * job running either with a shallow checkout leaves the release guard
+ * asserting nothing. That is CR-01's shape, one script name away, so
+ * the set names them. Each is read from the manifest, so a rename drops
+ * it rather than leaving a name behind that names nothing.
+ */
+const GATE_SCRIPTS = [
+  ...new Set([
+    'ci',
+    ...['test', 'validate'].filter((name) => name in manifest.scripts),
+    ...localGateCommands(manifest.scripts['ci'] ?? '')
+      .map((step) => step.split(/\s+/)[0] ?? '')
+      .filter((step) => step in manifest.scripts),
+  ]),
+];
+
+/**
+ * The scripts that invoke actionlint: `npm run ci` (which runs
+ * `npm run lint:actions`) and every gate step whose own command runs
+ * actionlint. DERIVED from package.json, so renaming the actionlint
+ * script cannot leave the guard behind. A job running one of these shells
+ * out to a bare `actionlint`, which the runner does not ship — so it
+ * needs the pinned install and the PATH echo in an earlier step. A job
+ * running any other gate step does not, and demanding the install of it
+ * would fail a workflow that is correct.
+ */
+const ACTIONLINT_SCRIPTS = [
+  ...new Set([
+    'ci',
+    ...GATE_SCRIPTS.filter((name) => (manifest.scripts[name] ?? '').includes('actionlint')),
+  ]),
+];
 
 /** The `npm run …` suffixes a job's steps run, in order. */
 function workflowRunSteps(job: Job): string[] {
@@ -260,11 +344,26 @@ function actionRepository(uses: string): string {
   return before.split('/').slice(0, 2).join('/');
 }
 
-/** The steps of a job that run the shared gate. */
+/** The steps of a job that run a gate command. */
 function gateConsumerSteps(job: Job): number[] {
   const found: number[] = [];
   job.steps.forEach((step, index) => {
-    if (GATE_COMMAND.test(step.run ?? '')) found.push(index);
+    const invoked = invokedScripts(step.run ?? '');
+    if (invoked.some((name) => GATE_SCRIPTS.includes(name))) found.push(index);
+  });
+  return found;
+}
+
+/**
+ * The steps of a job that shell out to actionlint — the gate steps that
+ * need the pinned install and the PATH echo, as opposed to the gate
+ * steps that need neither.
+ */
+function actionlintConsumerSteps(job: Job): number[] {
+  const found: number[] = [];
+  job.steps.forEach((step, index) => {
+    const invoked = invokedScripts(step.run ?? '');
+    if (invoked.some((name) => ACTIONLINT_SCRIPTS.includes(name))) found.push(index);
   });
   return found;
 }
@@ -309,16 +408,20 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
     // stricter than line order: `GITHUB_PATH` applies only to subsequent
     // steps, so install, echo and gate folded into one step still die with
     // `actionlint: command not found` however they are ordered inside it.
+    //
+    // The rule is about the steps that SHELL OUT TO ACTIONLINT, and those
+    // are derived from the manifest: a job that runs only `npm run
+    // test:coverage` runs a gate command, but it never calls actionlint,
+    // so demanding the install of it would fail a workflow that is
+    // correct. A gate command that does call actionlint — `npm run ci`,
+    // `npm run lint:actions` — still needs it.
     const findings: string[] = [];
     for (const workflow of workflowFiles) {
       for (const job of workflow.jobs) {
-        const consumers = job.steps
-          .map((step, index) => ({ step, index }))
-          .filter(({ step }) => GATE_COMMAND.test(step.run ?? ''));
-        const consumer = consumers[0];
+        const consumer = actionlintConsumerSteps(job)[0];
         if (consumer === undefined) continue;
         const where = `${workflow.file}: job \`${job.key}\``;
-        const installs = installSteps(job).filter((index) => index < consumer.index);
+        const installs = installSteps(job).filter((index) => index < consumer);
         if (installs.length === 0) {
           findings.push(`${where}: runs the gate with no pinned actionlint install before it`);
         }
@@ -326,7 +429,7 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
         // not ship: GOPATH's bin dir must be on PATH for the later steps.
         // An actionlint run by absolute path needs no PATH at all.
         const byPath = job.steps.some((step) => ACTIONLINT_BY_PATH.test(step.run ?? ''));
-        if (!byPath && pathEchoSteps(job).filter((index) => index < consumer.index).length === 0) {
+        if (!byPath && pathEchoSteps(job).filter((index) => index < consumer).length === 0) {
           findings.push(
             `${where}: bare gate with no \`>> "$GITHUB_PATH"\` echo appending $(go env GOPATH)/bin`,
           );
@@ -636,11 +739,22 @@ describe('the workflow files — what the merge gate runs', () => {
     // The `security` job is here for the same reason and a second one:
     // gitleaks scans COMMITS, so a shallow checkout leaves every commit
     // before the tip unscanned — and the job still reports green.
+    //
+    // The gate jobs are DERIVED from the workflows, not named: the jobs
+    // whose run values invoke a gate command are read out of the files
+    // themselves, so a gate job added later — one that checks out shallow
+    // — fails HERE instead of leaving the release guard vacuous in that
+    // job. Naming the two jobs the workflows happen to have today would
+    // guard those two and nothing else.
     const gateJobs = [
-      { file: 'ci.yml', job: 'quality' },
-      { file: 'release.yml', job: 'ci' },
+      ...workflowFiles.flatMap((workflow) =>
+        workflow.jobs
+          .filter((job) => gateConsumerSteps(job).length > 0)
+          .map((job) => ({ file: workflow.file, job: job.key })),
+      ),
       { file: 'ci.yml', job: 'security' },
     ];
+    let checked = 0;
     for (const { file, job } of gateJobs) {
       const workflow = loadWorkflow(file);
       const found = jobOf(workflow, job);
@@ -653,7 +767,43 @@ describe('the workflow files — what the merge gate runs', () => {
         String(checkout?.with['fetch-depth'] ?? ''),
         `${file}: job \`${job}\` must check out the full history`,
       ).toBe('0');
+      checked += 1;
     }
+    // The guard passes on nothing if the parser saw no gate job at all:
+    // a change that hides every run value would leave the loop empty
+    // and this test green.
+    expect(
+      checked,
+      'no gate job found in any workflow — this guard passes on nothing',
+    ).toBeGreaterThan(0);
+  });
+
+  it('reads a fetch-depth value that carries a trailing comment', () => {
+    // The value may carry a trailing comment (`fetch-depth: 0 # why`) — YAML
+    // reads the comment as a comment, so it is stripped before the value is
+    // read; without that, a job whose depth is right is reported as
+    // wrong. Until now the strip was pinned only INDIRECTLY, by the one
+    // comment in release.yml; neutralise that comment and the strip could
+    // be removed with the suite still green. This pins it DIRECTLY.
+    const withComment = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - name: Check out',
+      '        uses: actions/checkout@abc123',
+      '        with:',
+      '          fetch-depth: 0 # the tags the release guard reads',
+      '      - uses: actions/setup-node@def456',
+    ].join('\n');
+    const workflow = parseWorkflow(withComment, 'literal.yml');
+    const checkout = workflow.jobs[0]?.steps.find((step) =>
+      step.uses?.startsWith('actions/checkout'),
+    );
+    expect(checkout, 'the literal workflow has no checkout step').toBeDefined();
+    expect(
+      String(checkout?.with['fetch-depth'] ?? ''),
+      'a fetch-depth value with a trailing comment must read as the value',
+    ).toBe('0');
   });
 
   it('runs the release guard in EVERY job that publishes a tarball', () => {

@@ -92,7 +92,7 @@ const NUMERIC_ENTITY_RE = /&#(?:x([0-9a-fA-F]+)|([0-9]+));/g;
  * `&#x22;` inside an attribute value into a quote and corrupt structure).
  * The parser already drops invalid numeric refs (NUL, C0 controls,
  * surrogate halves); these guards repeat that stance independently (belt
- * and braces, SPEC §12 #35) and additionally refuse DEL and the C1 block
+ * and braces, delivery log §12 #35) and additionally refuse DEL and the C1 block
  * (0x80–0x9F — the parser passes `&#x85;` NEL through raw) plus
  * out-of-range codepoints the parser passes through — `String.fromCodePoint`
  * throws on those, so this guard is load-bearing during sync. Single linear
@@ -576,11 +576,11 @@ function walk(
  */
 export function parseTitleXml(xml: string): RawSection[] {
   // Case-insensitive: XML declares DOCTYPE uppercase, but a smuggled
-  // lowercase variant must not slip past (SPEC §12 #15).
+  // lowercase variant must not slip past (delivery log §12 #15).
   if (DOCTYPE_RE.test(xml)) throw new XmlFormatError('DOCTYPE declarations are not accepted');
   // Belt and braces: entity declarations require a DOCTYPE, but reject them
   // independently so the billion-laughs class stays closed even if the
-  // DOCTYPE gate ever changes (SPEC §12 #35).
+  // DOCTYPE gate ever changes (delivery log §12 #35).
   if (ENTITY_RE.test(xml)) throw new XmlFormatError('ENTITY declarations are not accepted');
 
   let parsed: unknown;

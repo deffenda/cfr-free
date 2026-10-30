@@ -3,17 +3,22 @@ import { fetchFullTitleXml } from './archive.js';
 import { diffHashes, hashContent } from './changes.js';
 import { isIssueDateString, type EcfrApi } from './ecfr.js';
 import { POINT_IN_TIME_NOTICE } from './point-in-time.js';
-import { ServiceError } from './service.js';
+import { ServiceError } from './errors.js';
 import { SyncError } from './sync.js';
 import { parseTitleXml } from './xml.js';
 
 /**
- * Stateless point-in-time diff: "what changed in Title 38 between issue date
- * A and issue date B?". Both dates' full-title XML is fetched from eCFR and
+ * Point-in-time diff: "what changed in Title 38 between issue date A and
+ * issue date B?". Both dates' full-title XML is fetched from eCFR and
  * parsed on the fly, then hashed per citation with the SAME machinery the
  * sync change report uses (`hashText` + `diffHashes`). No history table, no
  * schema growth, no storage policy: the corpus is small enough that an
  * on-demand fetch delivers what a persisted snapshot would.
+ *
+ * "On the fly" means nothing is PERSISTED between calls — there is no index
+ * and no cross-process cache. It does not mean the document is re-fetched
+ * every time: the client's own short-lived memo may serve either document
+ * from memory (see `src/core/ecfr.ts`).
  */
 
 /** Provision-level diff of two issue dates; lists are sorted and FULL. */
@@ -106,10 +111,12 @@ export async function diffIssues(
   }
   const { ecfr, logger } = deps;
 
-  // Two independent GETs on a stateless HttpClient (http-client.ts keeps all
-  // request state function-local: fresh AbortSignal per call, function-local
-  // retry counters, immutable options), so the fetches run in
-  // parallel — half the wall time of sequential on a ~2 s upstream.
+  // Two parallel GETs on an HttpClient that keeps all request state
+  // function-local (http-client.ts: fresh AbortSignal per call,
+  // function-local retry counters, immutable options), so the fetches run
+  // in parallel — half the wall time of sequential on a ~2 s upstream. The
+  // client's own memo may serve either document from memory, or share an
+  // in-flight fetch with another reader of the same date.
   logger.info('fetching full title XML', { issueDate: fromDate });
   logger.info('fetching full title XML', { issueDate: toDate });
   const [fromXml, toXml] = await Promise.all([

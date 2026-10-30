@@ -1,8 +1,9 @@
 import { fetchFullTitleXml } from './archive.js';
 import { assertIssueDate } from './diff.js';
-import { normalizeCitation } from './citations.js';
-import { ServiceError } from './service.js';
-import { parseTitleXml, type RawSection } from './xml.js';
+import { normalizeCitation, findProvision } from './citations.js';
+import { ServiceError } from './errors.js';
+import { datedSourceUrlFor, sourceUrlFor } from './urls.js';
+import { parseTitleXml } from './xml.js';
 import type { EcfrApi } from './ecfr.js';
 import type { Logger } from '../logger.js';
 
@@ -51,32 +52,10 @@ function urlsFor(
   citation: string,
   requestedDate: string,
 ): { sourceUrl: string; sourceUrlAtRequestedDate: string } {
-  const encoded = encodeURIComponent(citation);
-  const kindSegment = kind === 'appendix' ? 'appendix' : 'section';
   return {
-    sourceUrl:
-      kind === 'appendix'
-        ? `https://www.ecfr.gov/search?searchTerm=${encoded}&titles=38`
-        : `https://www.ecfr.gov/current/title-38/section-${encoded}`,
-    sourceUrlAtRequestedDate: `https://www.ecfr.gov/on/${requestedDate}/title-38/${kindSegment}-${encoded}`,
+    sourceUrl: sourceUrlFor(citation, kind),
+    sourceUrlAtRequestedDate: datedSourceUrlFor(citation, kind, requestedDate),
   };
-}
-
-/**
- * Find the provision in a parsed document. Sections compare
- * case-insensitively (the corpus stores them lower-cased); appendices
- * compare case-insensitively too — the store's own appendix lookup is
- * COLLATE NOCASE, so this mirrors the repo's citation identity.
- */
-function findProvision(
-  sections: readonly RawSection[],
-  kind: 'section' | 'appendix',
-  citation: string,
-): RawSection | undefined {
-  const wanted = citation.toLowerCase();
-  return sections.find(
-    (section) => section.kind === kind && section.citation.toLowerCase() === wanted,
-  );
 }
 
 /**

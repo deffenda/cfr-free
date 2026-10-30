@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { diffIssues } from '../src/core/diff.js';
 import { EcfrApi } from '../src/core/ecfr.js';
 import { HttpClient } from '../src/core/http-client.js';
-import { ServiceError } from '../src/core/service.js';
+import { ServiceError } from '../src/core/errors.js';
 import { SyncError } from '../src/core/sync.js';
 import { createTestLogger, type TestLogger } from './helpers.js';
 import type { FetchLike } from '../src/core/http-client.js';

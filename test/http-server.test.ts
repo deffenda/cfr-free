@@ -3,7 +3,10 @@ import net from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type http from 'node:http';
 import type { EcfrApi } from '../src/core/ecfr.js';
+import { HttpError } from '../src/core/http-client.js';
+import { UpstreamFormatError } from '../src/core/errors.js';
 import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
+import { SemaphoreOverflowError } from '../src/core/semaphore.js';
 import { CFRService } from '../src/core/service.js';
 import { createHttpServer, type HttpServerOptions } from '../src/titan/http-server.js';
 import { createTestLogger, makeSection, openTempStore, type TempStore } from './helpers.js';
@@ -54,6 +57,30 @@ describe('Titan HTTP API', () => {
     expect(body['structureDrift']).toBeNull();
     expect(headers.get('cache-control')).toBe('no-store');
     expect(headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
+  it('tells every route not to leak the URL it was reading', async () => {
+    // The API answers with paths and queries that can carry a search
+    // term. A client that follows a link out of a response must not
+    // carry that URL to the next site.
+    for (const path of ['/health', '/metrics', '/', '/ui.js', '/api/v1/search?q=PTSD']) {
+      const response = await fetch(`${base}${path}`);
+      expect(response.headers.get('referrer-policy'), path).toBe('no-referrer');
+    }
+  });
+
+  it('bounds the connections and the header wait', () => {
+    // The rate limiter runs only after the headers are complete, so a
+    // client that dribbles them holds a socket without spending a token.
+    const created = createHttpServer(new CFRService(temp.store, 7), createTestLogger());
+    try {
+      expect(created.headersTimeout).toBe(10_000);
+      expect(created.keepAliveTimeout).toBe(5_000);
+      expect(created.maxConnections).toBe(256);
+      expect(created.requestTimeout).toBe(60_000);
+    } finally {
+      created.close();
+    }
   });
 
   it('exposes Prometheus metrics at /metrics', async () => {
@@ -506,6 +533,17 @@ describe('Titan HTTP rate limiting', () => {
   let server: http.Server;
   let base: string;
 
+  /** One document, for the routes that fetch the whole upstream title. */
+  const DIFF_XML =
+    '<ECFR><DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD><DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD>' +
+    '<DIV5 N="4" TYPE="PART"><HEAD>Part 4</HEAD><DIV8 N="4.125" TYPE="SECTION"><HEAD>§ 4.125 Test.</HEAD>' +
+    '<P>Body.</P></DIV8></DIV5></DIV3></DIV1>';
+
+  /** Offline eCFR stub: every issue date serves the same document. */
+  function diffEcfr(): EcfrApi {
+    return { getFullTitleXml: async () => DIFF_XML } as unknown as EcfrApi;
+  }
+
   beforeEach(async () => {
     temp = openTempStore();
   });
@@ -545,6 +583,184 @@ describe('Titan HTTP rate limiting', () => {
       const response = await fetch(`${base}/health`);
       expect(response.status).toBe(200);
     }
+  });
+
+  it.each([
+    '/api/v1/diff?from=2026-01-01&to=2026-02-01',
+    '/api/v1/redline?from=2026-01-01&to=2026-02-01&citation=4.125',
+  ])('charges the route that pulls the whole upstream document: %s', async (query) => {
+    // The cost of a request is what it COSTS. The diff and the redline
+    // route fetch the complete Title 38 document from eCFR — ~2 MB on the
+    // wire, ~16 MB parsed — so NEITHER may be buyable with one token: a
+    // budget of one token per request bought twenty whole documents a
+    // second. The redline pulls TWO documents, exactly as the diff does.
+    // Only the diff was pinned: dropping `|| pathname === REDLINE_PATH`
+    // from the price left every test green, while the published table
+    // still said the redline costs ten.
+    server = createHttpServer(
+      new CFRService(temp.store, 7, diffEcfr(), createTestLogger()),
+      createTestLogger(),
+      { rateLimit: { capacity: 20, refillPerSec: 0.1 } },
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    // A cheap route fits the budget.
+    expect((await fetch(`${base}/health`)).status).toBe(200);
+    // The expensive route costs ten tokens: the first fits in what is
+    // left of twenty, the second does not.
+    const first = await fetch(`${base}${query}`);
+    expect(first.status).toBe(200);
+    const second = await fetch(`${base}${query}`);
+    expect(second.status).toBe(429);
+    expect(((await second.json()) as Json)['error']).toBe('rate_limited');
+  });
+
+  it('keeps the expensive route reachable when the capacity is below its cost', async () => {
+    // A capacity of five is smaller than the expensive route's cost of
+    // ten. The bucket must still hold ONE expensive request, or the route
+    // is unreachable at any clock (zero of a thousand calls admitted).
+    server = createHttpServer(
+      new CFRService(temp.store, 7, diffEcfr(), createTestLogger()),
+      createTestLogger(),
+      { rateLimit: { capacity: 5, refillPerSec: 0.1 } },
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const admitted = await fetch(`${base}/api/v1/diff?from=2026-01-01&to=2026-02-01`);
+    expect(admitted.status).toBe(200);
+    // The bucket is empty now: the next expensive request is refused.
+    const refused = await fetch(`${base}/api/v1/diff?from=2026-01-01&to=2026-02-01`);
+    expect(refused.status).toBe(429);
+  });
+
+  it('charges a request the method gate refuses', async () => {
+    // A refused request is still a request: leaving the refusal free
+    // would let a peer send unlimited POSTs without touching the budget.
+    server = createHttpServer(new CFRService(temp.store, 7), createTestLogger(), {
+      rateLimit: { capacity: 1, refillPerSec: 0.1 },
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const refused = await fetch(`${base}/health`, { method: 'POST' });
+    expect(refused.status).toBe(405);
+    // The one token is spent: the next request is rate limited.
+    const limited = await fetch(`${base}/health`);
+    expect(limited.status).toBe(429);
+  });
+
+  it('charges a request whose URL is too long', async () => {
+    // Same for the size gate: an oversized URL is refused, but not for
+    // free — unlimited 2 KB URLs are exactly the traffic the budget is
+    // there to bound.
+    server = createHttpServer(new CFRService(temp.store, 7), createTestLogger(), {
+      rateLimit: { capacity: 1, refillPerSec: 0.1 },
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const tooLong = await fetch(`${base}/api/v1/search?q=${'x'.repeat(3000)}`);
+    expect(tooLong.status).toBe(414);
+    const limited = await fetch(`${base}/health`);
+    expect(limited.status).toBe(429);
+  });
+
+  it('charges a refused request one token, not the route’s ten', async () => {
+    // The method gate refuses the POST — but the request is charged
+    // before the gate answers, and a refused request costs one token.
+    server = createHttpServer(
+      new CFRService(temp.store, 7, diffEcfr(), createTestLogger()),
+      createTestLogger(),
+      { rateLimit: { capacity: 10, refillPerSec: 0.1 } },
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const refused = await fetch(`${base}/api/v1/diff?from=2026-01-01&to=2026-02-01`, {
+      method: 'POST',
+    });
+    expect(refused.status).toBe(405);
+    // Nine tokens are left: nine cheap requests fit, the tenth is refused.
+    let served = 0;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const response = await fetch(`${base}/health`);
+      if (response.status !== 200) break;
+      served += 1;
+    }
+    expect(served).toBe(9);
+  });
+
+  it('charges an expensive route its own price for a request the router rejects', async () => {
+    // The oversized-parameter cap is one of the router's byte caps, and it
+    // fires AFTER the bucket was spent. The price still follows the path
+    // the request would have taken: a diff request costs the route's ten
+    // even though the router refused it, because the route was already
+    // identified. The token-cost table publishes this, and it is pinned
+    // here so the table cannot drift from the code.
+    server = createHttpServer(
+      new CFRService(temp.store, 7, diffEcfr(), createTestLogger()),
+      createTestLogger(),
+      { rateLimit: { capacity: 10, refillPerSec: 0.1 } },
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const refused = await fetch(`${base}/api/v1/diff?q=${'x'.repeat(801)}`);
+    expect(refused.status).toBe(400);
+    // The whole budget is gone: the request cost the route's price.
+    let served = 0;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const response = await fetch(`${base}/health`);
+      if (response.status !== 200) break;
+      served += 1;
+    }
+    expect(served).toBe(0);
+  });
+
+  it('charges a cheap route one token for the same rejection', async () => {
+    // The same rejection on a route that reads the index: the cap is the
+    // router's, but the price is the route's — and that route costs one.
+    server = createHttpServer(
+      new CFRService(temp.store, 7, diffEcfr(), createTestLogger()),
+      createTestLogger(),
+      { rateLimit: { capacity: 10, refillPerSec: 0.1 } },
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const refused = await fetch(`${base}/api/v1/search?q=${'x'.repeat(801)}`);
+    expect(refused.status).toBe(400);
+    // Nine tokens are left: the request cost one.
+    let served = 0;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const response = await fetch(`${base}/health`);
+      if (response.status !== 200) break;
+      served += 1;
+    }
+    expect(served).toBe(9);
+  });
+
+  it('answers 503 when the upstream queue is full', async () => {
+    // The fetch queue was full: the request is refused at once instead of
+    // being parked behind the fetches already in flight.
+    const busyEcfr = {
+      getFullTitleXml: async () => {
+        throw new SemaphoreOverflowError(16);
+      },
+    } as unknown as EcfrApi;
+    server = createHttpServer(
+      new CFRService(temp.store, 7, busyEcfr, createTestLogger()),
+      createTestLogger(),
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const response = await fetch(`${base}/api/v1/diff?from=2026-01-01&to=2026-02-01`);
+    expect(response.status).toBe(503);
+    const body = (await response.json()) as Json;
+    expect(body['error']).toBe('upstream_busy');
   });
 });
 
@@ -728,6 +944,36 @@ describe('Titan web UI routes', () => {
     expect(html).toContain('id="browse-list"');
   });
 
+  it('pinned posture: the served HTML carries the keyboard posture the SPEC promises', async () => {
+    const { text: html } = await fetchUi('/');
+    // The skip link is the FIRST thing in the body, and it names the
+    // content it reaches. A skip link that points nowhere is worse than
+    // none: it is the first thing a keyboard user reaches.
+    const body = (html.match(/<body>([\s\S]*?)<script/) ?? ['', ''])[1] ?? '';
+    expect(body.trimStart().startsWith('<a class="skip-link"')).toBe(true);
+    expect(html).toContain('href="#main"');
+    // The content it reaches can take the focus.
+    expect(html).toContain('<main id="main" tabindex="-1">');
+    // The live region that announces the change of view.
+    expect(html).toContain('role="status"');
+    expect(html).toContain('aria-live="polite"');
+    // Every view's heading takes the focus on a route change without
+    // becoming a tab stop. The search heading is VISIBLE: a focus ring on a
+    // clipped element cannot be seen, so a hidden heading fails WCAG 2.4.7
+    // on every transition into the search view.
+    for (const id of ['search-heading', 'section-heading', 'browse-heading', 'redline-heading']) {
+      expect(html).toMatch(new RegExp(`<h2 id="${id}"[^>]*tabindex="-1"`));
+    }
+    expect(html).not.toContain('id="search-heading" class="visually-hidden"');
+    // The form's own rules are visible in the form, not only in a schema.
+    expect(html).toMatch(/id="part"[^>]*pattern="\[0-9\]\{1,3\}"/);
+    expect(html).toMatch(/id="part"[^>]*maxlength="3"/);
+    expect(html).toMatch(/id="part"[^>]*title="/);
+    expect(html).toMatch(/id="chapter"[^>]*pattern="\[IVXLCDM\]\{1,8\}"/);
+    expect(html).toMatch(/id="chapter"[^>]*maxlength="8"/);
+    expect(html).toMatch(/id="chapter"[^>]*title="/);
+  });
+
   it('pinned posture: ui.js guards route ownership (a late response cannot repaint a route the user left)', async () => {
     // Behaviour is proven in test/ui.test.ts, which EXECUTES this served
     // script against a DOM/fetch stub; these string pins keep the guard
@@ -800,11 +1046,11 @@ describe('Titan HTTP /api/v1/diff', () => {
       getFullTitleXml: async (issueDate: string) => {
         const xml = xmlByDate[issueDate];
         if (xml === undefined) {
-          const error = new Error(`HTTP ${failureStatus} for ${issueDate}`) as Error & {
-            status?: number;
-          };
-          error.status = failureStatus;
-          throw error;
+          // The real client throws an `HttpError`; the archive guard
+          // recognises it by `instanceof` (CR-22). A loose object with a
+          // `status` property is a DIFFERENT thing, and pretending the two
+          // are the same would hide what this test pins.
+          throw new HttpError(`HTTP ${failureStatus} for ${issueDate}`, issueDate, failureStatus);
         }
         return xml;
       },
@@ -906,15 +1152,16 @@ describe('Titan HTTP /api/v1/diff', () => {
     expect(String(body['message'])).not.toContain('internal server error');
   });
 
-  it('answers a clean mapped 400 when no eCFR client was injected', async () => {
-    // Default construction (2-arg) — the facade fails closed; the packet
-    // allows "500/ServiceError-mapped", and statusFor maps invalid_input to a
-    // 400 with the client-safe message rather than a generic internal error.
+  it('answers a clean mapped 500 when no eCFR client was injected', async () => {
+    // Default construction (2-arg) — the facade fails closed. The fault is
+    // the DEPLOYMENT's (the service was wired without its eCFR client), not
+    // the caller's argument, so statusFor maps `unavailable` to a 500 and
+    // not to a 400 the caller would retry unchanged.
     const service = new CFRService(temp.store, 7);
     const { status, body } = await withService(service, `/api/v1/diff?${DIFF_QUERY}`);
-    expect(status).toBe(400);
+    expect(status).toBe(500);
     expect(body).toEqual({
-      error: 'invalid_input',
+      error: 'internal_error',
       message: 'diff unavailable — no eCFR client injected',
     });
   });
@@ -924,6 +1171,25 @@ describe('Titan HTTP /api/v1/diff', () => {
     const { status, body } = await withService(service, `/api/v1/diff?${DIFF_QUERY}`);
     expect(status).toBe(500);
     expect(body).toEqual({ error: 'internal_error', message: 'internal server error' });
+  });
+
+  it('answers a 502 when eCFR sends data the contract does not allow', async () => {
+    // An upstream-DATA fault is neither the reader's fault nor ours: eCFR
+    // answered, and what it sent is not usable. That is a bad gateway, and
+    // it must not be collapsed into a generic 500 — the most actionable
+    // messages in the codebase were the ones being swallowed (CR-21).
+    const faulting = {
+      getFullTitleXml: async () => {
+        throw new UpstreamFormatError('eCFR returned an invalid date: not-a-date');
+      },
+    } as unknown as EcfrApi;
+    const service = new CFRService(temp.store, 7, faulting, createTestLogger());
+    const { status, body } = await withService(service, `/api/v1/diff?${DIFF_QUERY}`);
+    expect(status).toBe(502);
+    expect(body['error']).toBe('upstream_error');
+    // The detail stays server-side: the client learns the upstream was
+    // unusable, not what it said.
+    expect(String(body['message'])).not.toContain('not-a-date');
   });
 
   it("answers a 400 for a date before eCFR's archive, not a generic 500", async () => {
@@ -1005,11 +1271,11 @@ describe('Titan HTTP /api/v1/redline', () => {
       getFullTitleXml: async (issueDate: string) => {
         const xml = xmlByDate[issueDate];
         if (xml === undefined) {
-          const error = new Error(`HTTP ${failureStatus} for ${issueDate}`) as Error & {
-            status?: number;
-          };
-          error.status = failureStatus;
-          throw error;
+          // The real client throws an `HttpError`; the archive guard
+          // recognises it by `instanceof` (CR-22). A loose object with a
+          // `status` property is a DIFFERENT thing, and pretending the two
+          // are the same would hide what this test pins.
+          throw new HttpError(`HTTP ${failureStatus} for ${issueDate}`, issueDate, failureStatus);
         }
         return xml;
       },
@@ -1127,14 +1393,15 @@ describe('Titan HTTP /api/v1/redline', () => {
     expect(String(body['message'])).toContain(TO_DATE);
   });
 
-  it('answers a clean mapped 400 when no eCFR client was injected', async () => {
-    // Default construction (2-arg) — the facade fails closed; statusFor maps
-    // invalid_input to a 400 with the client-safe message rather than a 500.
+  it('answers a clean mapped 500 when no eCFR client was injected', async () => {
+    // Default construction (2-arg) — the facade fails closed. The fault is
+    // the deployment's, not the caller's, so statusFor maps `unavailable`
+    // to a 500 rather than to a 400.
     const service = new CFRService(temp.store, 7);
     const { status, body } = await withService(service, `/api/v1/redline?${REDLINE_QUERY}`);
-    expect(status).toBe(400);
+    expect(status).toBe(500);
     expect(body).toEqual({
-      error: 'invalid_input',
+      error: 'internal_error',
       message: 'redline unavailable — no eCFR client injected',
     });
   });

@@ -24,6 +24,7 @@
   },
   "files": [
     "dist",
+    "docs/openapi.yaml",
     "scripts/prepare.mjs",
     "scripts/copy-assets.mjs",
     "README.md",
@@ -40,6 +41,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "scan": "bash tools/security-scan.sh",
+    "scan:strict": "bash tools/security-scan.sh --strict",
     "scan:audit": "npm audit --audit-level=high",
     "validate": "bash scripts/validate.sh",
     "review": "node tools/llm-review.mjs",

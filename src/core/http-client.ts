@@ -83,7 +83,7 @@ function errorMessage(error: unknown): string {
 /**
  * Stream a response body while enforcing the byte cap: an oversized payload
  * is rejected *as it arrives*, instead of being buffered into memory first
- * and checked afterwards (SPEC §12 #28).
+ * and checked afterwards (delivery log §12 #28).
  */
 async function readBodyCapped(
   response: Response,
@@ -118,7 +118,7 @@ async function readBodyCapped(
 
 /**
  * Read at most the first `MAX_ERROR_BODY_CHARS` bytes of an error body —
- * enough for a useful message, never an unbounded read (SPEC §12 #29).
+ * enough for a useful message, never an unbounded read (delivery log §12 #29).
  */
 async function readErrorSnippet(response: Response): Promise<string> {
   if (!response.body) return '';

@@ -69,7 +69,7 @@ export interface EnsureIndexDeps {
 /**
  * Guarantee a usable index before serving.
  *
- * Policy (SPEC §10 #2): sync before serving; if a refresh fails but rows
+ * Policy (delivery log §10 #2): sync before serving; if a refresh fails but rows
  * exist, serve the stale index with a warning; if there are no rows at all,
  * fail with an actionable error.
  *

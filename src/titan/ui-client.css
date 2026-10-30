@@ -149,3 +149,89 @@ blockquote {
 .pager-info {
   margin: 0.5rem 0;
 }
+
+/*
+ * A skip link: the first thing in the tab order, so a keyboard user can
+ * reach the content without walking the header on every view.
+ *
+ * It is hidden until it is focused — a permanently visible "skip to
+ * content" above every page is noise for everyone who did not ask for it.
+ */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  padding: 0.5rem 0.75rem;
+  background: #ffffff;
+  color: #0b57d0;
+  border: 2px solid #0b57d0;
+  z-index: 10;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
+/*
+ * Present to a screen reader, absent to the eye: the view announcer
+ * exists so the change of view is read aloud, not to be looked at twice.
+ *
+ * The view HEADINGS are visible: they are where the keyboard lands on a
+ * route change, and a focus ring on a clipped element cannot be seen. A
+ * focus the reader cannot see is no focus at all.
+ */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The heading a route change moves the keyboard to. */
+h2[tabindex='-1']:focus {
+  outline: 2px solid #0b57d0;
+  outline-offset: 2px;
+}
+
+/*
+ * A rating table, rendered from the provision's markdown.
+ *
+ * The provision arrives in two renderings; the plain one lost the table's
+ * structure, so § 4.130's rating schedule came out as an unaligned run-on
+ * block. This is the shape the data always had.
+ */
+.rating-table {
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  width: 100%;
+  font-size: 0.9rem;
+}
+
+.rating-table th,
+.rating-table td {
+  border: 1px solid #b9b9b9;
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.rating-table th {
+  background: #f2f2f2;
+  font-weight: 600;
+}
+
+@media (prefers-color-scheme: dark) {
+  .rating-table th,
+  .rating-table td {
+    border-color: #4a4a4a;
+  }
+
+  .rating-table th {
+    background: #242424;
+  }
+}

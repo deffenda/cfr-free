@@ -1,5 +1,6 @@
 import type { EcfrApi } from './ecfr.js';
-import { ServiceError } from './service.js';
+import { ServiceError } from './errors.js';
+import { HttpError } from './http-client.js';
 
 /** The earliest date eCFR's point-in-time archive serves (measured 2026-10-20). */
 export const ARCHIVE_FLOOR = '2017-01-01';
@@ -21,7 +22,12 @@ export async function fetchFullTitleXml(ecfr: EcfrApi, date: string): Promise<st
   try {
     return await ecfr.getFullTitleXml(date);
   } catch (error) {
-    const status = (error as { status?: number }).status;
+    // An `instanceof` check, not a cast (CR-22): `HttpError` declares
+    // `readonly status: number | undefined`, so the cast would silently read
+    // `undefined` from any other error that happens to carry a `status`
+    // property — and a non-404 upstream failure would then be swallowed into
+    // a usage error about the reader's date.
+    const status = error instanceof HttpError ? error.status : undefined;
     if (status !== 404) throw error;
     // Two different mistakes share one upstream answer: a date before the
     // archive, and a date inside it that simply has no revision (a

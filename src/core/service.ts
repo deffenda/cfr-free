@@ -1,7 +1,9 @@
 import { z } from 'zod';
+import { ServiceError } from './errors.js';
 import { normalizeCitation } from './citations.js';
+import { datedSourceUrlFor, sourceUrlFor } from './urls.js';
 import { extractReferences } from './references.js';
-import type { SyncChanges } from './changes.js';
+import { syncChangesSchema, type SyncChanges } from './changes.js';
 import { diffIssues, type IssueDiff } from './diff.js';
 import { redlineSection, type SectionRedline } from './redline.js';
 import type { EcfrApi } from './ecfr.js';
@@ -13,34 +15,20 @@ import {
   type StructureNode,
 } from './structure.js';
 import {
-  Store,
   contentTerms,
   hitWords,
   queryTerms,
   termResponded,
   type MatchMode,
   type QueryTerm,
-  type SearchHit,
   visibleMatches,
-} from './store.js';
+} from './query.js';
+import { Store, type SearchHit } from './store.js';
 
 /**
  * Application facade shared by the MCP server and the HTTP API. All input
  * validation happens here so both surfaces behave identically.
  */
-
-export type ServiceErrorCode = 'invalid_input' | 'not_found';
-
-/** Domain error carrying a machine-readable code and client-safe message. */
-export class ServiceError extends Error {
-  override readonly name = 'ServiceError';
-  readonly code: ServiceErrorCode;
-
-  constructor(message: string, code: ServiceErrorCode) {
-    super(message);
-    this.code = code;
-  }
-}
 
 /**
  * The query length the index accepts. Exported so the CLI can refuse a
@@ -343,6 +331,22 @@ const CITATION_HINTS: Hints = {
   },
 };
 
+/**
+ * Validate a search input against the schema the service uses.
+ *
+ * Exported so the CLI can refuse a bad flag BEFORE the index is opened: a
+ * rejected flag is the reader's mistake, and it must not be billed to a
+ * 2-3 MB sync — the same rule the query length follows.
+ *
+ * The errors are the service's plain-language ones, so the CLI and the API
+ * cannot drift in what they say about a rejected search.
+ */
+export function validateSearchInput(input: SearchInput): z.infer<typeof searchInputSchema> {
+  const parsed = searchInputSchema.safeParse(input);
+  if (!parsed.success) toServiceError(parsed.error, SEARCH_HINTS);
+  return parsed.data;
+}
+
 function toServiceError(error: unknown, hints: Hints): never {
   if (error instanceof z.ZodError) {
     const details = error.issues
@@ -358,14 +362,6 @@ function toServiceError(error: unknown, hints: Hints): never {
   throw error;
 }
 
-/** Permalink to the section on ecfr.gov (verified redirect pattern). */
-function sourceUrlFor(kind: 'section' | 'appendix', citation: string): string {
-  if (kind === 'appendix') {
-    return `https://www.ecfr.gov/search?searchTerm=${encodeURIComponent(citation)}&titles=38`;
-  }
-  return `https://www.ecfr.gov/current/title-38/section-${encodeURIComponent(citation)}`;
-}
-
 /**
  * Permalink to the SAME provision at a DATED revision on ecfr.gov — the
  * `/on/<date>/…` form, which keeps the date in the canonical path (the
@@ -379,15 +375,10 @@ function sourceUrlFor(kind: 'section' | 'appendix', citation: string): string {
  * answers 404):
  *   /on/2026-10-16/title-38/appendix-Appendix%20A%20to%20Part%204
  *     -> /on/2026-10-16/title-38/chapter-I/part-4/appendix-Appendix%20A%20to%20Part%204
+ *
+ * The URL shapes themselves live in `src/core/urls.ts` (CR-16), shared with
+ * the point-in-time read in `src/core/historical.ts`.
  */
-function datedSourceUrlFor(
-  kind: 'section' | 'appendix',
-  citation: string,
-  issueDate: string,
-): string {
-  const kindSegment = kind === 'appendix' ? 'appendix' : 'section';
-  return `https://www.ecfr.gov/on/${issueDate}/title-38/${kindSegment}-${encodeURIComponent(citation)}`;
-}
 
 /** Sections are numeric citations; everything else is an appendix name. */
 function kindForCitation(citation: string): 'section' | 'appendix' {
@@ -460,9 +451,7 @@ export class CFRService {
   }
 
   search(input: SearchInput): SearchResponse {
-    const parsed = searchInputSchema.safeParse(input);
-    if (!parsed.success) toServiceError(parsed.error, SEARCH_HINTS);
-    const { query, page, perPage, part, kind, chapter } = parsed.data;
+    const { query, page, perPage, part, kind, chapter } = validateSearchInput(input);
     const outcome = this.store.search({ query, page, perPage, part, kind, chapter });
     const direct = this.directHit(query, { part, kind, chapter });
 
@@ -560,8 +549,8 @@ export class CFRService {
     return {
       ...rest,
       citationDisplay: displayCitation(kind, hit.citation),
-      sourceUrl: sourceUrlFor(kind, hit.citation),
-      sourceUrlAtIndexDate: datedSourceUrlFor(kind, hit.citation, issueDate),
+      sourceUrl: sourceUrlFor(hit.citation, kind),
+      sourceUrlAtIndexDate: datedSourceUrlFor(hit.citation, kind, issueDate),
       direct,
       inResults,
       partTitle: partTitleValue,
@@ -585,7 +574,7 @@ export class CFRService {
     const base =
       `no indexed content for citation ${citation} — it may be reserved, removed, ` +
       'or outside Title 38 as of the local issue date';
-    const verify = `verify it on eCFR: ${sourceUrlFor(kindForCitation(citation), citation)}`;
+    const verify = `verify it on eCFR: ${sourceUrlFor(citation, kindForCitation(citation))}`;
     if (mentions.length === 0) return `${base}; ${verify}`;
     return `${base}; ${verify}. Indexed sections that mention it: ${mentions.join(', ')}`;
   }
@@ -617,8 +606,8 @@ export class CFRService {
       issueDate: row.issueDate,
       markdown: row.markdown,
       text: row.text,
-      sourceUrl: sourceUrlFor(row.kind, row.citation),
-      sourceUrlAtIndexDate: datedSourceUrlFor(row.kind, row.citation, row.issueDate),
+      sourceUrl: sourceUrlFor(row.citation, row.kind),
+      sourceUrlAtIndexDate: datedSourceUrlFor(row.citation, row.kind, row.issueDate),
       references: extractReferences(row.text).map((citation) => ({
         citation,
         available: this.store.hasSection(citation),
@@ -685,11 +674,16 @@ export class CFRService {
   private lastChanges(): SyncChanges | null {
     const raw = this.store.getMeta('last_changes');
     if (raw === null) return null;
+    let parsed: unknown;
     try {
-      return JSON.parse(raw) as SyncChanges;
+      parsed = JSON.parse(raw);
     } catch {
       return null;
     }
+    // A syntactically valid record is not necessarily a VALID one: the
+    // schema is what makes the doc comment true (CR-20).
+    const result = syncChangesSchema.safeParse(parsed);
+    return result.success ? (result.data as SyncChanges) : null;
   }
 
   /**
@@ -767,22 +761,26 @@ export class CFRService {
    * facade over `diffIssues` so the HTTP surface shares the core's exact
    * validation and error semantics. BOTH dates are required — no default-to
    * resolution happens here (the store's `issue_date` lookup is the CLI's
-   * convenience, deliberately not threaded behind this facade). Stateless by
-   * design: every call fetches both dates' full-title XML from eCFR — no
-   * prefetch, no cache.
+   * convenience, deliberately not threaded behind this facade). Nothing is
+   * prefetched: each call fetches both dates' full-title XML from eCFR,
+   * through the client's own per-process document memo (see `ecfr.ts` —
+   * short-lived, in memory, shared by concurrent readers of the same date).
    *
    * Every `serve`/`mcp` entrypoint injects the client and logger together;
    * the guard fails closed for test-constructed services without the diff
    * stack, so the route answers a clean mapped error instead of a crash.
    *
-   * @throws {ServiceError} (`invalid_input`) when no eCFR client was
-   *   injected, or when a date is malformed/impossible or the two dates are
-   *   identical; upstream fetch failures surface as `HttpError`.
+   * @throws {ServiceError} (`unavailable`) when no eCFR client was
+   *   injected — a deployment fault, not the reader's argument;
+   *   (`invalid_input`) when a date is malformed/impossible or the two dates
+   *   are identical; upstream fetch failures surface as `HttpError`, or as
+   *   `SemaphoreOverflowError` when the upstream fetch queue is full (the
+   *   HTTP layer maps that to `503 upstream_busy`).
    */
   async diffBetween(fromDate: string, toDate: string): Promise<IssueDiff> {
     const { ecfr, logger } = this;
     if (ecfr === undefined || logger === undefined) {
-      throw new ServiceError('diff unavailable — no eCFR client injected', 'invalid_input');
+      throw new ServiceError('diff unavailable — no eCFR client injected', 'unavailable');
     }
     return diffIssues({ ecfr, logger }, fromDate, toDate);
   }
@@ -793,19 +791,24 @@ export class CFRService {
    * the core otherwise. BOTH dates are required on the wire (no default-to
    * resolution); the core owns every validation (malformed/impossible/identical
    * dates, non-citation) and the `not_found` tripwire for a citation missing
-   * from BOTH dates. Stateless by design: every call fetches both dates'
-   * full-title XML from eCFR — no prefetch, no cache.
+   * from BOTH dates. Nothing is prefetched: each call fetches both dates'
+   * full-title XML from eCFR, through the client's own per-process document
+   * memo (see `ecfr.ts` — short-lived, in memory, shared by concurrent
+   * readers of the same date).
    *
    * Every `serve`/`mcp` entrypoint injects the client and logger together;
    * the guard fails closed for test-constructed services without the redline
    * stack, so both wire surfaces answer a clean mapped error instead of a
    * crash.
    *
-   * @throws {ServiceError} (`invalid_input`) when no eCFR client was
-   *   injected, or when a date is malformed/impossible, the two dates are
-   *   identical, or the citation is not recognizable; (`not_found`) when the
-   *   citation is missing from BOTH dates' parse results; upstream fetch
-   *   failures surface as `HttpError`.
+   * @throws {ServiceError} (`unavailable`) when no eCFR client was
+   *   injected — a deployment fault, not the reader's argument;
+   *   (`invalid_input`) when a date is malformed/impossible, the two dates
+   *   are identical, or the citation is not recognizable; (`not_found`) when
+   *   the citation is missing from BOTH dates' parse results; upstream fetch
+   *   failures surface as `HttpError`, or as `SemaphoreOverflowError` when
+   *   the upstream fetch queue is full (the HTTP layer maps that to
+   *   `503 upstream_busy`).
    */
   async redlineBetween(
     fromDate: string,
@@ -814,7 +817,7 @@ export class CFRService {
   ): Promise<SectionRedline> {
     const { ecfr, logger } = this;
     if (ecfr === undefined || logger === undefined) {
-      throw new ServiceError('redline unavailable — no eCFR client injected', 'invalid_input');
+      throw new ServiceError('redline unavailable — no eCFR client injected', 'unavailable');
     }
     return redlineSection({ ecfr, logger }, fromDate, toDate, citation);
   }

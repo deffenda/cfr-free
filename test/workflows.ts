@@ -107,7 +107,18 @@ function runnerLabel(runsOn: RawJob['runs-on']): string | undefined {
 
 /** Parse one workflow file into its jobs and steps. */
 export function loadWorkflow(file: string): Workflow {
-  const text = readFileSync(join(WORKFLOWS_DIR, file), 'utf8');
+  return parseWorkflow(readFileSync(join(WORKFLOWS_DIR, file), 'utf8'), file);
+}
+
+/**
+ * Parse the TEXT of a workflow into its jobs and steps.
+ *
+ * The file-reading wrapper above is the common case; a guard that needs to
+ * read a workflow that is not on disk — a literal it writes out to pin one
+ * reading of the document — parses its text here, so it reads the document
+ * the same way the files on disk are read.
+ */
+export function parseWorkflow(text: string, file: string): Workflow {
   const parsed = parseYaml(text) as { readonly jobs?: Record<string, RawJob> };
   const jobs = Object.entries(parsed.jobs ?? {}).map(([key, job]) => ({
     key,

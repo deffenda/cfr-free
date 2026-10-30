@@ -5,6 +5,11 @@
 #
 # The published port binds to loopback by default; change the left side of
 # "127.0.0.1:8787:8787" (and only with an auth proxy in front) to expose it.
+#
+# The container's own process binds 0.0.0.0 (the image sets CFR_HOST and
+# CFR_ALLOW_REMOTE) because a loopback bind inside a container cannot be
+# reached through a published port. The exposure gate is therefore THIS
+# published port, and the HTTP API has no authentication.
 services:
   cfr-free:
     build: .

@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Logger } from '../logger.js';
-import { CHANGE_LIST_CAP } from '../core/changes.js';
+import { CHANGE_LIST_CAP, CORPUS_RECEIPT_LIMIT } from '../core/changes.js';
 import { diffIssues } from '../core/diff.js';
 import type { EcfrApi } from '../core/ecfr.js';
 import { redlineSection } from '../core/redline.js';
@@ -12,7 +12,8 @@ import {
   SEARCH_QUERY_MIN_LENGTH,
   type CFRService,
 } from '../core/service.js';
-import { clientSafeMessage } from './client-safe.js';
+import { UNTRUSTED_DATA_NOTE } from './posture.js';
+import { renderToolText, runTool } from './tool-result.js';
 
 /**
  * MCP tool registrations. Every tool is read-only (never destructive,
@@ -31,11 +32,38 @@ const READ_ONLY_ANNOTATIONS = {
   openWorldHint: false,
 } as const;
 
-// get_section_at, diff_issues and redline hit the live eCFR versioner on every call — openWorld stays true while the other hints stay read-only.
+// get_section_at, diff_issues and redline read from the live eCFR versioner — openWorld stays true while the other hints stay read-only.
 const DIFF_ANNOTATIONS = {
   ...READ_ONLY_ANNOTATIONS,
   openWorldHint: true,
 } as const;
+
+/**
+ * The MCP wire's size bound on ONE provision's body, in characters.
+ *
+ * `diff_issues` bounds its citation lists at {@link CHANGE_LIST_CAP} and
+ * reports a `truncated` flag; a provision is one text, so the bound is a
+ * character count. 100 000 characters ≈ 25k tokens: a large provision
+ * (§ 4.130 is tens of KB) still fits a context, and a pathological one
+ * cannot blow it. The parser's own guard (MAX_SECTION_CHARS = 400 000 in
+ * src/core/xml.ts) is the upstream ceiling — this is the wire's, and it
+ * applies to the MCP surface only: the HTTP API and the export command
+ * serve the whole corpus on purpose.
+ */
+export const PROVISION_TEXT_CAP = 100_000;
+
+/**
+ * Cut one provision body at {@link PROVISION_TEXT_CAP} characters and
+ * report whether it was cut. The cut never splits a surrogate pair: half a
+ * character is not a character.
+ */
+function capProvision(body: string): { body: string; truncated: boolean } {
+  if (body.length <= PROVISION_TEXT_CAP) return { body, truncated: false };
+  let cut = body.slice(0, PROVISION_TEXT_CAP);
+  const last = cut.charCodeAt(cut.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1);
+  return { body: cut, truncated: true };
+}
 
 const searchOutputSchema = z.object({
   query: z.string(),
@@ -84,6 +112,11 @@ const sectionOutputSchema = z.object({
   citedBy: z.array(z.string()),
   indexStale: z.boolean(),
   notice: z.string().nullable(),
+  truncated: z
+    .boolean()
+    .describe(
+      `true when the provision body was cut at the ${PROVISION_TEXT_CAP}-character cap — the text below is incomplete`,
+    ),
 });
 
 const structureEntrySchema = z.object({
@@ -166,6 +199,11 @@ const historicalOutputSchema = z.object({
   markdown: z.string(),
   sourceUrl: z.string(),
   sourceUrlAtRequestedDate: z.string(),
+  truncated: z
+    .boolean()
+    .describe(
+      `true when the provision body was cut at the ${PROVISION_TEXT_CAP}-character cap — the text below is incomplete`,
+    ),
 });
 
 const changeReportOutputSchema = z.object({
@@ -233,10 +271,6 @@ type HealthOutput = z.infer<typeof healthOutputSchema>;
 type ChangeReportOutput = z.infer<typeof changeReportOutputSchema>;
 type RedlineOutput = z.infer<typeof redlineOutputSchema>;
 
-function textContent(payload: unknown): string {
-  return JSON.stringify(payload, null, 2);
-}
-
 /** Register all tools on the server; `deps.ecfr` gates the three eCFR-backed tools (get_section_at, diff_issues, redline). */
 export function registerTools(
   server: McpServer,
@@ -272,7 +306,8 @@ export function registerTools(
         "Read each hit's heading and fetch its full text with get_section before you cite it. " +
         "Each response also carries matchedTerms and unmatchedTerms: the query's content words (stopwords, single characters and bare numerals removed), split into those the returned hits answered and those they did not. " +
         'A non-empty unmatchedTerms means the returned text does not speak to that part of your question — the governing provision may be a later hit, may be reachable only under different wording, or may not be in this index. ' +
-        'Never cite a provision you have not read in full, and never state that Title 38 does not address a question on the basis of this response alone.',
+        'Never cite a provision you have not read in full, and never state that Title 38 does not address a question on the basis of this response alone. ' +
+        UNTRUSTED_DATA_NOTE,
       inputSchema: {
         query: z
           .string()
@@ -313,8 +348,8 @@ export function registerTools(
       outputSchema: searchOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async (args) => {
-      try {
+    async (args) =>
+      runTool(logger, 'search_regulations', async () => {
         const response = service.search({
           query: args.query,
           page: args.page,
@@ -330,19 +365,10 @@ export function registerTools(
           hits: response.hits.map((hit) => ({ ...hit, matches: [...hit.matches] })),
         };
         return {
-          content: [{ type: 'text', text: textContent(structuredContent) }],
+          content: [{ type: 'text', text: renderToolText(structuredContent) }],
           structuredContent,
         };
-      } catch (error) {
-        logger.error('tool search_regulations failed', {
-          message: error instanceof Error ? error.message : String(error),
-        });
-        return {
-          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-          isError: true,
-        };
-      }
-    },
+      }),
   );
 
   server.registerTool(
@@ -352,35 +378,34 @@ export function registerTools(
       description:
         'Fetch the full text of one Title 38 CFR section or appendix as markdown. Accepts flexible citations: ' +
         '"4.125", "§ 4.125", "38 CFR 4.125", or appendix names like "Appendix A to Part 4". ' +
-        'Returns heading, hierarchy path, issue date and an ecfr.gov permalink.',
+        'Returns heading, hierarchy path, issue date and an ecfr.gov permalink. ' +
+        `The body is capped at ${PROVISION_TEXT_CAP} characters; a body that was cut sets \`truncated: true\`, ` +
+        'and the truncated text is incomplete — read the rest from the sourceUrl. ' +
+        UNTRUSTED_DATA_NOTE,
       inputSchema: {
         citation: z.string().min(1).max(120).describe('the citation to read, e.g. "38 CFR 4.125"'),
       },
       outputSchema: sectionOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async (args) => {
-      try {
+    async (args) =>
+      runTool(logger, 'get_section', async () => {
         const section = service.getSection(args.citation);
+        const text = capProvision(section.text);
+        const markdown = capProvision(section.markdown);
         const result: SectionOutput = {
           ...section,
+          text: text.body,
+          markdown: markdown.body,
+          truncated: text.truncated || markdown.truncated,
           references: section.references.map((reference) => ({ ...reference })),
           citedBy: [...section.citedBy],
         };
         return {
-          content: [{ type: 'text', text: textContent(result) }],
+          content: [{ type: 'text', text: renderToolText(result, ['markdown', 'text']) }],
           structuredContent: result,
         };
-      } catch (error) {
-        logger.error('tool get_section failed', {
-          message: error instanceof Error ? error.message : String(error),
-        });
-        return {
-          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-          isError: true,
-        };
-      }
-    },
+      }),
   );
 
   server.registerTool(
@@ -405,8 +430,8 @@ export function registerTools(
       outputSchema: browseOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async (args) => {
-      try {
+    async (args) =>
+      runTool(logger, 'browse_title38', async () => {
         const response = service.browse({
           chapter: args.chapter,
           part: args.part,
@@ -419,19 +444,10 @@ export function registerTools(
           children: [...response.children],
         };
         return {
-          content: [{ type: 'text', text: textContent(structuredContent) }],
+          content: [{ type: 'text', text: renderToolText(structuredContent) }],
           structuredContent,
         };
-      } catch (error) {
-        logger.error('tool browse_title38 failed', {
-          message: error instanceof Error ? error.message : String(error),
-        });
-        return {
-          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-          isError: true,
-        };
-      }
-    },
+      }),
   );
 
   server.registerTool(
@@ -441,13 +457,15 @@ export function registerTools(
       description:
         'Report how current the local Title 38 index is: eCFR issue date, last sync time, row counts, the ' +
         'corpus receipt hash (a sha256 over the sorted per-provision (citation, text+heading) pairs at ' +
-        'rebuild time, null on older indexes) and ' +
+        'rebuild time, null on older indexes — ' +
+        CORPUS_RECEIPT_LIMIT +
+        ') and ' +
         'whether the index is stale relative to CFR_MAX_AGE_DAYS. Check this before relying on search results.',
       outputSchema: statusOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async () => {
-      try {
+    async () =>
+      runTool(logger, 'index_status', async () => {
         const status = service.status();
         const result: StatusOutput = {
           ...status,
@@ -462,19 +480,10 @@ export function registerTools(
                 },
         };
         return {
-          content: [{ type: 'text', text: textContent(result) }],
+          content: [{ type: 'text', text: renderToolText(result) }],
           structuredContent: result,
         };
-      } catch (error) {
-        logger.error('tool index_status failed', {
-          message: error instanceof Error ? error.message : String(error),
-        });
-        return {
-          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-          isError: true,
-        };
-      }
-    },
+      }),
   );
 
   server.registerTool(
@@ -488,26 +497,17 @@ export function registerTools(
       outputSchema: listPartsOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async () => {
-      try {
+    async () =>
+      runTool(logger, 'list_parts', async () => {
         const parts = service.listParts();
         const structuredContent: ListPartsOutput = {
           parts: parts.map((row) => ({ ...row })),
         };
         return {
-          content: [{ type: 'text', text: textContent(structuredContent) }],
+          content: [{ type: 'text', text: renderToolText(structuredContent) }],
           structuredContent,
         };
-      } catch (error) {
-        logger.error('tool list_parts failed', {
-          message: error instanceof Error ? error.message : String(error),
-        });
-        return {
-          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-          isError: true,
-        };
-      }
-    },
+      }),
   );
 
   server.registerTool(
@@ -522,23 +522,14 @@ export function registerTools(
       outputSchema: healthOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async () => {
-      try {
+    async () =>
+      runTool(logger, 'health', async () => {
         const structuredContent: HealthOutput = service.health();
         return {
-          content: [{ type: 'text', text: textContent(structuredContent) }],
+          content: [{ type: 'text', text: renderToolText(structuredContent) }],
           structuredContent,
         };
-      } catch (error) {
-        logger.error('tool health failed', {
-          message: error instanceof Error ? error.message : String(error),
-        });
-        return {
-          content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-          isError: true,
-        };
-      }
-    },
+      }),
   );
 
   // Registered only when an eCFR client is injected: without one there is no
@@ -556,11 +547,16 @@ export function registerTools(
           'eCFR serves the revision IN FORCE on that date, so a date that is not itself an ' +
           'issue date resolves to the revision that was in force then; the upstream does not ' +
           'report which issue date it served, so the response names the REQUESTED date and ' +
-          'never a served-revision date. Stateless: the revision is fetched from eCFR on ' +
-          "every call — no local index, no cache. eCFR's point-in-time archive starts at " +
+          'never a served-revision date. Fetched from eCFR on demand — there is no ' +
+          'local index for a point-in-time read; a short-lived in-memory memo may ' +
+          'serve a document this process fetched moments ago, and concurrent readers ' +
+          "of the same date share one fetch. eCFR's point-in-time archive starts at " +
           `${ARCHIVE_FLOOR}; a date before that is rejected as invalid_input. Use this for ` +
           'date-of-claim and CUE questions ("what did this section say when the claim was ' +
-          'filed?"); for the CURRENT text use get_section.',
+          'filed?"); for the CURRENT text use get_section. ' +
+          `The body is capped at ${PROVISION_TEXT_CAP} characters; a body that was cut sets \`truncated: true\`, ` +
+          'and the truncated text is incomplete — read the rest from the sourceUrl. ' +
+          UNTRUSTED_DATA_NOTE,
         inputSchema: {
           // at_date is a REQUESTED date, not an issue date: eCFR serves the
           // revision in force then and never reports which issue date it
@@ -579,9 +575,11 @@ export function registerTools(
         outputSchema: historicalOutputSchema,
         annotations: DIFF_ANNOTATIONS,
       },
-      async (args) => {
-        try {
+      async (args) =>
+        runTool(logger, 'get_section_at', async () => {
           const section = await historicalSection({ ecfr, logger }, args.at_date, args.citation);
+          const text = capProvision(section.text);
+          const markdown = capProvision(section.markdown);
           const structuredContent = {
             requestedDate: section.requestedDate,
             citation: section.citation,
@@ -591,25 +589,19 @@ export function registerTools(
             part: section.part,
             subpart: section.subpart,
             path: section.path,
-            text: section.text,
-            markdown: section.markdown,
+            text: text.body,
+            markdown: markdown.body,
             sourceUrl: section.sourceUrl,
             sourceUrlAtRequestedDate: section.sourceUrlAtRequestedDate,
+            truncated: text.truncated || markdown.truncated,
           };
           return {
-            content: [{ type: 'text', text: textContent(structuredContent) }],
+            content: [
+              { type: 'text', text: renderToolText(structuredContent, ['markdown', 'text']) },
+            ],
             structuredContent,
           };
-        } catch (error) {
-          logger.error('tool get_section_at failed', {
-            message: error instanceof Error ? error.message : String(error),
-          });
-          return {
-            content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-            isError: true,
-          };
-        }
-      },
+        }),
     );
 
     server.registerTool(
@@ -621,8 +613,11 @@ export function registerTools(
           'which were added, and which were removed between `from_date` and `to_date` ' +
           '(both YYYY-MM-DD, both required — this tool has no default-to; for ' +
           '"what changed since my index was built" run `cfr-free diff <from>` locally, ' +
-          "which resolves `to` from the index issue date). Stateless: both dates' full-title XML is " +
-          'fetched from eCFR and hashed per citation on the fly — no local index needed, no cache. ' +
+          'which resolves `to` from the index issue date). Fetched from eCFR on ' +
+          "demand: both dates' full-title XML is hashed per citation on the fly — " +
+          'there is no local index for a point-in-time diff; a short-lived in-memory ' +
+          'memo may serve a document this process fetched moments ago, and concurrent ' +
+          'readers of the same date share one fetch. ' +
           `Each citation list is capped at ${CHANGE_LIST_CAP} entries; \`truncated: true\` means at least ` +
           'one list was cut. Identical dates or an impossible calendar date (e.g. month 13) are ' +
           'rejected as errors before any fetch.',
@@ -633,8 +628,8 @@ export function registerTools(
         outputSchema: changeReportOutputSchema,
         annotations: DIFF_ANNOTATIONS,
       },
-      async (args) => {
-        try {
+      async (args) =>
+        runTool(logger, 'diff_issues', async () => {
           const diff = await diffIssues({ ecfr, logger }, args.from_date, args.to_date);
           const structuredContent: ChangeReportOutput = {
             fromIssueDate: diff.fromIssueDate,
@@ -649,19 +644,10 @@ export function registerTools(
             notice: diff.notice,
           };
           return {
-            content: [{ type: 'text', text: textContent(structuredContent) }],
+            content: [{ type: 'text', text: renderToolText(structuredContent) }],
             structuredContent,
           };
-        } catch (error) {
-          logger.error('tool diff_issues failed', {
-            message: error instanceof Error ? error.message : String(error),
-          });
-          return {
-            content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-            isError: true,
-          };
-        }
-      },
+        }),
     );
 
     server.registerTool(
@@ -676,10 +662,14 @@ export function registerTools(
           "issue date was served. Returns the status (changed/added/removed/unchanged), both sides' raw " +
           "text, and one hunk per line (same/add/del with 1-based anchors into each side's text). " +
           'Identical or impossible dates (e.g. month 13) are rejected as errors before any fetch; a ' +
-          'citation missing from BOTH dates is a not_found error after the fetches. Stateless: both ' +
-          "dates' full-title XML is fetched from eCFR per call — no local index needed, no cache. " +
+          'citation missing from BOTH dates is a not_found error after the fetches. Fetched ' +
+          "from eCFR on demand: both dates' full-title XML is read on demand — there " +
+          'is no local index for a point-in-time redline; a short-lived in-memory ' +
+          'memo may serve a document this process fetched moments ago, and concurrent ' +
+          'readers of the same date share one fetch. ' +
           "When either side exceeds the core's line cap the per-line walk is replaced by two whole-text " +
-          "coarse blocks (`coarse: true`) — passed through uncapped here, the core's own bound.",
+          "coarse blocks (`coarse: true`) — passed through uncapped here, the core's own bound. " +
+          UNTRUSTED_DATA_NOTE,
         inputSchema: {
           from_date: dateArgSchema,
           to_date: dateArgSchema,
@@ -692,8 +682,8 @@ export function registerTools(
         outputSchema: redlineOutputSchema,
         annotations: DIFF_ANNOTATIONS,
       },
-      async (args) => {
-        try {
+      async (args) =>
+        runTool(logger, 'redline', async () => {
           const redline = await redlineSection(
             { ecfr, logger },
             args.from_date,
@@ -715,19 +705,10 @@ export function registerTools(
             notice: redline.notice,
           };
           return {
-            content: [{ type: 'text', text: textContent(structuredContent) }],
+            content: [{ type: 'text', text: renderToolText(structuredContent) }],
             structuredContent,
           };
-        } catch (error) {
-          logger.error('tool redline failed', {
-            message: error instanceof Error ? error.message : String(error),
-          });
-          return {
-            content: [{ type: 'text', text: `Error: ${clientSafeMessage(error)}` }],
-            isError: true,
-          };
-        }
-      },
+        }),
     );
   }
 }
