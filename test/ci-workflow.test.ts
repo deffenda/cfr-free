@@ -73,6 +73,8 @@ interface Job {
   readonly matrix: Record<string, unknown> | undefined;
   /** The container image the job runs in, when it names one. */
   readonly image: string | undefined;
+  /** The runner label the job runs on — a label, or a list of them. */
+  readonly runsOn: string | undefined;
 }
 
 /** One workflow file, parsed. */
@@ -95,6 +97,7 @@ interface RawJob {
   readonly steps?: readonly RawStep[];
   readonly strategy?: { readonly matrix?: Record<string, unknown> };
   readonly container?: string | { readonly image?: string };
+  readonly 'runs-on'?: string | readonly string[];
 }
 
 /**
@@ -124,8 +127,21 @@ function loadWorkflow(file: string): Workflow {
     })),
     matrix: job.strategy?.matrix,
     image: containerImage(job.container),
+    runsOn: runnerLabel(job['runs-on']),
   }));
   return { file, text, jobs };
+}
+
+/**
+ * The runner a job runs on, as text: a label, or the labels of a list.
+ *
+ * `runs-on` takes either a single label or a list of them, and a label
+ * that says `arm` says the job runs on an arm64 runner — which is what
+ * the semgrep job must not do.
+ */
+function runnerLabel(runsOn: RawJob['runs-on']): string | undefined {
+  if (runsOn === undefined) return undefined;
+  return Array.isArray(runsOn) ? runsOn.join(' ') : runsOn;
 }
 
 /** Every workflow file, in a stable order. */
@@ -911,6 +927,20 @@ describe('the workflow files — what the merge gate runs', () => {
       line,
       'the pinned semgrep digest must name its release in the comment beside it',
     ).toContain(`# ${SEMGREP_IMAGE_VERSION}`);
+  });
+
+  it('keeps the semgrep job on an x64 runner', () => {
+    // The semgrep job runs in the published container image, which is
+    // Alpine, and GitHub's runner supports JavaScript actions in an
+    // Alpine container only on an x64 runner: an arm64 label fails the
+    // job at runtime with NotSupportedException — after the checkout, so
+    // the failure would name the runner rather than the scan.
+    const semgrepJob = jobOf(ci, 'semgrep');
+    expect(semgrepJob, 'ci.yml has no `semgrep` job').toBeDefined();
+    expect(semgrepJob?.runsOn, 'the semgrep job must name its runner').toBeDefined();
+    expect(semgrepJob?.runsOn ?? '', 'the semgrep job must run on an x64 runner').not.toMatch(
+      /arm/i,
+    );
   });
 
   it('checks out the tags the release guard reads', () => {
