@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runInNewContext } from 'node:vm';
 import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
-import { UI_JS } from '../src/titan/ui.js';
+import { UI_HTML, UI_JS } from '../src/titan/ui.js';
 
 /**
  * Behavioural harness for the served UI script (review finding P1-02).
@@ -19,6 +19,37 @@ import { UI_JS } from '../src/titan/ui.js';
  * into a tree the user has left.
  */
 
+/** The tags a browser lets take the focus without a `tabindex`. */
+const FOCUSABLE_TAGS = new Set(['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON']);
+
+/**
+ * The elements the served shell declares, with the tag and the attributes
+ * that decide whether each can take the focus.
+ *
+ * The harness must not invent the DOM. A stub that creates any element it
+ * is asked for cannot tell a missing heading from a present one, and a stub
+ * that always accepts the focus reports a focus move that a real browser
+ * would refuse — a bare `<h2>` is not focusable, so `focus()` on it does
+ * nothing at all. So the shell's own markup is read, and the elements the
+ * script asks for are built from it.
+ */
+function shellElements(): Map<string, { tag: string; focusable: boolean }> {
+  const found = new Map<string, { tag: string; focusable: boolean }>();
+  for (const match of UI_HTML.matchAll(/<([a-zA-Z][a-zA-Z0-9]*)[^>]*>/g)) {
+    const tag = (match[1] ?? '').toUpperCase();
+    const element = match[0];
+    const id = /\bid="([^"]*)"/.exec(element)?.[1];
+    if (id === undefined) continue;
+    const hasTabIndex = /\btabindex="[^"]*"/.test(element);
+    const href = /\bhref="([^"]*)"/.exec(element)?.[1] ?? '';
+    found.set(id, {
+      tag,
+      focusable: FOCUSABLE_TAGS.has(tag) || hasTabIndex || (tag === 'A' && href !== ''),
+    });
+  }
+  return found;
+}
+
 /** Minimal DOM node: the surface the served script actually uses. */
 class StubNode {
   nodeType = 1;
@@ -34,6 +65,8 @@ class StubNode {
   childNodes: StubNode[] = [];
   /** True once this node has taken the keyboard focus. */
   tookFocus = false;
+  /** True when the browser would let this element take the focus. */
+  focusable = false;
   /** Called when the node takes the keyboard focus. */
   onFocus: ((node: StubNode) => void) | null = null;
   private handlers = new Map<string, Array<(event: unknown) => void>>();
@@ -44,6 +77,12 @@ class StubNode {
 
   /** The keyboard moving here — what `tabindex="-1"` + `focus()` does. */
   focus(): void {
+    // A real `focus()` on an element that cannot take the focus does
+    // nothing. Only form controls, links with an href, and anything with a
+    // `tabindex` are focusable. A stub that always focuses reports a focus
+    // move that never happens — which is how a heading without a
+    // `tabindex` shipped green.
+    if (!this.focusable) return;
     this.tookFocus = true;
     if (this.onFocus !== null) this.onFocus(this);
   }
@@ -76,6 +115,7 @@ class StubNode {
   setAttribute(name: string, value: string): void {
     if (name === 'href') this.href = value;
     else if (name === 'class') this.className = value;
+    else if (name === 'tabindex') this.focusable = true;
     else (this as unknown as Record<string, string>)[name] = value;
   }
 
@@ -118,11 +158,14 @@ function makeHarness(): Harness {
   const calls: PendingCall[] = [];
   const hashListeners: Array<() => void> = [];
   let lastFocused: StubNode | null = null;
+  const shell = shellElements();
 
   const element = (id: string): StubNode => {
     let node = elements.get(id);
     if (node === undefined) {
-      node = new StubNode('div');
+      const declared = shell.get(id);
+      node = new StubNode(declared?.tag ?? 'div');
+      node.focusable = declared?.focusable ?? false;
       node.id = id;
       node.onFocus = (focused) => {
         lastFocused = focused;
@@ -1078,6 +1121,58 @@ describe('UI usability (CR-08, CR-09, CR-24)', () => {
     const harness = makeHarness();
     await harness.navigate('#/search?q=one');
     expect(harness.focused()).toBeNull();
+  });
+
+  it('moves the keyboard into the search view too, not only out of it', async () => {
+    // The search view's heading was the only one without a `tabindex`, so
+    // the focus stayed on the heading of the view that was just hidden. The
+    // stub used to report a focus move whatever the element was, so this
+    // passed while the browser did nothing at all.
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.125');
+    harness.calls[0]?.respond(true, sectionBody('4.125', 'Diagnosis of mental disorders.'));
+    await harness.flush();
+    expect(harness.focused()?.id).toBe('section-heading');
+
+    await harness.navigate('#/search?q=disorders');
+    expect(harness.focused()?.id).toBe('search-heading');
+  });
+
+  it('the skip link reaches the content without throwing the view away', async () => {
+    // The link points at `#main`, and a router that reads every fragment as
+    // a route would throw away the view the reader was in — and the query
+    // they had typed — to show them the search form again. The skip link is
+    // the FIRST tab stop on every page, so this is what a keyboard user
+    // does first.
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.125');
+    harness.calls[0]?.respond(true, sectionBody('4.125', 'Diagnosis of mental disorders.'));
+    await harness.flush();
+
+    let prevented = false;
+    harness.element('skip-link').dispatch('click', {
+      preventDefault: () => {
+        prevented = true;
+      },
+    });
+
+    // The fragment navigation is refused…
+    expect(prevented).toBe(true);
+    // …and the focus lands on the content the link names.
+    expect(harness.focused()?.id).toBe('main');
+    // The view is still the one the reader was on.
+    expect(harness.element('section-view').hidden).toBe(false);
+  });
+
+  it('a fragment that is not a route leaves the view standing', async () => {
+    // Any other fragment — an anchor, something typed into the address
+    // bar — is a fragment, not a destination. The router must not treat it
+    // as a route and wipe what the reader was looking at.
+    const harness = makeHarness();
+    await harness.navigate('#/search?q=disorders');
+    await harness.navigate('#main');
+    expect(harness.element('search-view').hidden).toBe(false);
+    expect(harness.element('q').value).toBe('disorders');
   });
 
   it('sends the part the form carries, and keeps it in the route', async () => {

@@ -51,7 +51,7 @@ export const UI_HTML = `<!doctype html>
     <link rel="stylesheet" href="/ui.css" />
   </head>
   <body>
-    <a class="skip-link" href="#main">Skip to the main content</a>
+    <a class="skip-link" id="skip-link" href="#main">Skip to the main content</a>
     <header class="site-header">
       <h1><a href="#/search">cfr-free</a></h1>
       <p>Read-only search over the local Title 38 CFR index.</p>
@@ -64,10 +64,10 @@ export const UI_HTML = `<!doctype html>
     <noscript>
       <p>This page needs JavaScript. The JSON API stays available at /api/v1/… without it.</p>
     </noscript>
-    <main id="main">
+    <main id="main" tabindex="-1">
       <p id="view-announcer" class="visually-hidden" role="status" aria-live="polite"></p>
       <section id="search-view">
-        <h2 id="search-heading" class="visually-hidden">Search</h2>
+        <h2 id="search-heading" tabindex="-1">Search Title 38</h2>
         <form id="search-form">
           <label for="q">Search</label>
           <input id="q" name="q" type="search" autocomplete="off" />
