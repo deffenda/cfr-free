@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1808,6 +1809,24 @@ describe('the release guard — the packed package must carry what the program r
     const guard = readFileSync(VERIFIER_PATH, 'utf8');
     expect(guard).toMatch(/'run', 'build'/);
   });
+
+  it('the pack list still answers when it is reached through a symlink', () => {
+    // `import.meta.url` is the REAL path of the module and `argv[1]` is
+    // whatever the caller typed. Comparing the two without resolving them
+    // meant the script printed NOTHING through a symlink — and a caller
+    // read that as an empty package list.
+    const dir = mkdtempSync(join(tmpdir(), 'cfr-pack-link-'));
+    try {
+      const link = join(dir, 'pack-list.mjs');
+      symlinkSync(join(ROOT, 'scripts', 'pack-list.mjs'), link);
+      const out = execFileSync(process.execPath, [link, ROOT], { encoding: 'utf8' });
+      const paths = JSON.parse(out) as string[];
+      expect(paths).toContain('dist/cli.js');
+      expect(paths).toContain('dist/titan/ui-client.js');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it('reads the package list whichever shape npm printed it in', () => {
     // `npm pack --json` is not one shape: npm 10 and 11 print an array of

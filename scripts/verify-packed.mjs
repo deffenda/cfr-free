@@ -17,7 +17,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -57,11 +57,13 @@ function expectedImports() {
  *
  * The specifier is the COMPILED name ('./service.js'), so the source is the
  * same path with the TypeScript extension. An import that names no source
- * file — a directory, a package — is not part of the closure.
+ * FILE — a directory, a package — is not part of the closure: a directory
+ * has no compiled file, and `npm pack --json` never lists one.
  */
 function sourceFor(from, specifier) {
   const target = join(dirname(from), specifier).replace(/\.js$/, '.ts');
-  return existsSync(join(ROOT, target)) ? target : null;
+  const path = join(ROOT, target);
+  return existsSync(path) && statSync(path).isFile() ? target : null;
 }
 
 /**
@@ -101,20 +103,33 @@ const expected = [...new Set([...expectedImports(), ...expectedAssets()])];
  * It is run every time, not only when `dist/` is missing: a stale
  * `dist/` is as misleading as an absent one, and the guard's verdict
  * must not depend on what happened to be lying in the working tree.
+ *
+ * The build does not clean `dist/`, so a file it no longer produces would
+ * survive it — and be packed. The old directory is moved aside and the
+ * build starts from an empty one; if the build FAILS, the old directory
+ * is put back, because a check must not leave the tree it checked broken.
  */
 function buildPackage() {
-  // The build does not clean `dist/`, so a file the build no longer
-  // produces would survive it — and be packed. The guard measures what a
-  // CLEAN build produces, so it starts from an empty directory.
-  rmSync(join(ROOT, 'dist'), { recursive: true, force: true });
+  const dist = join(ROOT, 'dist');
+  const previous = join(ROOT, 'dist.before-verify-packed');
+  const hadPrevious = existsSync(dist);
+  if (hadPrevious) {
+    rmSync(previous, { recursive: true, force: true });
+    renameSync(dist, previous);
+  }
   const result = spawnSync('npm', ['run', 'build'], {
     cwd: ROOT,
     stdio: ['inherit', process.stderr, 'inherit'],
   });
   if (result.status !== 0) {
+    if (hadPrevious) {
+      rmSync(dist, { recursive: true, force: true });
+      renameSync(previous, dist);
+    }
     console.error('The build failed, so there is no package to check.');
     process.exit(1);
   }
+  if (hadPrevious) rmSync(previous, { recursive: true, force: true });
 }
 
 /**
