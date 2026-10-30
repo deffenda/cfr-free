@@ -112,6 +112,31 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+  /openapi.yaml:
+    # source: src/titan/http-server.ts#handleDiscovery
+    get:
+      summary: The OpenAPI description of this API
+      responses:
+        '200':
+          description: 'This document, served as application/yaml so a running instance carries its own contract. Cache-Control: no-store.'
+          content:
+            application/yaml:
+              schema: { type: string }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    head:
+      summary: Headers-only OpenAPI document
+      responses:
+        '200':
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts#sendStatic); errors mirror GET, also body-less.'
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
   /health:
     # source: src/titan/http-server.ts#dispatch
     get:
@@ -154,6 +179,31 @@ paths:
         '500': { $ref: '#/components/responses/InternalError' }
     head:
       summary: Headers-only metrics check
+      responses:
+        '200':
+          description: 'Status and headers as GET, empty body (src/titan/http-server.ts#sendJson); errors mirror GET, also body-less.'
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1:
+    # source: src/titan/http-server.ts#handleDiscovery
+    get:
+      summary: API index — the routes this instance serves
+      responses:
+        '200':
+          description: 'The routes, their summaries and the parameters each requires. Cache-Control: no-store.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiIndex' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    head:
+      summary: Headers-only API index
       responses:
         '200':
           description: 'Status and headers as GET, empty body (src/titan/http-server.ts#sendJson); errors mirror GET, also body-less.'
@@ -540,6 +590,28 @@ components:
           description: 'The same cache policy as the 200 it replaces.'
           schema: { type: string }
   schemas:
+    ApiIndex:
+      type: object
+      required: [service, version, openapi, routes]
+      properties:
+        service: { type: string }
+        version: { type: string }
+        openapi:
+          type: string
+          description: The path this instance serves its OpenAPI document on.
+        routes:
+          type: array
+          items:
+            type: object
+            required: [method, path, summary, required]
+            properties:
+              method: { type: string }
+              path: { type: string }
+              summary: { type: string }
+              required:
+                type: array
+                items: { type: string }
+                description: The parameters this route requires.
     Error:
       type: object
       required: [error, message]

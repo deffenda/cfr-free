@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import { CHANGE_LIST_CAP } from '../core/changes.js';
 import { ServiceError, type CFRService } from '../core/service.js';
@@ -6,6 +7,7 @@ import { StructureError } from '../core/structure.js';
 import type { Logger } from '../logger.js';
 import { RateLimiter } from './rate-limit.js';
 import { UI_CSP, UI_CSS, UI_HTML, UI_JS } from './ui.js';
+import { VERSION } from '../version.js';
 
 /**
  * Titan HTTP API: a tiny GET-only JSON surface over the local index, plus
@@ -24,6 +26,7 @@ const TEXT_HEADER = 'text/plain; version=0.0.4; charset=utf-8';
 const HTML_HEADER = 'text/html; charset=utf-8';
 const JS_HEADER = 'text/javascript; charset=utf-8';
 const CSS_HEADER = 'text/css; charset=utf-8';
+const YAML_HEADER = 'application/yaml; charset=utf-8';
 const NOSNIFF = 'X-Content-Type-Options';
 
 /**
@@ -45,6 +48,8 @@ const METRICS_PATH = '/metrics';
 const UI_PATH = '/';
 const UI_JS_PATH = '/ui.js';
 const UI_CSS_PATH = '/ui.css';
+const API_INDEX_PATH = '/api/v1';
+const OPENAPI_PATH = '/openapi.yaml';
 
 // Router-level request-size caps, enforced before validation: zod already
 // bounds `q` to 200 chars (≤ 800 UTF-8 bytes) and `part` to 3 digits, so
@@ -504,6 +509,113 @@ function renderMetrics(service: CFRService, disk?: () => DiskSnapshot | null): s
   return out;
 }
 
+/**
+ * The API index: what this instance serves, and what each route needs.
+ *
+ * A self-hosted service has to be discoverable on its own. Without this,
+ * a developer or an agent probing the instance finds a bare 404, and the
+ * contract — `docs/openapi.yaml` — is only reachable in the repository.
+ *
+ * The conformance suite checks this list against the spec, so the two
+ * cannot drift.
+ */
+const ROUTE_INDEX: JsonBody = {
+  service: 'cfr-free',
+  version: VERSION,
+  openapi: OPENAPI_PATH,
+  routes: [
+    {
+      method: 'GET',
+      path: '/api/v1',
+      summary: 'This index — the routes below.',
+      required: [],
+    },
+    {
+      method: 'GET',
+      path: '/api/v1/search',
+      summary: 'Ranked provisions for a query.',
+      required: ['q'],
+    },
+    {
+      method: 'GET',
+      path: '/api/v1/sections/{citation}',
+      summary: 'One provision by citation.',
+      required: ['citation'],
+    },
+    {
+      method: 'GET',
+      path: '/api/v1/browse',
+      summary: 'The hierarchy, from its root or from a node.',
+      required: [],
+    },
+    {
+      method: 'GET',
+      path: '/api/v1/diff',
+      summary: 'Changes between two issue dates.',
+      required: ['from', 'to'],
+    },
+    {
+      method: 'GET',
+      path: '/api/v1/redline',
+      summary: 'Line-level redline of one provision.',
+      required: ['from', 'to', 'citation'],
+    },
+    { method: 'GET', path: '/health', summary: 'Freshness and status.', required: [] },
+    { method: 'GET', path: '/metrics', summary: 'Prometheus exposition text.', required: [] },
+  ],
+};
+
+/**
+ * The OpenAPI document, read from the package and cached.
+ *
+ * `../../docs/openapi.yaml` is the repository's copy in development
+ * (`src/titan/`) and the package's copy in a build (`dist/titan/`). It is
+ * read lazily and cached: a deployment without the file must still serve
+ * every other route, and the route that needs it should say so.
+ */
+let openApiDocument: string | null = null;
+
+function readOpenApiDocument(): string | null {
+  if (openApiDocument !== null) return openApiDocument;
+  try {
+    openApiDocument = readFileSync(new URL('../../docs/openapi.yaml', import.meta.url), 'utf8');
+  } catch {
+    return null;
+  }
+  return openApiDocument;
+}
+
+/**
+ * The discovery routes: the API index and the OpenAPI document.
+ *
+ * Returns whether it answered the request, so the router can carry on.
+ */
+function handleDiscovery(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  pathname: string,
+): boolean {
+  if (pathname === API_INDEX_PATH) {
+    sendJson(req, res, 200, ROUTE_INDEX, 'no-store');
+    return true;
+  }
+  if (pathname === OPENAPI_PATH) {
+    const document = readOpenApiDocument();
+    if (document === null) {
+      sendJson(
+        req,
+        res,
+        500,
+        errorBody('internal_error', 'the OpenAPI document is not available in this installation'),
+      );
+      return true;
+    }
+    sendStatic(req, res, YAML_HEADER, document, undefined);
+    return true;
+  }
+  return false;
+}
+
 async function dispatch(
   service: CFRService,
   req: http.IncomingMessage,
@@ -555,6 +667,7 @@ async function dispatch(
     await handleRedline(service, req, res, url);
     return;
   }
+  if (handleDiscovery(req, res, pathname)) return;
   if (pathname === UI_PATH) {
     sendStatic(req, res, HTML_HEADER, UI_HTML, UI_CSP);
     return;

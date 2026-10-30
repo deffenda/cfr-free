@@ -264,8 +264,10 @@ const KNOWN_PATHS = [
   '/',
   '/ui.js',
   '/ui.css',
+  '/openapi.yaml',
   '/health',
   '/metrics',
+  '/api/v1',
   '/api/v1/search',
   '/api/v1/sections/{citation}',
   '/api/v1/browse',
@@ -299,6 +301,33 @@ function parametersOf(raw: readonly unknown[] | undefined): SpecParameter[] {
     }
   }
   return params;
+}
+
+/**
+ * The parameters a path item requires, across the path item and every
+ * operation on it. Path parameters are required by OpenAPI itself.
+ */
+function requiredParameterNames(pathItem: SpecPathItem | undefined): string[] {
+  if (pathItem === undefined) return [];
+  // A path item declares its parameters per operation, so the same one can
+  // appear twice (once for GET, once for HEAD).
+  const required = new Set<string>();
+  const collect = (raw: readonly unknown[] | undefined): void => {
+    if (raw === undefined) return;
+    for (const value of raw) {
+      if (value === null || typeof value !== 'object') continue;
+      const record = value as Record<string, unknown>;
+      if (record['required'] === true && typeof record['name'] === 'string') {
+        required.add(record['name']);
+      }
+    }
+  };
+  collect(pathItem.parameters);
+  for (const entry of Object.values(pathItem)) {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    collect((entry as SpecOperation).parameters);
+  }
+  return [...required].sort();
 }
 
 function operationOf(specPath: string, method: 'get' | 'head'): SpecOperation {
@@ -541,8 +570,10 @@ const ROUTE_PROBES: Readonly<
   '/': { requestPath: '/' },
   '/ui.js': { requestPath: '/ui.js' },
   '/ui.css': { requestPath: '/ui.css' },
+  '/openapi.yaml': { requestPath: '/openapi.yaml' },
   '/health': { requestPath: '/health' },
   '/metrics': { requestPath: '/metrics' },
+  '/api/v1': { requestPath: '/api/v1' },
   '/api/v1/search': { requestPath: '/api/v1/search', query: 'q=veteran&per_page=1' },
   '/api/v1/sections/{citation}': { requestPath: '/api/v1/sections/4.125' },
   '/api/v1/browse': { requestPath: '/api/v1/browse' },
@@ -768,6 +799,44 @@ describe('OpenAPI response conformance (in-process server vs spec)', () => {
       server.closeAllConnections();
     });
     temp.cleanup();
+  });
+
+  it('serves an index that matches the spec', async () => {
+    // The index is written by hand — the app has no YAML parser at runtime,
+    // and a generated index would be a build artefact the source could not
+    // explain — so the spec is the authority it is checked against: every
+    // path in the index is a path the spec declares, every API path the
+    // spec declares is in the index, and the required parameters agree.
+    const response = await fetch(`${base}/api/v1`);
+    expect(response.status).toBe(200);
+    const index = (await response.json()) as {
+      openapi: string;
+      routes: { method: string; path: string; required: string[] }[];
+    };
+
+    // The document the index points at is the one the spec describes.
+    expect(index.openapi).toBe('/openapi.yaml');
+    const document = await fetch(`${base}${index.openapi}`);
+    expect(document.status).toBe(200);
+    expect(await document.text()).toContain('openapi: 3.1.0');
+
+    const documented = Object.keys(specPaths());
+    for (const route of index.routes) {
+      expect(documented, `${route.path} is in the index but not in the spec`).toContain(route.path);
+      const item = SPEC.paths?.[route.path] as SpecPathItem | undefined;
+      const required = requiredParameterNames(item);
+      expect([...route.required].sort(), `${route.path}`).toEqual([...required].sort());
+    }
+
+    // Every API path in the spec is in the index. The UI assets are not:
+    // they are a page, not an API.
+    const apiPaths = documented.filter((path) => path.startsWith('/api/'));
+    for (const path of apiPaths) {
+      expect(
+        index.routes.map((route) => route.path),
+        `${path} is missing from the index`,
+      ).toContain(path);
+    }
   });
 
   for (const row of rows) {
