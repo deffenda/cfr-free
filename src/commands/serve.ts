@@ -31,7 +31,18 @@ function listenExitCode(error: unknown): number {
  *
  * @returns the process exit code to use after shutdown completes.
  */
-export async function runServeCommand(config: AppConfig, logger: Logger): Promise<number> {
+export interface ServeOptions {
+  /** Called with the URL once the server is listening. */
+  readonly onListening?: (url: string) => void;
+  /** Stops the server when the signal aborts; the process signals are the default. */
+  readonly stop?: AbortSignal;
+}
+
+export async function runServeCommand(
+  config: AppConfig,
+  logger: Logger,
+  options: ServeOptions = {},
+): Promise<number> {
   const store = Store.open(config.indexPath);
   try {
     const freshness = await ensureIndex(store, config, logger);
@@ -77,7 +88,11 @@ export async function runServeCommand(config: AppConfig, logger: Logger): Promis
         resolve();
       });
     });
-    logger.info('http api listening', { url: `http://${config.host}:${config.port}`, freshness });
+    const url = `http://${config.host}:${config.port}`;
+    logger.info('http api listening', { url, freshness });
+    // The plain-language line: where the server actually ended up, for the
+    // person who started it.
+    options.onListening?.(url);
 
     // Opt-in background refresh (CFR_REFRESH_HOURS): armed only after a
     // successful bind, so a failed listen exits with no timer left behind.
@@ -100,21 +115,25 @@ export async function runServeCommand(config: AppConfig, logger: Logger): Promis
         : null;
     scheduler?.schedule();
 
+    const cleanup = async (): Promise<void> => {
+      scheduler?.dispose();
+      await new Promise<void>((done) => {
+        server.close(() => {
+          store.close();
+          done();
+        });
+        server.closeAllConnections();
+      });
+    };
+
     return await new Promise<number>((resolve) => {
-      const shutdown = createShutdownController(
-        () =>
-          new Promise<void>((done) => {
-            scheduler?.dispose();
-            server.close(() => {
-              store.close();
-              done();
-            });
-            server.closeAllConnections();
-          }),
-        { exit: (code) => resolve(code), logger },
-      );
+      const shutdown = createShutdownController(cleanup, { exit: (code) => resolve(code), logger });
       process.once('SIGINT', () => void shutdown.handle('SIGINT'));
       process.once('SIGTERM', () => void shutdown.handle('SIGTERM'));
+      // An abort is a shutdown reason of its own: it is how a caller that
+      // is not a process (a test, an embedder) stops the server without
+      // raising a signal at the whole process group.
+      options.stop?.addEventListener('abort', () => void shutdown.handle('abort'));
     });
   } catch (error) {
     store.close();

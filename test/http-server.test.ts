@@ -718,8 +718,10 @@ describe('Titan web UI routes', () => {
     const { text: html } = await fetchUi('/');
     // Both tab affordances live in the header's Views nav, as plain hash links.
     const tabs = (html.match(/<nav[^>]*aria-label="Views"[^>]*>[\s\S]*?<\/nav>/) ?? [''])[0];
-    expect(tabs).toContain('<a href="#/search">Search</a>');
-    expect(tabs).toContain('<a href="#/browse">Browse</a>');
+    // The tabs carry ids: the client script finds them by id to mark the
+    // current one with `aria-current`.
+    expect(tabs).toContain('<a id="tab-search" href="#/search">Search</a>');
+    expect(tabs).toContain('<a id="tab-browse" href="#/browse">Browse</a>');
     // The browse view's static shell (error line, breadcrumb nav, heading, list).
     expect(html).toContain('id="browse-view"');
     expect(html).toContain('id="browse-crumbs"');

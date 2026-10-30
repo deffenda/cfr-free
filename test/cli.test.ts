@@ -1,8 +1,9 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { CliError, failureMessage, main, parseArgs } from '../src/cli.js';
+import { CliError, commandUsage, failureMessage, main, parseArgs } from '../src/cli.js';
 import { HttpError } from '../src/core/http-client.js';
 import { formatIssueDiff } from '../src/commands/diff.js';
 import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
@@ -11,11 +12,12 @@ import { Store } from '../src/core/store.js';
 import type { FetchLike } from '../src/core/http-client.js';
 import { VERSION } from '../src/version.js';
 import type { Logger } from '../src/logger.js';
-import { createTestLogger, FIXTURE_STRUCTURE } from './helpers.js';
+import { createTestLogger, FIXTURE_STRUCTURE, openTempStore } from './helpers.js';
 
 function makeIo(
   env: NodeJS.ProcessEnv = {},
   logger?: Logger,
+  stop?: AbortSignal,
 ): {
   out: string[];
   err: string[];
@@ -24,6 +26,7 @@ function makeIo(
     err(c: string): void;
     env: NodeJS.ProcessEnv;
     logger?: Logger;
+    stop?: AbortSignal;
   };
 } {
   const out: string[] = [];
@@ -37,6 +40,7 @@ function makeIo(
       env,
       // `exactOptionalPropertyTypes`: the property is absent, not undefined.
       ...(logger === undefined ? {} : { logger }),
+      ...(stop === undefined ? {} : { stop }),
     },
   };
 }
@@ -131,6 +135,82 @@ describe('main', () => {
     expect(out.join('')).toContain('cfr-free diff <from> [to]');
     expect(out.join('')).toContain('cfr-free export <path> [jsonl|md]');
     expect(err.join('')).toBe('');
+  });
+
+  it('says in plain language where the server is serving', async () => {
+    // The structured log carries the URL, but a log line is not what the
+    // person who started the server reads to find out where it is.
+    const temp = openTempStore();
+    const controller = new AbortController();
+    try {
+      const probe = net.createServer();
+      await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+      const address = probe.address();
+      const port = typeof address === 'object' && address !== null ? address.port : 0;
+      await new Promise<void>((resolve) => probe.close(() => resolve()));
+
+      const { out, io } = makeIo(
+        {
+          CFR_INDEX_PATH: temp.indexPath,
+          CFR_PORT: String(port),
+          CFR_AUTO_SYNC: '0',
+        },
+        createTestLogger(),
+        controller.signal,
+      );
+      const running = main(['serve'], io);
+      for (let attempt = 0; attempt < 100 && out.length === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(out.join('')).toContain(`Serving on http://127.0.0.1:${port}`);
+      controller.abort();
+      expect(await running).toBe(0);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it("answers --help after a command with that command's usage", async () => {
+    // `cfr-free search --help` used to fail with "unknown option for
+    // search: --help" — the one thing a user asks for when they have got a
+    // command wrong was the one thing the tool refused to say.
+    const { out, io, err } = makeIo();
+    const code = await main(['search', '--help'], io);
+    expect(code).toBe(0);
+    const printed = out.join('');
+    expect(printed).toContain('cfr-free search <query>');
+    // The per-command usage is the command's OWN entry, not the whole
+    // block: the other commands' entries are not repeated here.
+    expect(printed).not.toContain('cfr-free export <path>');
+    // The sections every command shares are still there.
+    expect(printed).toContain('CFR_INDEX_PATH');
+    expect(printed).toContain('Exit codes:');
+    expect(err.join('')).toBe('');
+  });
+
+  it('answers -h after a command as well', async () => {
+    const { out, io } = makeIo();
+    const code = await main(['sync', '-h'], io);
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('cfr-free sync');
+    expect(out.join('')).not.toContain('cfr-free export <path>');
+  });
+
+  it('answers --help for a command that takes no arguments', async () => {
+    const { out, io } = makeIo();
+    const code = await main(['serve', '--help'], io);
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('cfr-free serve');
+  });
+
+  it("derives every command's usage from the one usage block", () => {
+    // The per-command help is derived from the global block, so the two
+    // cannot disagree: each command's entry is the very text the global
+    // usage carries.
+    const global = commandUsage('diff');
+    expect(global).toContain('cfr-free diff <from> [to]');
+    // The entry's continuation line belongs to the entry.
+    expect(global).toContain("(to defaults to the index's issue date)");
   });
 
   it('prints the package version', async () => {
