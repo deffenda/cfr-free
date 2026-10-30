@@ -214,6 +214,20 @@ describe('main', () => {
     const refused = new HttpError('request failed for /api/versioner/v1/titles.json', '/x', 404);
     expect(failureMessage(refused)).toBe('eCFR answered HTTP 404');
 
+    // An answer that was not JSON is still an answer: eCFR replied, the
+    // reply was not its data. The reader's router is not the suspect, and
+    // telling them to check it sends them after the wrong thing.
+    const notJson = new HttpError('invalid JSON response from /x', '/x', 200, 'parse');
+    expect(failureMessage(notJson)).toContain('eCFR answered, but not with valid JSON');
+    expect(failureMessage(notJson)).not.toContain('network connection');
+
+    // A body over the cap is not a success either, even though it carries
+    // the status of the answer it came with.
+    const tooLarge = new HttpError('response from /x exceeds 52428800 bytes', '/x', 200, 'size');
+    expect(failureMessage(tooLarge)).toContain('the response was too large');
+    expect(failureMessage(tooLarge)).not.toContain('HTTP 200');
+    expect(failureMessage(tooLarge)).not.toContain('network connection');
+
     // An ordinary failure keeps its own message.
     expect(failureMessage(new Error('the index has no structure data'))).toBe(
       'the index has no structure data',
@@ -244,6 +258,35 @@ describe('main', () => {
       expect(String(fields?.['url'])).toContain('/api/versioner');
       expect(String(fields?.['message'])).toContain('upstream said no');
       expect(fields?.['status']).toBe(400);
+      // The kind is the machine-readable discriminator: a status alone
+      // cannot tell an upstream that answered 200 with a page of HTML from
+      // one that answered 200 with a body over the cap.
+      expect(fields?.['kind']).toBe('status');
+    } finally {
+      vi.unstubAllGlobals();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports a date before the eCFR archive as a usage error, not a service failure', async () => {
+    // eCFR serves no revision for a date before its point-in-time archive
+    // starts. That is the reader's argument, not a service failure: the
+    // exit code must be 2 (usage), not 1 — the code a script would retry
+    // forever. The floor is enforced at the unit, HTTP and MCP levels;
+    // this is the CLI's own exit code.
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-cli-archive-'));
+    vi.stubGlobal('fetch', async () => new Response('not found', { status: 404 }));
+    const { err, io } = makeIo(
+      { CFR_INDEX_PATH: path.join(dir, 'index.sqlite'), CFR_LOG_LEVEL: 'error' },
+      createTestLogger(),
+    );
+    try {
+      const code = await main(['historical', '2016-06-01', '4.130'], io);
+      expect(code).toBe(2);
+      expect(err.join('')).toContain('its point-in-time archive starts at');
+      // No upstream status and no endpoint on the reader's line.
+      expect(err.join('')).not.toContain('HTTP 404');
+      expect(err.join('')).not.toContain('/api/versioner');
     } finally {
       vi.unstubAllGlobals();
       rmSync(dir, { recursive: true, force: true });
