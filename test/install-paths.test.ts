@@ -63,6 +63,8 @@ function readRepoFile(relativePath: string): string {
 type VersionTriple = readonly [number, number, number];
 
 const VERSION_PATTERN = /^v?(\d+)\.(\d+)\.(\d+)$/;
+/** A release tag: `v` plus a strict three-part version. */
+const RELEASE_TAG_PATTERN = /^v\d+\.\d+\.\d+$/;
 
 function parseVersion(raw: string): VersionTriple {
   const match = VERSION_PATTERN.exec(raw);
@@ -90,12 +92,20 @@ interface VersionTag {
   readonly version: VersionTriple;
 }
 
-/** Every `v`-prefixed tag in the checkout, parsed. */
+/**
+ * Every RELEASE tag in the checkout, parsed.
+ *
+ * Only strict `vX.Y.Z` tags count. A pre-release tag (`v0.3.0-rc.1`) is
+ * not a release — it does not claim the version, so it cannot make the
+ * manifest's version untag-able — and it is excluded rather than allowed
+ * to crash the suite. A tag that is not a version at all (`vnext`) is
+ * ignored for the same reason.
+ */
 function versionTags(): VersionTag[] {
   return git('tag')
     .split('\n')
     .map((tag) => tag.trim())
-    .filter((tag) => tag.startsWith('v'))
+    .filter((tag) => RELEASE_TAG_PATTERN.test(tag))
     .map((tag) => ({ tag, version: parseVersion(tag) }));
 }
 
@@ -593,10 +603,11 @@ describe('the release guard', () => {
     const tags = versionTags();
     expect(
       tags.length,
-      'no v-prefixed git tag found — the release guard cannot run. A checkout ' +
-        'without tags (actions/checkout defaults to --depth 1) makes every check ' +
-        'below vacuous, so the suite fails instead of passing silently. CI must ' +
-        'check out with fetch-depth: 0.',
+      'no release tag (vX.Y.Z) found in this checkout — the release guard cannot ' +
+        'run. A checkout without tags (actions/checkout defaults to --depth 1) makes ' +
+        'every check below vacuous, so the suite fails instead of passing silently. ' +
+        'CI must check out with fetch-depth: 0; a shallow local clone needs ' +
+        '`git fetch --tags`.',
     ).toBeGreaterThan(0);
   });
 
@@ -643,8 +654,8 @@ describe('the release guard', () => {
     const tags = versionTags();
     expect(
       tags.length,
-      'no v-prefixed git tag found — the release guard cannot run; see the ' +
-        'companion assertion in this describe block.',
+      'no release tag (vX.Y.Z) found in this checkout — the release guard cannot ' +
+        'run; see the companion assertion in this describe block.',
     ).toBeGreaterThan(0);
 
     const newest = tags.reduce((a, b) => (compareVersions(b.version, a.version) > 0 ? b : a));

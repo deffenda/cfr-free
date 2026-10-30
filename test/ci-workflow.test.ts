@@ -393,8 +393,10 @@ function checkoutFetchDepth(jobText: string): string | undefined {
   for (const line of lines.slice(checkout + 1)) {
     // The next step begins — nothing below it belongs to this one.
     if (line.startsWith(`${indent}- `)) return undefined;
-    const found = /^\s*fetch-depth:\s*(\S+)\s*$/.exec(line);
-    if (found !== null) return found[1];
+    const found = /^\s*fetch-depth:\s*(.+?)\s*$/.exec(line);
+    // The value may be quoted (`fetch-depth: "0"`); the quotes are YAML
+    // syntax, not part of the value.
+    if (found !== null) return (found[1] ?? '').replace(/^["']|["']$/g, '');
   }
   return undefined;
 }
