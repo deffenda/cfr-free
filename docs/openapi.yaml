@@ -1,6 +1,6 @@
 # Static OpenAPI 3.1 description of the Titan HTTP API (SPEC §5). Derived from
 # the router in src/titan/http-server.ts (source of truth; nothing serves this
-# file). Each `paths:` entry cites its router line as
+# file). Each `paths:` entry cites the router SYMBOL it comes from as
 # `# source: src/titan/http-server.ts#symbol` (shared error responses cite the
 # symbols that send them too) so code/doc drift is easy to spot. The anchor is
 # a SYMBOL, not a line: the conformance suite resolves it in the cited file, so
