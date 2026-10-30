@@ -22,10 +22,11 @@
  *    non-null SyncChanges branch of Health.lastChanges (the fixture store
  *    has no sync history, so it exercises the null branch).
  *
- * 3. Source-citation drift — every `# source: file:NN` comment must land on
- *    a real line of the cited file that carries the construct it names, so
- *    a line shift in the router fails the suite instead of silently
- *    invalidating the doc's provenance claims.
+ * 3. Provenance drift — every citation in the document must name a symbol
+ *    that exists, in real code, and that still does what the citation
+ *    claims for it: the `# source:` comments, and the inline `file#symbol`
+ *    anchors in the response descriptions. The anchors are SYMBOLS, not
+ *    lines, so inserting a line above the router does not invalidate them.
  *
  * Deterministic by construction: in-process server, injected fetch, no
  * sleeps, and no external process — the spec is parsed in-process by the
@@ -34,13 +35,15 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import ts from 'typescript';
 import type http from 'node:http';
 import addFormats from 'ajv-formats';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import type { AnySchema } from 'ajv';
-import { parse as parseYaml } from 'yaml';
+import { parse as parseYaml, parseDocument, visit } from 'yaml';
 import { EcfrApi } from '../src/core/ecfr.js';
 import { HttpClient } from '../src/core/http-client.js';
 import type { FetchLike } from '../src/core/http-client.js';
@@ -996,38 +999,74 @@ describe('OpenAPI conformance: sync-seeded /health (lastChanges non-null branch)
 });
 
 // ---------------------------------------------------------------------------
-// Suite 3 — `# source:` citation drift: every `# source: file:NN[,MM…]`
-// comment in docs/openapi.yaml must land on a real line of the cited file
-// that carries the construct the citation names. Two-step check, both
-// exact-line (a windowed fuzzy match was evaluated and rejected: the
-// 0d4facb +2 shift moved every cited site by exactly 2 lines, so each
-// drifted citation then sat within +2 of its true target and a windowed
-// keyword check would have passed the drift):
-//   (a) the cited line must be non-blank, non-comment, not a bare
-//       `return;`, and carry one of the keywords below on the line itself;
-//   (b) when no keyword matches, the coarse structure check requires the
-//       cited line + next 2 to at least contain a statement opener — its
-//       absence is the `});`/`res,`-class total drift, its presence
-//       escalates the message to "likely off by 1–2 lines".
-// Both steps raise a violation naming the drift; neither can wave one
-// through.
+// Suite 3 — provenance drift: every citation in docs/openapi.yaml must name a
+// symbol that EXISTS, in real code, and that still does what the citation
+// claims for it.
+//
+// The anchor is a SYMBOL, not a line: the router can grow a hundred lines
+// and `#dispatch` still names the same function, so a citation is a claim
+// about the implementation rather than a tripwire on every insertion above
+// it.
+//
+// Three questions, asked of every citation:
+//
+//   1. Does the symbol exist? The cited file is parsed with the TypeScript
+//      compiler's own API, so the declarations are the compiler's: a
+//      definition that is commented out is not in the tree at all, and a
+//      method is a declaration wherever it lives — a class body, an object
+//      literal, an interface, a type literal, an enum.
+//
+//   2. Does it carry the construct the citation claims? Every cited symbol
+//      has its own expectation (SYMBOL_CONSTRUCTS), chosen so that no other
+//      symbol in the router carries it: a citation repointed at the wrong
+//      real symbol fails here.
+//
+//   3. Is it the right symbol for the route it documents? A citation inside
+//      a path item names the handler that route calls, and the router's own
+//      dispatch says which handler that is: a citation repointed at the
+//      handler of another route fails here.
+//
+// The inline `file#symbol` anchors in the response descriptions are
+// citations too, and are held to the first two questions.
 // ---------------------------------------------------------------------------
 
-const CITATION_KEYWORDS = [
+/**
+ * The construct each cited symbol must carry.
+ *
+ * One global keyword list cannot tell `#dispatch` from `#handleSection`:
+ * both bodies call `sendJson`, so repointing a citation at the wrong real
+ * symbol passed. The expectation is per symbol, and every entry is a
+ * construct that symbol carries and no other symbol of the router does.
+ */
+const SYMBOL_CONSTRUCTS: Readonly<Record<string, readonly string[]>> = {
+  dispatch: ['pathname ==='],
+  handleSearch: ['service.search'],
+  handleSection: ['service.getSection'],
+  handleBrowse: ['service.browse'],
+  handleDiff: ['service.diffBetween'],
+  handleRedline: ['service.redlineBetween'],
+  precheck: ['retry-after'],
+  statusFor: ['error.code'],
+  createHttpServer: ['createServer'],
+  sendNotModified: ['304'],
+  sendJson: ['JSON.stringify'],
+  sendStatic: ['content-security-policy'],
+  etagFor: ['sha256'],
+};
+
+/**
+ * The fallback for a symbol with no entry above: its declaration must carry
+ * at least one of these, so a citation cannot check out a name that declares
+ * nothing.
+ */
+const GENERAL_CONSTRUCTS = [
   'pathname ===',
-  'pathname.startsWith',
   'sendJson',
   'sendText',
   'errorBody',
   'setHeader',
   'res.end',
   'res.statusCode',
-  'content-length',
-  'HEALTH_PATH',
-  'METRICS_PATH',
-  'SEARCH_PREFIX',
-  'SECTIONS_PREFIX',
-  'BROWSE_PATH',
   'invalid_input',
   'not_found',
   'method_not_allowed',
@@ -1035,6 +1074,11 @@ const CITATION_KEYWORDS = [
   'rate_limited',
   'internal_error',
 ] as const;
+
+/** The constructs a citation of `symbol` expects its declaration to carry. */
+function expectedConstructs(symbol: string): readonly string[] {
+  return SYMBOL_CONSTRUCTS[symbol] ?? GENERAL_CONSTRUCTS;
+}
 
 /**
  * A `# source:` citation: the marker, then the tail it introduces. The tail
@@ -1053,6 +1097,9 @@ const SYMBOL_PAIR_RE = /^([\w./-]+\.\w+)#([A-Za-z_$][\w$]*)$/;
 /** A bare symbol name. */
 const BARE_SYMBOL_RE = /^[A-Za-z_$][\w$]*$/;
 
+/** An inline `file#symbol` anchor in the document's prose. */
+const INLINE_ANCHOR_RE = /([\w./-]+\.\w+)#([A-Za-z_$][\w$]*)/g;
+
 /** One symbol a citation names, and the file it must be defined in. */
 interface CitedSymbol {
   readonly file: string;
@@ -1062,18 +1109,54 @@ interface CitedSymbol {
 }
 
 /**
+ * Split a citation tail on the commas that are NOT inside parentheses: a
+ * parenthetical is prose and may itself contain commas ("precheck (encoding,
+ * URL parse, byte caps)").
+ */
+function splitTail(tail: string): readonly string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const char of tail) {
+    if (char === '(') depth += 1;
+    else if (char === ')') depth = Math.max(0, depth - 1);
+    if (char === ',' && depth === 0) {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  parts.push(current);
+  return parts;
+}
+
+/**
  * The symbols a `# source:` tail names.
  *
  * A parenthetical is prose ("(router)", "(encoding, URL parse, byte caps)")
  * and is dropped before the tail is read: a prose word must never be
- * mistaken for a symbol.
+ * mistaken for a symbol. A parenthetical that WRAPS a symbol reference is
+ * not prose — it is a citation written in parentheses, and it is unwrapped
+ * and checked rather than dropped.
  */
 function citedSymbols(tail: string): CitedSymbol[] {
-  const prose = tail.replace(/\([^)]*\)/g, ' ');
   const cited: CitedSymbol[] = [];
   let file = '';
-  for (const raw of prose.split(',')) {
-    const token = raw.trim();
+  const pending = [...splitTail(tail)];
+  while (pending.length > 0) {
+    const raw = pending.shift() ?? '';
+    const segment = raw.trim();
+    if (segment === '') continue;
+    if (segment.startsWith('(') && segment.endsWith(')')) {
+      const inner = segment.slice(1, -1).trim();
+      // A parenthetical that names no symbol is prose and stays prose; one
+      // that names a symbol is a citation, and is read as one.
+      if (!inner.includes('#') && !BARE_SYMBOL_RE.test(inner)) continue;
+      pending.unshift(...splitTail(inner));
+      continue;
+    }
+    const token = segment.replace(/\([^)]*\)/g, ' ').trim();
     if (token === '') continue;
     const pair = SYMBOL_PAIR_RE.exec(token);
     if (pair !== null) {
@@ -1092,75 +1175,322 @@ function citedSymbols(tail: string): CitedSymbol[] {
   return cited;
 }
 
-/**
- * The line that defines a named symbol, or null when the file defines no
- * such symbol. A commented-out definition does not count: the citation
- * claims the construct exists, not that it once did.
- */
-function definitionLine(lines: readonly string[], symbol: string): number | null {
-  for (const [index, line] of lines.entries()) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
-    if (definesSymbol(line, symbol)) return index + 1;
+/** The name a declaration node declares, or null when it declares none. */
+function declarationName(node: ts.Node): string | null {
+  if (ts.isVariableDeclaration(node)) return node.name.getText();
+  if (
+    ts.isFunctionDeclaration(node) ||
+    ts.isClassDeclaration(node) ||
+    ts.isInterfaceDeclaration(node) ||
+    ts.isTypeAliasDeclaration(node) ||
+    ts.isEnumDeclaration(node)
+  ) {
+    return node.name === undefined ? null : node.name.getText();
   }
   return null;
 }
 
-/** The keywords a declaration can start with. */
-const DECLARATION_KEYWORDS = new Set(['function', 'class', 'const', 'let', 'var']);
+/** The name a member node declares, or null when it declares none. */
+function memberName(node: ts.Node): string | null {
+  if (
+    ts.isMethodDeclaration(node) ||
+    ts.isMethodSignature(node) ||
+    ts.isPropertyDeclaration(node) ||
+    ts.isPropertySignature(node) ||
+    ts.isPropertyAssignment(node) ||
+    ts.isEnumMember(node) ||
+    ts.isGetAccessorDeclaration(node) ||
+    ts.isSetAccessorDeclaration(node)
+  ) {
+    return node.name.getText();
+  }
+  return null;
+}
 
 /**
- * True when the line declares the named symbol.
+ * The name a node declares, or null when the node declares nothing.
  *
- * The declaration keyword and the symbol are read as WORDS rather than
- * matched with a pattern built from the symbol: a pattern built at run
- * time from a value read out of a document is the shape the security
- * scanners flag, and the rule here needs no pattern at all.
+ * A member counts: a method is a declaration wherever it lives — a class
+ * body, an object literal, an interface, a type literal, an enum — so a
+ * citation stays resolvable when the code around it is reorganised.
  */
-function definesSymbol(line: string, symbol: string): boolean {
-  const words = line.split(/[^A-Za-z0-9_$]+/);
-  for (let index = 0; index + 1 < words.length; index += 1) {
-    const word = words[index] ?? '';
-    if (!DECLARATION_KEYWORDS.has(word)) continue;
-    if (words[index + 1] === symbol) return true;
-  }
-  return false;
+function declaredName(node: ts.Node): string | null {
+  return declarationName(node) ?? memberName(node);
+}
+
+/** The cited file, parsed by the TypeScript compiler. */
+function parseCited(source: string): ts.SourceFile {
+  return ts.createSourceFile('cited.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 }
 
 /**
- * The lines a top-level symbol occupies: its definition up to the next
- * top-level declaration. The section, not the definition line alone, is
- * what the construct check reads — a function's body is where its work is.
+ * The text of the declaration of `symbol` in `source`, or null when the
+ * file declares no such symbol.
+ *
+ * The declarations are the TypeScript compiler's own, which is what makes
+ * the check exact: a definition that is commented out is not in the tree at
+ * all, and a method is a declaration wherever it lives.
  */
-function symbolSection(lines: readonly string[], at: number): string[] {
-  const section: string[] = [];
-  for (let index = at - 1; index < lines.length; index += 1) {
-    const line = lines[index] ?? '';
-    if (index > at - 1 && /^(?:export |async )*(?:function|const|class|let|var)\b/.test(line)) {
-      break;
+function declarationText(source: string, symbol: string): string | null {
+  const parsed = parseCited(source);
+  let found: string | null = null;
+  const visit = (node: ts.Node): void => {
+    if (found !== null) return;
+    if (declaredName(node) === symbol) {
+      found = node.getText(parsed);
+      return;
     }
-    section.push(line);
-  }
-  return section;
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  return found;
 }
 
-/** The violation message for one cited symbol, or null when it checks out. */
+/**
+ * The router's path constants: the constant's name and the path it holds.
+ */
+function pathConstants(
+  source: string,
+): readonly { readonly name: string; readonly path: string }[] {
+  const parsed = parseCited(source);
+  const found: { name: string; path: string }[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+      const init = node.initializer;
+      if (init !== undefined && ts.isStringLiteral(init)) {
+        found.push({ name: node.name.text, path: init.text });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  return found;
+}
+
+/**
+ * The identifiers a node mentions.
+ *
+ * Read as WORDS, not as text: `pathname === SEARCH_PREFIX` names two
+ * identifiers, and matching the constant's name inside a longer text would
+ * confuse `UI_PATH` with `UI_JS_PATH`.
+ */
+function identifierNames(node: ts.Node): readonly string[] {
+  const found: string[] = [];
+  const walk = (current: ts.Node): void => {
+    if (ts.isIdentifier(current)) found.push(current.text);
+    ts.forEachChild(current, walk);
+  };
+  walk(node);
+  return found;
+}
+
+/**
+ * True when the router's branch for `constant` calls `symbol`.
+ *
+ * The router is the authority on which handler serves which route: it
+ * compares the path against a constant and calls one handler. A citation
+ * inside a path item claims a handler for that route, so the claim is
+ * checked against the router's own branch — which is what makes a citation
+ * repointed at another route's handler fail.
+ */
+function branchCalls(source: string, constant: string, symbol: string): boolean {
+  const parsed = parseCited(source);
+  let called = false;
+  const visit = (node: ts.Node): void => {
+    if (called) return;
+    if (ts.isIfStatement(node) && identifierNames(node.expression).includes(constant)) {
+      const inner = (current: ts.Node): void => {
+        if (called) return;
+        if (ts.isIdentifier(current) && current.text === symbol) {
+          called = true;
+          return;
+        }
+        ts.forEachChild(current, inner);
+      };
+      inner(node.thenStatement);
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  return called;
+}
+
+/** The repository root — a cited path may not leave it. */
+const REPO_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
+
+/**
+ * The absolute path of a cited file, or null when it resolves outside the
+ * repository: the path is read out of a document, and a document must not be
+ * able to point the suite at the rest of the filesystem.
+ */
+function citedFilePath(file: string): string | null {
+  const resolved = resolve(REPO_ROOT, file);
+  if (resolved !== REPO_ROOT && !resolved.startsWith(`${REPO_ROOT}${sep}`)) return null;
+  return resolved;
+}
+
+/**
+ * The violation message for one cited symbol, or null when it checks out.
+ */
 function checkCitation(where: string, file: string, symbol: string): string | null {
-  if (!existsSync(fileURLToPath(new URL(`../${file}`, import.meta.url)))) {
-    return `${where} — ${file} does not exist`;
-  }
-  const lines = readFileSync(fileURLToPath(new URL(`../${file}`, import.meta.url)), 'utf8').split(
-    '\n',
-  );
-  const at = definitionLine(lines, symbol);
-  if (at === null) {
-    return `${where} — ${file} defines no symbol named ${symbol}`;
-  }
-  const section = symbolSection(lines, at);
-  if (!CITATION_KEYWORDS.some((keyword) => section.join('\n').includes(keyword))) {
-    return `${where} — ${symbol} carries none of the expected constructs`;
+  const path = citedFilePath(file);
+  if (path === null) return `${where} — ${file} resolves outside the repository`;
+  if (!existsSync(path)) return `${where} — ${file} does not exist`;
+  const source = readFileSync(path, 'utf8');
+  const declaration = declarationText(source, symbol);
+  if (declaration === null) return `${where} — ${file} declares no symbol named ${symbol}`;
+  const expected = expectedConstructs(symbol);
+  if (!expected.some((keyword) => declaration.includes(keyword))) {
+    return `${where} — ${symbol} carries none of ${expected.join(', ')}`;
   }
   return null;
+}
+
+/**
+ * The violation message for a citation that names a handler the route it
+ * documents does not call, or null when the route does call it.
+ */
+function checkRouteBinding(
+  where: string,
+  source: string,
+  path: string,
+  symbol: string,
+): string | null {
+  // `dispatch` IS the router: every route is served by it.
+  if (symbol === 'dispatch') return null;
+  const wanted = path.replace(/\{[^}]*\}/g, '');
+  const constant = pathConstants(source).find((entry) => entry.path === wanted);
+  if (constant === undefined) return null;
+  if (branchCalls(source, constant.name, symbol)) return null;
+  return `${where} — ${path} is served by the router, not by ${symbol}`;
+}
+
+/**
+ * The offsets the YAML block scalars occupy — the strings, not the
+ * comments.
+ *
+ * A `#` line is a COMMENT only outside a block scalar; inside one it is
+ * part of a string. The citation scan has to know the difference: prose
+ * that happens to start with `# source:` must not be read as a citation, and
+ * the inline anchors in the descriptions must be found even though they sit
+ * inside strings.
+ */
+function blockScalarRanges(specText: string): readonly (readonly [number, number])[] {
+  const ranges: (readonly [number, number])[] = [];
+  visit(parseDocument(specText), {
+    Scalar(_key, node) {
+      const type = node.type;
+      if (type !== 'BLOCK_LITERAL' && type !== 'BLOCK_FOLDED') return;
+      const range = node.range;
+      if (range === undefined || range === null) return;
+      ranges.push([range[0], range[1]]);
+    },
+  });
+  return ranges;
+}
+
+/** True when `offset` falls inside one of the ranges. */
+function insideRanges(ranges: readonly (readonly [number, number])[], offset: number): boolean {
+  return ranges.some(([start, end]) => offset >= start && offset <= end);
+}
+
+/** The offset each line of the text starts at. */
+function lineOffsets(text: string): readonly number[] {
+  const offsets: number[] = [];
+  let at = 0;
+  for (const line of text.split('\n')) {
+    offsets.push(at);
+    at += line.length + 1;
+  }
+  return offsets;
+}
+
+/**
+ * The path a citation documents, or null when it documents a construct
+ * rather than a route.
+ *
+ * A citation sits inside the path item it documents — between the path key
+ * and its first operation — so the path is the nearest path key above it.
+ * The walk stops at the first key at indent two or less: `responses:` and
+ * `schemas:` are such keys, and a citation under one of them documents a
+ * construct, not a route.
+ */
+function documentedPath(lines: readonly string[], citationLine: number): string | null {
+  for (let at = citationLine - 1; at >= 0; at -= 1) {
+    const key = /^(\s*)([^\s#][^:]*):\s*$/.exec(lines[at] ?? '');
+    if (key === null) continue;
+    if ((key[1] ?? '').length > 2) continue;
+    const name = (key[2] ?? '').trim();
+    return name.startsWith('/') ? name : null;
+  }
+  return null;
+}
+
+/** A citation in the document: the line it is on, its tail, and the route it documents. */
+interface Citation {
+  readonly line: number;
+  readonly tail: string;
+  /** The path the citation documents, or null for a shared construct. */
+  readonly path: string | null;
+}
+
+/**
+ * The `# source:` citations in the document.
+ *
+ * A citation is a YAML COMMENT, and a `#` line inside a block scalar is part
+ * of a string instead — so a line of prose that happens to start with
+ * `# source:` is not a citation and is not counted as one.
+ */
+function citationsIn(specText: string): readonly Citation[] {
+  const blocks = blockScalarRanges(specText);
+  const offsets = lineOffsets(specText);
+  const lines = specText.split('\n');
+  const citations: Citation[] = [];
+  for (const [index, line] of lines.entries()) {
+    const offset = offsets[index] ?? 0;
+    if (insideRanges(blocks, offset)) continue;
+    const match = CITATION_RE.exec(line);
+    if (match === null) continue;
+    citations.push({
+      line: index + 1,
+      tail: match[1] ?? '',
+      path: documentedPath(lines, index),
+    });
+  }
+  return citations;
+}
+
+/** An inline `file#symbol` anchor in the document's prose. */
+interface InlineAnchor {
+  readonly line: number;
+  readonly file: string;
+  readonly symbol: string;
+}
+
+/**
+ * The inline `file#symbol` anchors in the document.
+ *
+ * The response descriptions name the symbol they come from in prose, and
+ * those names were unchecked: renaming `sendJson` left eight stale
+ * provenance claims in the document and the suite green. The anchors are
+ * found in the document's CONTENT — a YAML comment is the `# source:`
+ * channel and is not scanned, so the convention note's own placeholder is
+ * never mistaken for an anchor.
+ */
+function inlineAnchorsIn(specText: string): readonly InlineAnchor[] {
+  const blocks = blockScalarRanges(specText);
+  const offsets = lineOffsets(specText);
+  const anchors: InlineAnchor[] = [];
+  for (const [index, line] of specText.split('\n').entries()) {
+    const offset = offsets[index] ?? 0;
+    const isComment = !insideRanges(blocks, offset) && line.trimStart().startsWith('#');
+    if (isComment) continue;
+    for (const match of line.matchAll(INLINE_ANCHOR_RE)) {
+      anchors.push({ line: index + 1, file: match[1] ?? '', symbol: match[2] ?? '' });
+    }
+  }
+  return anchors;
 }
 
 describe('OpenAPI source citations (docs/openapi.yaml # source: lines)', () => {
@@ -1170,28 +1500,95 @@ describe('OpenAPI source citations (docs/openapi.yaml # source: lines)', () => {
     // moved, the suite failed, and the failure pointed at the router rather
     // than at the doc that had to change with it. A symbol is stable — the
     // router can grow a hundred lines and `#dispatch` still names the same
-    // function — and the claim the citation makes is the one the check
-    // now makes: that symbol exists, and still carries a construct of the
-    // expected family.
+    // function — and the claim the citation makes is the one the check now
+    // makes: that the symbol exists, in real code, and still does what the
+    // citation says it does.
     const specText = readFileSync(SPEC_PATH, 'utf8');
     const violations: string[] = [];
     let citations = 0;
-    for (const [index, line] of specText.split('\n').entries()) {
-      const match = CITATION_RE.exec(line);
-      if (match === null) continue;
-      for (const cited of citedSymbols(match[1] ?? '')) {
+    for (const citation of citationsIn(specText)) {
+      const path = citation.path;
+      for (const cited of citedSymbols(citation.tail)) {
         citations += 1;
-        const where = `docs/openapi.yaml:${index + 1} cites ${cited.file}#${cited.symbol}`;
+        const where = `docs/openapi.yaml:${citation.line} cites ${cited.file}#${cited.symbol}`;
         if (!cited.wellFormed) {
           violations.push(`${where} — not a symbol reference`);
           continue;
         }
         const violation = checkCitation(where, cited.file, cited.symbol);
-        if (violation !== null) violations.push(violation);
+        if (violation !== null) {
+          violations.push(violation);
+          continue;
+        }
+        if (path === null) continue;
+        const source = readFileSync(citedFilePath(cited.file) ?? '', 'utf8');
+        const bound = checkRouteBinding(where, source, path, cited.symbol);
+        if (bound !== null) violations.push(bound);
       }
     }
     expect(citations, 'docs/openapi.yaml must contain # source: citations').toBeGreaterThan(0);
     expect(violations, 'drifted # source: citations in docs/openapi.yaml').toEqual([]);
+  });
+
+  it('every inline anchor in the document names a symbol that exists', () => {
+    // The response descriptions name the symbol they come from in prose,
+    // and those names were unchecked: renaming `sendJson` left eight stale
+    // provenance claims in the document and the suite green. The anchors are
+    // found in the document's CONTENT — a YAML comment is the `# source:`
+    // channel and is not scanned, so the convention note's own placeholder
+    // is never mistaken for an anchor.
+    const specText = readFileSync(SPEC_PATH, 'utf8');
+    const violations: string[] = [];
+    const anchors = inlineAnchorsIn(specText);
+    for (const anchor of anchors) {
+      const where = `docs/openapi.yaml:${anchor.line} cites ${anchor.file}#${anchor.symbol}`;
+      const violation = checkCitation(where, anchor.file, anchor.symbol);
+      if (violation !== null) violations.push(violation);
+    }
+    expect(anchors.length, 'docs/openapi.yaml must contain inline #symbol anchors').toBeGreaterThan(
+      0,
+    );
+    expect(violations, 'drifted inline anchors in docs/openapi.yaml').toEqual([]);
+  });
+
+  it('reads a # source: line inside a block scalar as prose, not as a citation', () => {
+    // A block scalar's body is a STRING: a `#` line inside one is part of
+    // the text, not a comment. Read as a citation it would either be
+    // silently unchecked or fail the suite for no reason at all — and the
+    // two outcomes must not depend on whether the symbol it names happens
+    // to exist.
+    const spec = [
+      'info:',
+      '  description: |',
+      '    # source: src/titan/http-server.ts#notacitation',
+      'paths:',
+      '  /x:',
+      '    # source: src/titan/http-server.ts#dispatch',
+      '    get:',
+      '      description: x',
+      '',
+    ].join('\n');
+    const citations = citationsIn(spec);
+    expect(citations.map((citation) => citation.tail)).toEqual([
+      'src/titan/http-server.ts#dispatch',
+    ]);
+    // A citation inside a path item documents that path.
+    expect(citations[0]?.path).toBe('/x');
+  });
+
+  it('counts the inline anchors in the document content only', () => {
+    // The convention note quotes a placeholder anchor in a COMMENT. A
+    // comment is the `# source:` channel and is not scanned, so the
+    // placeholder is never mistaken for a claim about the code — while the
+    // same anchor written in the prose IS a claim, and is checked.
+    const spec = [
+      '# a note quoting src/titan/http-server.ts#symbol',
+      'info:',
+      '  description: |',
+      '    served by src/titan/http-server.ts#sendJson',
+      '',
+    ].join('\n');
+    expect(inlineAnchorsIn(spec).map((anchor) => anchor.symbol)).toEqual(['sendJson']);
   });
 
   it('refuses a citation that names no symbol at all', () => {
@@ -1210,5 +1607,12 @@ describe('OpenAPI source citations (docs/openapi.yaml # source: lines)', () => {
       { file: 'src/titan/http-server.ts', symbol: 'dispatch', wellFormed: true },
       { file: 'src/titan/http-server.ts', symbol: 'handleSearch', wellFormed: true },
     ]);
+    // A citation wrapped in parentheses is a citation, not prose: it is
+    // unwrapped and checked, never dropped.
+    expect(citedSymbols('(src/titan/http-server.ts#dispatch)')).toEqual([
+      { file: 'src/titan/http-server.ts', symbol: 'dispatch', wellFormed: true },
+    ]);
+    // A parenthetical that names no symbol stays prose.
+    expect(citedSymbols('src/titan/http-server.ts#dispatch, (the router)')).toHaveLength(1);
   });
 });
