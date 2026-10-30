@@ -686,7 +686,9 @@ describe('cfr-free search', () => {
     // where the query is — before anything is opened.
     expect(() => parseArgs(['search', '--page', 'abc', 'PTSD'])).toThrow(/must be a whole number/);
     expect(() => parseArgs(['search', '--kind', 'policy', 'PTSD'])).toThrow(/--kind must be/);
-    expect(() => parseArgs(['search', '--per-page', '50', 'PTSD'])).toThrow(/between 1 and 20/);
+    expect(() => parseArgs(['search', '--per-page', '50', 'PTSD'])).toThrow(
+      /the number of results per page/,
+    );
     expect(() => parseArgs(['search', 'PTSD', '--page'])).toThrow(/--page needs a value/);
     expect(() => parseArgs(['search', '--json=1', 'PTSD'])).toThrow(/--json takes no value/);
 
@@ -696,7 +698,7 @@ describe('cfr-free search', () => {
     try {
       const code = await main(['search', '--per-page', '50', 'PTSD'], io);
       expect(code).toBe(2);
-      expect(err.join('')).toContain('between 1 and 20');
+      expect(err.join('')).toContain('the number of results per page');
       expect(existsSync(indexPath), 'the index must not be opened for a rejected flag').toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
