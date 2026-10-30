@@ -407,7 +407,10 @@ function checkoutFetchDepth(jobText: string): string | undefined {
   for (const line of lines.slice(checkout + 1)) {
     const marker = /^(\s*)-\s/.exec(line);
     if (marker !== null && (marker[1] ?? '').length <= stepIndent) return undefined;
-    const found = /^\s*fetch-depth:\s*(.+?)\s*$/.exec(line);
+    // The value may carry a trailing comment (`fetch-depth: 0 # why`) — YAML
+    // reads the comment as a comment, so it is stripped before the value is
+    // read; without that, a job whose depth is right is reported as wrong.
+    const found = /^\s*fetch-depth:\s*(.+?)\s*$/.exec(stripInlineComment(line));
     // The value may be quoted (`fetch-depth: "0"`); the quotes are YAML
     // syntax, not part of the value.
     if (found !== null) return (found[1] ?? '').replace(/^["']|["']$/g, '');
@@ -440,18 +443,60 @@ const ACTIONLINT_INSTALL_LINE =
   /^\s*-?\s*(?:run:)?\s*go install github\.com\/rhysd\/actionlint\/cmd\/actionlint@(\S+)\s*$/;
 
 /**
- * The gate's command — `npm run ci` or `npm run lint:actions`, the two
- * spellings a step uses to run what runs locally under `npm run ci` — in
- * command position anywhere in a run value. The command must stand alone
- * as a word: `npm ci` is an install, and `npm run ci:extra` is another
+ * A `npm run <script>` command in command position anywhere in a run
+ * value. The script name is the WHOLE token, so the command stands
+ * alone: `npm ci` is an install, and `npm run ci:extra` is another
  * script. The value arrives as one line, or as block-scalar lines joined
  * by `\n`, so a command folded across lines still reads as one. The match
- * is textual, not shell-aware: a value that only PRINTS the command
+ * is textual, not shell-aware: a value that only PRINTS a command
  * (`echo "npm run ci"`) counts as a consumer too — treating a step that
  * may run the gate as one that does is the safe direction, since the
  * finding it can raise is a missing install, never a skipped gate.
  */
-const GATE_COMMAND = /(?:^|[\s;&|(`'"])npm run\s+(?:ci|lint:actions)(?![\w:.-])/;
+const NPM_RUN_COMMAND = /(?:^|[\s;&|(`'"])npm run\s+([\w:.-]+)/g;
+
+/** The scripts a run value invokes with `npm run`, in the order they sit. */
+function invokedScripts(run: string): string[] {
+  return [...run.matchAll(NPM_RUN_COMMAND)].map((match) => match[1] ?? '');
+}
+
+/**
+ * The scripts that make a job a GATE job: `npm run ci` itself and every
+ * step the `ci` script runs.
+ *
+ * DERIVED from package.json, not hard-coded. The hard-coded list was
+ * `ci|lint:actions`, and it went stale the moment the gate grew a step:
+ * a job that runs only `npm run test:coverage` — which runs the release
+ * guard, and so needs the tags a shallow checkout does not carry — was
+ * not a gate job at all, so the checkout-depth guard never saw it. A
+ * step of the `ci` script that is no script of its own (a raw command)
+ * invokes no gate command and is not one.
+ */
+const GATE_SCRIPTS = [
+  ...new Set([
+    'ci',
+    ...localGateCommands(manifest.scripts.ci ?? '')
+      .map((step) => step.split(/\s+/)[0] ?? '')
+      .filter((step) => step in manifest.scripts),
+  ]),
+];
+
+/**
+ * The scripts that invoke actionlint: `npm run ci` (which runs
+ * `npm run lint:actions`) and every gate step whose own command runs
+ * actionlint. DERIVED from package.json, so renaming the actionlint
+ * script cannot leave the guard behind. A job running one of these shells
+ * out to a bare `actionlint`, which the runner does not ship — so it
+ * needs the pinned install and the PATH echo in an earlier step. A job
+ * running any other gate step does not, and demanding the install of it
+ * would fail a workflow that is correct.
+ */
+const ACTIONLINT_SCRIPTS = [
+  ...new Set([
+    'ci',
+    ...GATE_SCRIPTS.filter((name) => (manifest.scripts[name] ?? '').includes('actionlint')),
+  ]),
+];
 
 /**
  * A line appending GOPATH's bin dir to GITHUB_PATH as a command, in the
@@ -478,7 +523,10 @@ type GateLine = { step: string; ordinal: number };
 
 /** What one job says about the shared gate, for `gateFindings` to judge. */
 type JobGate = {
+  /** Steps invoking any gate command. */
   consumers: GateLine[];
+  /** Steps invoking a gate command that shells out to actionlint. */
+  actionlintConsumers: GateLine[];
   actionlintRuns: GateLine[];
   /** Step carrying the pinned install; -1 when the job carries none. */
   installOrdinal: number;
@@ -600,18 +648,24 @@ function runValueAt(lines: string[], index: number): string | undefined {
 
 /**
  * Everything one job says about the shared gate: which STEP invokes it,
- * which steps run actionlint by absolute GOPATH path, and which step
- * carries the pinned install and the GITHUB_PATH echo. Steps are
- * numbered so `gateFindings` can order by step, not by line: a step's
- * own lines all sit together, and the effect the guard needs from the
- * echo reaches only LATER steps. Install and echo detection runs on the
- * line with its inline comment stripped AND anchored at the command
- * position, so a commented-out install, an echo PRINTING the install
- * line, or any text quoting the redirect counts for neither — the guard
- * needs the command to run, not its words to appear.
+ * which of those steps invoke actionlint, which steps run actionlint by
+ * absolute GOPATH path, and which step carries the pinned install and the
+ * GITHUB_PATH echo. Steps are numbered so `gateFindings` can order by
+ * step, not by line: a step's own lines all sit together, and the effect
+ * the guard needs from the echo reaches only LATER steps. Install and echo
+ * detection runs on the line with its inline comment stripped AND anchored
+ * at the command position, so a commented-out install, an echo PRINTING
+ * the install line, or any text quoting the redirect counts for neither —
+ * the guard needs the command to run, not its words to appear.
  */
 function scanJobGate(lines: string[]): JobGate {
-  const gate: JobGate = { consumers: [], actionlintRuns: [], installOrdinal: -1, echoOrdinal: -1 };
+  const gate: JobGate = {
+    consumers: [],
+    actionlintConsumers: [],
+    actionlintRuns: [],
+    installOrdinal: -1,
+    echoOrdinal: -1,
+  };
   let step = '(no run step)';
   let ordinal = -1;
   for (let index = 0; index < lines.length; index += 1) {
@@ -629,13 +683,19 @@ function scanJobGate(lines: string[]): JobGate {
     }
     const run = runValueAt(lines, index);
     if (run === undefined) continue;
-    if (GATE_COMMAND.test(run)) gate.consumers.push({ step, ordinal });
+    const invoked = invokedScripts(run);
+    if (invoked.some((name) => GATE_SCRIPTS.includes(name))) {
+      gate.consumers.push({ step, ordinal });
+    }
+    if (invoked.some((name) => ACTIONLINT_SCRIPTS.includes(name))) {
+      gate.actionlintConsumers.push({ step, ordinal });
+    }
     if (ACTIONLINT_BY_PATH.test(run)) gate.actionlintRuns.push({ step, ordinal });
   }
   return gate;
 }
 
-/** Every step of every job whose run value invokes the shared gate. */
+/** Every step of every job whose run value invokes a gate command. */
 function workflowGateConsumers(text: string): { job: string; step: string }[] {
   const consumers: { job: string; step: string }[] = [];
   for (const job of workflowJobs(text)) {
@@ -711,7 +771,8 @@ function unreadRunFindings(file: string, text: string): string[] {
   for (let index = from; index < to; index += 1) {
     if (read.has(index)) continue;
     const stripped = stripInlineComment(lines[index] ?? '');
-    if (GATE_COMMAND.test(stripped) || ACTIONLINT_BY_PATH.test(stripped)) {
+    const invoked = invokedScripts(stripped);
+    if (GATE_SCRIPTS.some((name) => invoked.includes(name)) || ACTIONLINT_BY_PATH.test(stripped)) {
       findings.push(
         `${file}:${index + 1}: gate or actionlint run on a line this guard does not read as a run value — run values must be a block-style \`run:\` key at step indent, not flow style, a plain-scalar continuation or compact step indentation`,
       );
@@ -724,15 +785,16 @@ function unreadRunFindings(file: string, text: string): string[] {
  * Every invariant a workflow's jobs break, as messages naming the file,
  * the job and the step. Empty when every job holds them:
  *
- *  - a job whose run value invokes the shared gate carries the pinned
- *    actionlint install AND the `>> "$GITHUB_PATH"` echo in a STRICTLY
- *    EARLIER step than the first consumer step — the gate shells out to
- *    a bare `actionlint`, which the runner does not ship. The step rule
- *    is deliberately stricter than line order: `GITHUB_PATH` applies
- *    only to subsequent steps, so install, echo and gate folded into
- *    one step still die with `actionlint: command not found` however
- *    they are ordered inside it, and holding every line of the rule to
- *    one uniform test keeps such a fold from passing on line order;
+ *  - a job whose run value invokes a gate command that SHELLS OUT TO
+ *    ACTIONLINT carries the pinned actionlint install AND the
+ *    `>> "$GITHUB_PATH"` echo in a STRICTLY EARLIER step than the first
+ *    such consumer step — the gate shells out to a bare `actionlint`,
+ *    which the runner does not ship. The step rule is deliberately
+ *    stricter than line order: `GITHUB_PATH` applies only to subsequent
+ *    steps, so install, echo and gate folded into one step still die
+ *    with `actionlint: command not found` however they are ordered
+ *    inside it, and holding every line of the rule to one uniform test
+ *    keeps such a fold from passing on line order;
  *  - a job that invokes actionlint by absolute GOPATH path carries the
  *    install in an earlier step too, but needs no PATH echo: the
  *    absolute path never reads PATH.
@@ -747,7 +809,7 @@ function gateFindings(file: string, text: string): string[] {
   for (const job of workflowJobs(text)) {
     const scan = scanJobGate(job.lines);
     const where = (step: string): string => `${file}: job \`${job.name}\`, step \`${step}\``;
-    const consumer = scan.consumers[0];
+    const consumer = scan.actionlintConsumers[0];
     if (consumer !== undefined) {
       if (scan.installOrdinal === -1) {
         findings.push(`${where(consumer.step)}: runs the gate with no pinned actionlint install`);

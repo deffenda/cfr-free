@@ -183,6 +183,27 @@ describe('the npm manifest', () => {
     const bin = readManifest().bin?.['cfr-free'];
     expect(bin).toBe('dist/cli.js');
   });
+
+  it('declares every package the test suite imports', () => {
+    // The OpenAPI suite imports `ajv`, `ajv-formats` and `yaml`. They are
+    // DECLARED devDependencies — but a declaration nothing checks is a
+    // declaration that can be dropped: `ajv` and `ajv-formats` are also
+    // dependencies of `@modelcontextprotocol/sdk`, so they stay resolvable
+    // at the top of `node_modules` after they are undeclared, and the
+    // suite keeps passing on a transitive hoist a later release of the SDK
+    // can take away. (`yaml` fails differently — it is an optional peer of
+    // `vite`, so undeclaring it prunes it from the lockfile and the suite
+    // fails loudly on a missing module.) The declaration is therefore
+    // asserted here, where the manifest is read: the suite must depend on
+    // what this repository declares, not on what it happens to hoist.
+    const manifest = readManifest();
+    for (const dep of ['ajv', 'ajv-formats', 'yaml']) {
+      expect(
+        manifest.devDependencies?.[dep],
+        `${dep} must be a declared devDependency`,
+      ).toBeDefined();
+    }
+  });
 });
 
 describe('the CLI entry point', () => {
