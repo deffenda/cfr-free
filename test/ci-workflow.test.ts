@@ -1673,3 +1673,26 @@ describe('the per-job gate guard — synthetic job snippets', () => {
     expect(workflowGateConsumers(text)).toEqual([]);
   });
 });
+
+describe('the release guard — the packed package must carry what the program reads', () => {
+  it('requires the runtime assets, not only the imports', () => {
+    // The UI script and stylesheet are read at RUNTIME — readFileSync
+    // beside the module — not imported, so the import scan cannot find
+    // them. A tarball published without them ships a package whose /ui.js
+    // route answers 404, and the guard would have passed it.
+    const release = readFileSync(join(WORKFLOWS_DIR, 'release.yml'), 'utf8');
+    const step = release.match(/verify packed executable and imports[\s\S]*?\n\s*NODE/);
+    expect(step?.[0], 'the packed-artifact guard is missing from release.yml').toBeDefined();
+    expect(step?.[0]).toContain('copy-assets.mjs');
+  });
+
+  it('fails closed when the copy list changes shape', () => {
+    // The asset list is read from the copy script's own text, so a
+    // reformat that the scan cannot read would check nothing — and a
+    // guard that checks nothing passes. It must stop instead.
+    const release = readFileSync(join(WORKFLOWS_DIR, 'release.yml'), 'utf8');
+    const step = release.match(/verify packed executable and imports[\s\S]*?\n\s*NODE/);
+    expect(step?.[0]).toContain('assets.length === 0');
+    expect(step?.[0]).toContain('process.exit(1)');
+  });
+});
