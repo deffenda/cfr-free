@@ -494,7 +494,8 @@ eCFR API ──sync──▶ SQLite (sections + FTS5 + structure meta)
 - `src/commands/` — one entrypoint per subcommand: `mcp`, `sync`, `diff`,
   `redline`, `historical`, `search`, `serve`, `export` (`help` and
   `version` dispatch from `src/cli.ts`)
-- `docs/SPEC.md` — design decisions and review dispositions
+- `docs/SPEC.md` — the design authority; `docs/research/delivery-log.md` —
+  the review dispositions and the closed delivery record
 
 Sync is atomic: the whole index is replaced inside one `BEGIN IMMEDIATE`
 transaction under WAL, so concurrent readers never see a partial build, and

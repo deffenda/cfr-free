@@ -1152,7 +1152,7 @@ describe('Store transaction and integrity edge cases', () => {
       source.close();
       // Find a btree root page that is not the schema page, then corrupt only
       // it: the header and page 1 must stay valid so opening gets far enough
-      // for quick_check to report the damage (SPEC §12 #9 in spirit).
+      // for quick_check to report the damage (delivery log §12 #9 in spirit).
       const raw = new DatabaseSync(file);
       const roots = raw
         .prepare("SELECT rootpage FROM sqlite_master WHERE type = 'table' AND rootpage > 1")

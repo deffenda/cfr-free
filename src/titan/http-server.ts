@@ -562,7 +562,7 @@ export interface HttpServerOptions {
   /** Per-peer request budget — enabled only when the bind is deliberately remote. */
   readonly rateLimit?: { readonly capacity: number; readonly refillPerSec: number };
   /**
-   * Disk-capacity accessor (SPEC §13 #22), read per request so `/health` and
+   * Disk-capacity accessor (delivery log §13 #22), read per request so `/health` and
    * `/metrics` reflect the caller's own moment, not a boot-time freeze; the
    * serve-side refresh callback owns the cell it reads. `null` (or absent)
    * omits the fields/gauges entirely rather than fabricating zeros.
@@ -673,7 +673,7 @@ export function createHttpServer(
       }
     })();
   });
-  // Bound how long a client may take to complete a request (SPEC §12 #16);
+  // Bound how long a client may take to complete a request (delivery log §12 #16);
   // the header timeout already defaults to 60 s.
   server.requestTimeout = 60_000;
   return server;

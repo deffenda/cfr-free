@@ -102,7 +102,7 @@ describe('CFRService.search', () => {
 
   it('orders a heading-phrase match ahead of a body-heavy match', () => {
     // bm25 weighs term frequency WITHIN a column, so the section whose body
-    // repeats the phrase ranks first on its own. SPEC §13 row 4 promises
+    // repeats the phrase ranks first on its own. delivery log §13 row 4 promises
     // that a heading match outranks a body-only match, so the heading-phrase
     // key puts § 3.350 ahead.
     const temp = openTempStore({

@@ -39,7 +39,7 @@ export async function runServeCommand(config: AppConfig, logger: Logger): Promis
     // the same stateless factory serve already uses for the refresh scheduler.
     const service = new CFRService(store, config.maxAgeDays, createEcfrApi(), logger);
 
-    // Disk capacity for /health and /metrics (SPEC §13 #22): probed once at
+    // Disk capacity for /health and /metrics (delivery log §13 #22): probed once at
     // boot and re-probed after every refresh attempt — success or failure,
     // because the capacity signal must not depend on sync health. The HTTP
     // layer reads this cell per request through an accessor, so it never

@@ -8,7 +8,7 @@ import { createTestLogger, openTempStore, type TempStore } from './helpers.js';
 
 /**
  * Live end-to-end smoke against the real eCFR API. Runs only when
- * `LIVE_TESTS=1` (never in PR CI — SPEC §12 #12); the scheduled Live E2E
+ * `LIVE_TESTS=1` (never in PR CI — delivery log §12 #12); the scheduled Live E2E
  * workflow and `workflow_dispatch` set it. This is the tripwire for eCFR
  * format or content drift: full sync, then consistent reads.
  */

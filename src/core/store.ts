@@ -208,7 +208,7 @@ export interface StoreOpenOptions {
 }
 
 // Column weights (citation 10, heading 5, body 1): exact-citation and
-// heading matches must outrank body-only matches (SPEC §13).
+// heading matches must outrank body-only matches (delivery log §13).
 const SCORE_EXPR = 'bm25(sections_fts, 10.0, 5.0, 1.0) AS score';
 
 /**
@@ -597,7 +597,7 @@ export function contentTerms(terms: readonly QueryTerm[]): readonly QueryTerm[] 
  *
  * bm25 weighs term frequency WITHIN a column, so a section whose body
  * repeats the phrase ten times outranks a section whose heading IS the
- * phrase — which is not what SPEC §13 row 4 promises ("citation/heading
+ * phrase — which is not what delivery log §13 row 4 promises ("citation/heading
  * matches outrank body-only hits"). The key counts how many of the
  * query's content terms the heading carries (the term itself, or the
  * corpus phrase a synonym stands for) and sorts on it before the score.
