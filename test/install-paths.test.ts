@@ -156,6 +156,71 @@ function releasingTagFindings(tag: string, version: string): string[] {
     `${tag} is not a release version — a release tag is vX.Y.Z, optionally with a pre-release part (vX.Y.Z-rc.N)`,
   ];
 }
+
+/** The facts the release guard's decision reads. */
+interface VersionVerdictInput {
+  /** The version the manifest declares. */
+  readonly current: string;
+  /** The newest released tag, e.g. `v0.2.1`. */
+  readonly newestTag: string;
+  /** The version that tag claims, e.g. `0.2.1`. */
+  readonly newestVersion: string;
+  /** The version the tag's OWN tree declared. */
+  readonly atTag: string;
+  /** The commit this tree is at (HEAD). */
+  readonly head: string;
+  /** The commit the tag was cut from. */
+  readonly tagCommit: string;
+}
+
+/**
+ * What the release guard requires of the manifest's version against the
+ * newest released tag: the findings, empty when the tree holds.
+ *
+ * The decision is a PURE function of its inputs, so every branch is
+ * exercised by a test instead of only by the incidental state of the
+ * working tree. That matters because the branches were DEAD CODE: at the
+ * head of this branch the manifest sat at 0.2.2 and the newest tag at
+ * v0.2.1, so the `relation === 0` branch never ran — and both branches
+ * could be deleted with the whole suite still green. A branch no test
+ * reaches is a branch no test can catch being broken, and the branch that
+ * mattered most (the tree must still be the commit the release was cut
+ * from) was reachable only through the working tree's own version.
+ *
+ * The findings, in the order the guard reports them:
+ *  - a version BEHIND the newest release cannot be published again;
+ *  - a version EQUAL to the newest release's is legitimate only on the
+ *    commit that release was cut from, and only when that tag's own tree
+ *    declared the same version.
+ */
+function versionVerdict(input: VersionVerdictInput): string[] {
+  const findings: string[] = [];
+  const relation = compareVersions(parseVersion(input.current), parseVersion(input.newestVersion));
+  if (relation < 0) {
+    findings.push(
+      `package.json ${input.current} is BEHIND the released tag ${input.newestTag} — the version ` +
+        'must move forward; a release cannot reuse or rewind a published version.',
+    );
+  }
+  if (relation === 0) {
+    // The manifest declares the newest release's version. That is
+    // legitimate only on the tree the release was cut from.
+    if (input.atTag !== input.current) {
+      findings.push(
+        `tag ${input.newestTag} was cut from a tree whose package.json says ${input.atTag}, not ` +
+          `${input.current} — the release names a version this manifest does not declare.`,
+      );
+    } else if (input.head !== input.tagCommit) {
+      findings.push(
+        `package.json ${input.current} is the version of the released tag ${input.newestTag}, but ` +
+          'this tree is not the commit that release was cut from — bump package.json to ' +
+          `a version above ${input.newestTag.slice(1)} before publishing again.`,
+      );
+    }
+  }
+  return findings;
+}
+
 describe('the npm manifest', () => {
   it('builds on prepare, so a git install ships a working binary', () => {
     // npm runs `prepare` when a package is installed from a git URL, and
@@ -703,6 +768,57 @@ describe('the release guard', () => {
     expect(parseVersion('0.3.0-rc.1')).toEqual([0, 3, 0]);
   });
 
+  it('judges the version against the newest release, branch by branch', () => {
+    // The decision the guard makes, exercised directly. It used to live
+    // INSIDE the guard, where its branches ran only when the working
+    // tree happened to hold the state they judged — and the tree held
+    // `relation > 0` (manifest 0.2.2, newest tag v0.2.1), so the
+    // `relation === 0` branch NEVER RAN. Both branches could then be
+    // deleted with the whole suite green, and the manifest could be put
+    // back to 0.2.1 — main's exact pre-pull-request state — with the
+    // suite green as well. Every branch below is pinned here instead, so
+    // each one is reached whether or not the tree is in that state.
+    const base = {
+      current: '0.2.1',
+      newestTag: 'v0.2.1',
+      newestVersion: '0.2.1',
+      atTag: '0.2.1',
+      head: 'abc1234',
+      tagCommit: 'abc1234',
+    };
+
+    // Past the newest release: the ordinary state of `main` between
+    // releases. No finding.
+    expect(versionVerdict({ ...base, current: '0.2.2' })).toEqual([]);
+
+    // Behind the newest release: a published version cannot be reused or
+    // rewound.
+    const behind = versionVerdict({ ...base, current: '0.2.0' });
+    expect(behind).toHaveLength(1);
+    expect(behind.join(' ')).toContain('is BEHIND the released tag v0.2.1');
+
+    // Equal to the newest release's version, on the commit the release
+    // was cut from: the legitimate form, and no finding.
+    expect(versionVerdict(base)).toEqual([]);
+
+    // Equal to the newest release's version, on a DIFFERENT commit: the
+    // version must move forward again. This is the branch that carried
+    // CR-01's headline state, and it is checked here rather than by the
+    // working tree's own version.
+    const otherCommit = versionVerdict({ ...base, tagCommit: 'def5678' });
+    expect(otherCommit).toHaveLength(1);
+    expect(otherCommit.join(' ')).toContain('not the commit that release was cut from');
+
+    // Equal to the newest release's version, but the tag's own tree
+    // declared another version: the tag names a release this manifest
+    // does not describe (the historical v0.2.0 shape).
+    const inconsistentTag = versionVerdict({ ...base, atTag: '0.1.0' });
+    expect(inconsistentTag).toHaveLength(1);
+    expect(inconsistentTag.join(' ')).toContain(
+      'the release names a version this manifest does not declare',
+    );
+  });
+
   it('has the tags it needs to judge the version', () => {
     // Every check below reads the tag list, so an EMPTY tag list makes them
     // vacuous — they would all pass while asserting nothing. That is not a
@@ -755,7 +871,6 @@ describe('the release guard', () => {
     // that very version, and a manifest that cannot hold it would make
     // every pre-release release fail here first.
     expect(version).toMatch(MANIFEST_VERSION_PATTERN);
-    const current = parseVersion(version);
 
     const releasingTag =
       process.env.GITHUB_REF_TYPE === 'tag' ? (process.env.GITHUB_REF_NAME ?? '') : '';
@@ -777,34 +892,20 @@ describe('the release guard', () => {
     ).toBeGreaterThan(0);
 
     const newest = tags.reduce((a, b) => (compareVersions(b.version, a.version) > 0 ? b : a));
-    const relation = compareVersions(current, newest.version);
-
-    if (relation < 0) {
-      throw new Error(
-        `package.json ${version} is BEHIND the released tag ${newest.tag} — the version ` +
-          'must move forward; a release cannot reuse or rewind a published version.',
-      );
-    }
-
-    if (relation === 0) {
-      // The manifest declares the newest release's version. That is
-      // legitimate only on the tree the release was cut from.
-      const atTag = manifestVersionAt(newest.tag);
-      if (atTag !== version) {
-        throw new Error(
-          `tag ${newest.tag} was cut from a tree whose package.json says ${atTag}, not ` +
-            `${version} — the release names a version this manifest does not declare.`,
-        );
-      }
-      const head = git('rev-parse', 'HEAD').trim();
-      const tagCommit = git('rev-parse', `${newest.tag}^{commit}`).trim();
-      if (head !== tagCommit) {
-        throw new Error(
-          `package.json ${version} is the version of the released tag ${newest.tag}, but ` +
-            'this tree is not the commit that release was cut from — bump package.json to ' +
-            `a version above ${newest.tag.slice(1)} before publishing again.`,
-        );
-      }
+    // The decision itself is `versionVerdict` — a pure function, unit-tested
+    // branch by branch. The guard below only GATHERS the facts it reads.
+    const head = git('rev-parse', 'HEAD').trim();
+    const tagCommit = git('rev-parse', `${newest.tag}^{commit}`).trim();
+    const findings = versionVerdict({
+      current: version,
+      newestTag: newest.tag,
+      newestVersion: newest.tag.slice(1),
+      atTag: manifestVersionAt(newest.tag),
+      head,
+      tagCommit,
+    });
+    if (findings.length > 0) {
+      throw new Error(findings.join('\n'));
     }
   });
 });
