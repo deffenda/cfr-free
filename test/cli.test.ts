@@ -258,6 +258,35 @@ describe('main', () => {
       expect(String(fields?.['url'])).toContain('/api/versioner');
       expect(String(fields?.['message'])).toContain('upstream said no');
       expect(fields?.['status']).toBe(400);
+      // The kind is the machine-readable discriminator: a status alone
+      // cannot tell an upstream that answered 200 with a page of HTML from
+      // one that answered 200 with a body over the cap.
+      expect(fields?.['kind']).toBe('status');
+    } finally {
+      vi.unstubAllGlobals();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports a date before the eCFR archive as a usage error, not a service failure', async () => {
+    // eCFR serves no revision for a date before its point-in-time archive
+    // starts. That is the reader's argument, not a service failure: the
+    // exit code must be 2 (usage), not 1 — the code a script would retry
+    // forever. The floor is enforced at the unit, HTTP and MCP levels;
+    // this is the CLI's own exit code.
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-cli-archive-'));
+    vi.stubGlobal('fetch', async () => new Response('not found', { status: 404 }));
+    const { err, io } = makeIo(
+      { CFR_INDEX_PATH: path.join(dir, 'index.sqlite'), CFR_LOG_LEVEL: 'error' },
+      createTestLogger(),
+    );
+    try {
+      const code = await main(['historical', '2016-06-01', '4.130'], io);
+      expect(code).toBe(2);
+      expect(err.join('')).toContain('its point-in-time archive starts at');
+      // No upstream status and no endpoint on the reader's line.
+      expect(err.join('')).not.toContain('HTTP 404');
+      expect(err.join('')).not.toContain('/api/versioner');
     } finally {
       vi.unstubAllGlobals();
       rmSync(dir, { recursive: true, force: true });

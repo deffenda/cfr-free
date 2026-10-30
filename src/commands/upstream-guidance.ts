@@ -1,4 +1,4 @@
-import { HttpError } from '../core/http-client.js';
+import { HttpError, type HttpFailureKind } from '../core/http-client.js';
 
 /** An upstream failure, split into what a reader needs and what an operator needs. */
 export interface UpstreamFailure {
@@ -12,6 +12,16 @@ export interface UpstreamFailure {
   readonly status: number | undefined;
   /** The raw message, for the log. */
   readonly detail: string;
+  /**
+   * Which kind of failure this was, for the log.
+   *
+   * The kind is the machine-readable discriminator: a status alone cannot
+   * tell an upstream that answered 200 with a page of HTML from an
+   * upstream that answered 200 with a body over the cap, and an operator
+   * reading the log should not have to recover that from the English in a
+   * message.
+   */
+  readonly kind: HttpFailureKind;
 }
 
 /**
@@ -85,5 +95,6 @@ export function upstreamFailure(error: unknown): UpstreamFailure | null {
     url: error.url,
     status,
     detail: error.message,
+    kind: error.kind,
   };
 }
