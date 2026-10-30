@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ServiceError } from './errors.js';
 import { normalizeCitation } from './citations.js';
 import { extractReferences } from './references.js';
 import type { SyncChanges } from './changes.js';
@@ -28,19 +29,6 @@ import {
  * Application facade shared by the MCP server and the HTTP API. All input
  * validation happens here so both surfaces behave identically.
  */
-
-export type ServiceErrorCode = 'invalid_input' | 'not_found';
-
-/** Domain error carrying a machine-readable code and client-safe message. */
-export class ServiceError extends Error {
-  override readonly name = 'ServiceError';
-  readonly code: ServiceErrorCode;
-
-  constructor(message: string, code: ServiceErrorCode) {
-    super(message);
-    this.code = code;
-  }
-}
 
 /**
  * The query length the index accepts. Exported so the CLI can refuse a

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { CFRService, ServiceError } from '../src/core/service.js';
-import { StructureError } from '../src/core/structure.js';
+import { CFRService } from '../src/core/service.js';
+import { ServiceError } from '../src/core/errors.js';
+import { StructureError } from '../src/core/errors.js';
 import { syncIndex } from '../src/core/sync.js';
 import type { EcfrApi } from '../src/core/ecfr.js';
 import {

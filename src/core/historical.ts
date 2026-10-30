@@ -1,7 +1,7 @@
 import { fetchFullTitleXml } from './archive.js';
 import { assertIssueDate } from './diff.js';
 import { normalizeCitation } from './citations.js';
-import { ServiceError } from './service.js';
+import { ServiceError } from './errors.js';
 import { parseTitleXml, type RawSection } from './xml.js';
 import type { EcfrApi } from './ecfr.js';
 import type { Logger } from '../logger.js';

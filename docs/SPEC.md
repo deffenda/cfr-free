@@ -39,6 +39,7 @@ src/
     citations.ts      parse/normalize "38 CFR 4.125", "38 C.F.R. § 4.125", "§ 4.125", "4.125"
     diff.ts           stateless point-in-time diff: fetch two issue dates, hash per citation
     ecfr.ts           eCFR endpoints: dates, structure, full-title XML, search
+    errors.ts         the error types the whole service speaks: ServiceError, StructureError
     historical.ts     point-in-time read: a provision as it stood at a requested date
     http-client.ts    fetch wrapper: timeout, size cap, gzip, friendly errors
     point-in-time.ts  the "a date is a selector, not a stamp" notice, shared by the change views
@@ -46,7 +47,7 @@ src/
     references.ts     cross-reference extraction for search results
     service.ts        facade shared by MCP + HTTP: search/getSection/browse/status
     store.ts          SQLite schema, queries (FTS5), transactional rebuild
-    structure.ts      browse-tree validation + StructureError
+    structure.ts      browse-tree validation + browse
     sync.ts           index build pipeline
     xml.ts            XML → markdown/text renderer + section extractor
   mcp/
