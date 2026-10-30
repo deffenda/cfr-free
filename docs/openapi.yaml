@@ -17,9 +17,11 @@ info:
     is required to expose it); every `GET` route has a `HEAD` twin with
     identical status/headers and an empty body (src/titan/http-server.ts:192),
     and the non-JSON routes are `GET /metrics` (Prometheus exposition) and the
-    read-only web UI (`GET /`, `/ui.js`, `/ui.css` — static asset strings from
-    src/titan/ui.ts; the HTML shell ships a strict Content-Security-Policy and
-    zero inline script).
+    read-only web UI (`GET /`, `/ui.js`, `/ui.css` — the HTML shell is a string
+    constant in src/titan/ui.ts, while the script and the stylesheet are real
+    files (src/titan/ui-client.js, src/titan/ui-client.css) that the build
+    copies into dist/ so the gate's linter and formatter can see them; the
+    document ships a strict Content-Security-Policy and zero inline script).
     The three index-backed reads (`/api/v1/search`, `/api/v1/sections/{citation}`,
     `/api/v1/browse`) carry a strong `ETag` over the response payload and answer
     a matching `If-None-Match` with a bodyless `304` (RFC 9110 §13.1.2); the
@@ -63,10 +65,10 @@ paths:
   /ui.js:
     # source: src/titan/http-server.ts:549
     get:
-      summary: Web UI script (embedded string, no external assets)
+      summary: Web UI script (a real file, linted and copied into dist/ at build time)
       responses:
         '200':
-          description: 'The UI page script as text/javascript — an embedded string constant from src/titan/ui.ts, nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts:222).'
+          description: 'The UI page script as text/javascript — served from src/titan/ui-client.js, which the build copies into dist/ so the gate can lint and format it, nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts:222).'
           content:
             text/javascript:
               schema: { type: string }
@@ -88,10 +90,10 @@ paths:
   /ui.css:
     # source: src/titan/http-server.ts:553
     get:
-      summary: Web UI stylesheet (embedded string, no external assets)
+      summary: Web UI stylesheet (a real file, linted and copied into dist/ at build time)
       responses:
         '200':
-          description: 'The UI stylesheet as text/css — an embedded string constant from src/titan/ui.ts, nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts:222).'
+          description: 'The UI stylesheet as text/css — served from src/titan/ui-client.css, which the build copies into dist/ so the gate can lint and format it, nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts:222).'
           content:
             text/css:
               schema: { type: string }
