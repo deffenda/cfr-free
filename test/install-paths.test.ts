@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -601,8 +609,15 @@ describe('the build copies the UI assets', () => {
     const copyScript = readRepoFile('scripts/copy-assets.mjs');
     const copies = [...copyScript.matchAll(/from: '([^']+)', to: '([^']+)'/g)];
     expect(copies.length, 'the copy script lists no asset').toBeGreaterThan(0);
-    for (const [, from, to] of copies) {
+    for (const [, from = '', to = ''] of copies) {
       expect(to, `${from} must land in dist/, beside the module that reads it`).toMatch(/^dist\//);
+      // Exactly beside the module that reads it: `src/titan/x` is read by
+      // `src/titan/ui.ts`, so the built copy is `dist/titan/x`. A target that
+      // merely STARTS with `dist/` — `dist/titan/x.bak`, `dist/x` — would
+      // leave the server reading a file that is not there.
+      expect(to, `${from} must land beside the module that reads it`).toBe(
+        from.replace(/^src\//, 'dist/'),
+      );
     }
 
     const sources = copies.map(([, from]) => from);
@@ -620,6 +635,41 @@ describe('the build copies the UI assets', () => {
     // would fail to build wherever npm runs it.
     const files = readManifest().files ?? [];
     expect(files).toContain('scripts/copy-assets.mjs');
+  });
+
+  it('actually copies the assets where the module that reads them will look', () => {
+    // The assertions above read the copy script's TEXT. This one RUNS it, so
+    // a target path that is wrong in a way the text cannot show — a
+    // directory that is never created, a truncated copy — fails here rather
+    // than as a 404 on /ui.js in the operator's browser.
+    //
+    // The script resolves the repository root from its own path, so a copy
+    // of it under <tmp>/scripts/ copies <tmp>/src/... to <tmp>/dist/....
+    const dir = mkdtempSync(path.join(tmpdir(), 'cfr-assets-'));
+    try {
+      mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+      mkdirSync(path.join(dir, 'src', 'titan'), { recursive: true });
+      copyFileSync(
+        path.join(ROOT, 'scripts', 'copy-assets.mjs'),
+        path.join(dir, 'scripts', 'copy-assets.mjs'),
+      );
+      for (const asset of ['ui-client.js', 'ui-client.css']) {
+        copyFileSync(path.join(ROOT, 'src', 'titan', asset), path.join(dir, 'src', 'titan', asset));
+      }
+
+      execFileSync(process.execPath, [path.join(dir, 'scripts', 'copy-assets.mjs')], {
+        cwd: dir,
+      });
+
+      for (const asset of ['ui-client.js', 'ui-client.css']) {
+        const copied = path.join(dir, 'dist', 'titan', asset);
+        expect(existsSync(copied), `${asset} was not copied into dist/titan/`).toBe(true);
+        // Byte for byte: a truncated or transformed copy is not the asset.
+        expect(readFileSync(copied)).toEqual(readFileSync(path.join(ROOT, 'src', 'titan', asset)));
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

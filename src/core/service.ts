@@ -266,37 +266,81 @@ function collectPartTitles(node: StructureNode, into: Map<string, string>): void
 }
 
 /**
- * Plain-language guidance for the fields `search` accepts.
+ * Plain-language guidance for a rejected input, keyed by the field AND by
+ * the rule that was broken.
  *
  * The validation library's own phrasing — "Too small: expected string to
  * have >=3 characters" — is developer-facing. The people reading this tool
  * are claims practitioners, so a rejected input says what to type instead.
+ *
+ * The rule matters as much as the field. `page` can be the wrong type
+ * (`?page=1.5`) or out of range (`?page=0`), and a hint that always
+ * states the range answers a question the request did not ask. Each entry
+ * therefore names the rule it explains, and an input that breaks a rule
+ * with no entry keeps the library's own wording.
  */
-const SEARCH_HINTS: Readonly<Record<string, string>> = {
-  query: `the query needs at least ${SEARCH_QUERY_MIN_LENGTH} characters and at most ${SEARCH_QUERY_MAX_LENGTH}`,
-  page: 'the page number must be between 1 and 10000',
-  perPage: 'the number of results per page must be between 1 and 20',
-  part: 'the part must be a number such as 4',
-  kind: 'the kind must be `section` or `appendix`',
-  chapter: 'the chapter must be a Roman numeral such as I, II or IV',
+type Hints = Readonly<Record<string, Readonly<Record<string, string>>>>;
+
+const SEARCH_HINTS: Hints = {
+  query: {
+    too_small: `the query needs at least ${SEARCH_QUERY_MIN_LENGTH} characters`,
+    too_big: `the query may be at most ${SEARCH_QUERY_MAX_LENGTH} characters`,
+  },
+  page: {
+    invalid_type: 'the page number must be a whole number',
+    too_small: 'the page number starts at 1',
+    too_big: 'the page number may be at most 10000',
+  },
+  perPage: {
+    invalid_type: 'the number of results per page must be a whole number',
+    too_small: 'the number of results per page starts at 1',
+    too_big: 'the number of results per page may be at most 20',
+  },
+  part: { invalid_format: 'the part must be a number such as 4' },
+  kind: { invalid_value: 'the kind must be `section` or `appendix`' },
+  chapter: {
+    too_small: 'the chapter must be at least one character',
+    too_big: 'the chapter may be at most 8 characters',
+    invalid_format: 'the chapter must be a Roman numeral such as I, II or IV',
+  },
 };
 
 /**
  * The same, for the fields `browse` accepts. Separate from the search
- * guidance because the two schemas disagree about `chapter`: browse takes
- * the hierarchy identifier as it is printed ("I"), search takes a Roman
- * numeral.
+ * guidance because the two schemas differ: search's `chapter` must be a
+ * Roman numeral of at most 8 characters, while browse's is the identifier
+ * the hierarchy prints, capped only by length.
  */
-const BROWSE_HINTS: Readonly<Record<string, string>> = {
-  chapter: 'the chapter must be the identifier the hierarchy prints, such as I',
-  part: 'the part must be the identifier the hierarchy prints, such as 4',
-  subpart: 'the subpart must be the identifier the hierarchy prints, such as B',
-  subjgrp: 'the subject group must be the identifier the hierarchy prints',
+const BROWSE_HINTS: Hints = {
+  chapter: {
+    too_small: 'the chapter must be at least one character',
+    too_big: 'the chapter may be at most 20 characters — the hierarchy prints it as I or II',
+  },
+  part: {
+    too_small: 'the part must be at least one character',
+    too_big: 'the part may be at most 20 characters — the hierarchy prints it as 4',
+  },
+  subpart: {
+    too_small: 'the subpart must be at least one character',
+    too_big: 'the subpart may be at most 20 characters — the hierarchy prints it as B',
+  },
+  subjgrp: {
+    too_small: 'the subject group must be at least one character',
+    too_big:
+      'the subject group may be at most 40 characters — it is the eCFR node id, such as ECFRd158704dcab040e',
+  },
 };
 
-/** Guidance for the citation a section read accepts. */
-const CITATION_HINTS: Readonly<Record<string, string>> = {
-  input: 'the citation must be a provision number such as 4.130',
+/**
+ * Guidance for the citation a section read accepts. The schema caps its
+ * length; whether it names a real provision is a separate check with its
+ * own message.
+ */
+const CITATION_HINTS: Hints = {
+  input: {
+    too_small: 'the citation must be at least one character',
+    too_big: 'the citation may be at most 120 characters',
+  },
 };
 
 /**
@@ -315,12 +359,14 @@ export function validateSearchInput(input: SearchInput): z.infer<typeof searchIn
   return parsed.data;
 }
 
-function toServiceError(error: unknown, hints: Readonly<Record<string, string>>): never {
+function toServiceError(error: unknown, hints: Hints): never {
   if (error instanceof z.ZodError) {
     const details = error.issues
       .map((issue) => {
         const field = issue.path.join('.') || 'input';
-        return hints[field] ?? `${field}: ${issue.message}`;
+        // The hint must state the rule that was broken — a field can break
+        // more than one — so the lookup is by rule as well as by field.
+        return hints[field]?.[issue.code] ?? `${field}: ${issue.message}`;
       })
       .join('; ');
     throw new ServiceError(`invalid input: ${details}`, 'invalid_input');

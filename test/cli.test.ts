@@ -2,19 +2,29 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { CliError, main, parseArgs } from '../src/cli.js';
+import { CliError, failureMessage, main, parseArgs } from '../src/cli.js';
+import { HttpError } from '../src/core/http-client.js';
 import { formatIssueDiff } from '../src/commands/diff.js';
 import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
 import { formatSearchResults } from '../src/commands/search.js';
 import { Store } from '../src/core/store.js';
 import type { FetchLike } from '../src/core/http-client.js';
 import { VERSION } from '../src/version.js';
-import { FIXTURE_STRUCTURE, openTempStore } from './helpers.js';
+import type { Logger } from '../src/logger.js';
+import { createTestLogger, FIXTURE_STRUCTURE, openTempStore } from './helpers.js';
 
-function makeIo(env: NodeJS.ProcessEnv = {}): {
+function makeIo(
+  env: NodeJS.ProcessEnv = {},
+  logger?: Logger,
+): {
   out: string[];
   err: string[];
-  io: { out(c: string): void; err(c: string): void; env: NodeJS.ProcessEnv };
+  io: {
+    out(c: string): void;
+    err(c: string): void;
+    env: NodeJS.ProcessEnv;
+    logger?: Logger;
+  };
 } {
   const out: string[] = [];
   const err: string[] = [];
@@ -25,6 +35,8 @@ function makeIo(env: NodeJS.ProcessEnv = {}): {
       out: (chunk) => out.push(chunk),
       err: (chunk) => err.push(chunk),
       env,
+      // `exactOptionalPropertyTypes`: the property is absent, not undefined.
+      ...(logger === undefined ? {} : { logger }),
     },
   };
 }
@@ -174,6 +186,89 @@ describe('main', () => {
     const code = await main(['historical', '2026-01-01', 'not a citation'], io);
     expect(code).toBe(2);
     expect(err.join('')).toContain('not a citation');
+  });
+
+  it('explains an upstream failure without the endpoint path', () => {
+    // `historical`, `diff` and `redline` reach eCFR directly, so their
+    // failures arrive as a raw HttpError. The user needs to know they are
+    // offline, not which endpoint failed: no user action depends on the
+    // path, and the raw message is developer-facing.
+    const failure = new HttpError(
+      'request failed for /api/versioner/v1/full/2026-01-01/title-38.xml: fetch failed',
+      '/api/versioner/v1/full/2026-01-01/title-38.xml',
+    );
+    const message = failureMessage(failure);
+    expect(message).toContain('eCFR could not be reached');
+    expect(message).toContain('network connection');
+    expect(message).not.toContain('/api/versioner');
+
+    const serverSide = new HttpError('request failed for /api/versioner/v1/titles.json', '/x', 503);
+    expect(failureMessage(serverSide)).toContain('eCFR answered HTTP 503');
+    // eCFR answered, so the reader's network is not the suspect: advising a
+    // network check would send them after the wrong thing.
+    expect(failureMessage(serverSide)).not.toContain('network connection');
+    expect(failureMessage(serverSide)).toContain('try again later');
+
+    // A refusal is not a failure to reach: there is nothing the reader can
+    // do but change the request, so no advice is offered at all.
+    const refused = new HttpError('request failed for /api/versioner/v1/titles.json', '/x', 404);
+    expect(failureMessage(refused)).toBe('eCFR answered HTTP 404');
+
+    // An ordinary failure keeps its own message.
+    expect(failureMessage(new Error('the index has no structure data'))).toBe(
+      'the index has no structure data',
+    );
+  });
+
+  it("records the upstream detail in the log, not on the reader's line", async () => {
+    // The endpoint and the upstream's own words are developer-facing: they
+    // stay off the reader's line, but they must not vanish either. The
+    // structured log is where they belong.
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-cli-diff-'));
+    vi.stubGlobal('fetch', async () => new Response('upstream said no', { status: 400 }));
+    const logger = createTestLogger();
+    const { err, io } = makeIo(
+      { CFR_INDEX_PATH: path.join(dir, 'index.sqlite'), CFR_LOG_LEVEL: 'error' },
+      logger,
+    );
+    try {
+      const code = await main(['diff', '2026-01-01', '2026-06-01'], io);
+      expect(code).toBe(1);
+      // The reader's line says what happened, and no endpoint.
+      expect(err.join('')).toContain('eCFR answered HTTP 400');
+      expect(err.join('')).not.toContain('/api/versioner');
+      // The detail reaches the log.
+      const errors = logger.records.filter((record) => record.level === 'error');
+      expect(errors.length).toBeGreaterThan(0);
+      const fields = errors[errors.length - 1]?.fields as Record<string, unknown> | undefined;
+      expect(String(fields?.['url'])).toContain('/api/versioner');
+      expect(String(fields?.['message'])).toContain('upstream said no');
+      expect(fields?.['status']).toBe(400);
+    } finally {
+      vi.unstubAllGlobals();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not tell the reader to run `cfr-free sync` when they ARE running it', async () => {
+    // The reader invoked `cfr-free sync`; advice to run `cfr-free sync`
+    // again is circular and sends them nowhere.
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-cli-sync-'));
+    vi.stubGlobal('fetch', async () => new Response('upstream said no', { status: 400 }));
+    const { err, io } = makeIo(
+      { CFR_INDEX_PATH: path.join(dir, 'index.sqlite'), CFR_LOG_LEVEL: 'error' },
+      createTestLogger(),
+    );
+    try {
+      const code = await main(['sync'], io);
+      expect(code).toBe(1);
+      expect(err.join('')).toContain('could not build the index from eCFR');
+      expect(err.join('')).toContain('eCFR answered HTTP 400');
+      expect(err.join('')).not.toContain('cfr-free sync');
+    } finally {
+      vi.unstubAllGlobals();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
