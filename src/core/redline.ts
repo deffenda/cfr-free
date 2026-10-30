@@ -332,11 +332,11 @@ export async function redlineSection(
   }
   const { ecfr, logger } = deps;
 
-  // Two parallel GETs on a stateless HttpClient (http-client.ts keeps all
-  // request state function-local), so the fetches run in parallel — the same
-  // ~4.7 s two-document cost family as `diff`. The client's own memo may
-  // serve either document from memory, or share an in-flight fetch with
-  // another reader of the same date.
+  // Two parallel GETs on an HttpClient that keeps all request state
+  // function-local (http-client.ts), so the fetches run in parallel — the
+  // same ~4.7 s two-document cost family as `diff`. The client's own
+  // short-lived memo may serve either document from memory, or share an
+  // in-flight fetch with another reader of the same date.
   logger.info('fetching full title XML', { issueDate: fromDate });
   logger.info('fetching full title XML', { issueDate: toDate });
   const [fromXml, toXml] = await Promise.all([

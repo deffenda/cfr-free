@@ -40,15 +40,15 @@ const FALSE_CLAIMS: readonly { readonly pattern: RegExp; readonly because: strin
       'the upstream fetch path keeps a per-process, in-memory memo of the documents it fetched',
   },
   {
-    pattern: /\bper call\b/i,
+    pattern: /\bfetched per call\b/i,
     because: 'a repeat read of the same issue date is served from the memo, not fetched again',
   },
   {
-    pattern: /\bon every call\b/i,
+    pattern: /\bfetched on every call\b/i,
     because: 'a repeat read of the same issue date is served from the memo, not fetched again',
   },
   {
-    pattern: /\bper request\b/i,
+    pattern: /\bfetched per request\b/i,
     because: 'a repeat read of the same issue date is served from the memo, not fetched again',
   },
 ];
@@ -61,8 +61,49 @@ const FALSE_CLAIMS: readonly { readonly pattern: RegExp; readonly because: strin
 const UPSTREAM_CONTEXT =
   /eCFR|upstream|full-title|full title|issue date|point-in-time|\bdiff\b|\bredline\b|get_section_at|diff_issues/i;
 
-/** How far either side of a claim to look for that context. */
-const CONTEXT_WINDOW = 160;
+/**
+ * The BLOCK a claim sits in: its markdown paragraph, or its markdown table
+ * row, or — in a source file — the run of comment lines around it.
+ *
+ * The review showed a claim could be slipped past by PLACEMENT: SPEC.md's
+ * markdown rows are multi-thousand-character lines, so a fixed
+ * character-window can miss the upstream words while the false claim is
+ * still in a passage entirely about the upstream path. Judging the claim
+ * against its own BLOCK closes that hole without the false positives a
+ * wider window would cause — a claim about the health check's store query
+ * is in a different table row from the upstream path, so it is not judged
+ * against the upstream path's row.
+ */
+function blockAround(text: string, at: number): string {
+  const lineStart = text.lastIndexOf('\n', at) + 1;
+  const lineEnd = text.indexOf('\n', at);
+  const end = lineEnd === -1 ? text.length : lineEnd;
+  const isTableRow = (line: string): boolean => line.trimStart().startsWith('|');
+
+  const thisRow = isTableRow(text.slice(lineStart, end));
+  let start = lineStart;
+  let stop = end;
+  // A table row stands alone: the row above it is about something else.
+  if (thisRow) return text.slice(start, stop);
+  while (start > 0) {
+    const prevEnd = start - 1;
+    const prevStart = text.lastIndexOf('\n', prevEnd - 1) + 1;
+    const prev = text.slice(prevStart, prevEnd);
+    if (prev.trim() === '') break;
+    if (isTableRow(prev) !== thisRow) break;
+    start = prevStart;
+  }
+  while (stop < text.length) {
+    const nextStart = stop + 1;
+    const nextEnd = text.indexOf('\n', nextStart);
+    const nextStop = nextEnd === -1 ? text.length : nextEnd;
+    const next = text.slice(nextStart, nextStop);
+    if (next.trim() === '') break;
+    if (isTableRow(next) !== thisRow) break;
+    stop = nextStop;
+  }
+  return text.slice(start, stop);
+}
 
 interface Violation {
   readonly surface: string;
@@ -78,10 +119,7 @@ function findFalseClaims(surface: string, text: string): Violation[] {
     const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
     for (const match of text.matchAll(new RegExp(pattern.source, flags))) {
       const at = match.index ?? 0;
-      const around = text.slice(
-        Math.max(0, at - CONTEXT_WINDOW),
-        at + match[0].length + CONTEXT_WINDOW,
-      );
+      const around = blockAround(text, at);
       if (!UPSTREAM_CONTEXT.test(around)) continue;
       violations.push({
         surface,
@@ -96,17 +134,6 @@ function findFalseClaims(surface: string, text: string): Violation[] {
 
 function readDoc(relative: string): string {
   return readFileSync(fileURLToPath(new URL(`../${relative}`, import.meta.url)), 'utf8');
-}
-
-/** The JSDoc block that documents `symbol` in `source`. */
-function docCommentBefore(source: string, symbol: string): string {
-  const at = source.indexOf(symbol);
-  if (at < 0) return '';
-  const before = source.slice(0, at);
-  const start = before.lastIndexOf('/**');
-  const end = before.lastIndexOf('*/');
-  if (start < 0 || end < start) return '';
-  return before.slice(start, end + 2);
 }
 
 /** Render the violations so the failure message says what is wrong. */
@@ -138,19 +165,24 @@ describe('published contract: the upstream fetch path is not "stateless"', () =>
     expect(violations, describeViolations(violations)).toEqual([]);
   });
 
-  it('the diff/redline service docstrings make no false claim', () => {
-    const source = readDoc('src/core/service.ts');
-    const violations = [
-      ...findFalseClaims(
-        'src/core/service.ts#diffBetween',
-        docCommentBefore(source, 'async diffBetween('),
-      ),
-      ...findFalseClaims(
-        'src/core/service.ts#redlineBetween',
-        docCommentBefore(source, 'async redlineBetween('),
-      ),
-    ];
+  it('the service module makes no false claim', () => {
+    // The WHOLE module, not only the two docstrings the first pass
+    // happened to look at: a false claim in any other comment of this file
+    // is just as false, and pinning two of them left the rest unpoliced.
+    const violations = findFalseClaims('src/core/service.ts', readDoc('src/core/service.ts'));
     expect(violations, describeViolations(violations)).toEqual([]);
+  });
+
+  it('the core diff/redline modules make no false claim', () => {
+    // The review found `src/core/diff.ts` still opening with "Stateless
+    // point-in-time diff" while the same file, further down, said the memo
+    // may serve either document — the file contradicted itself, and this
+    // suite could not see it because it only read the published documents
+    // and the service's docstrings.
+    for (const file of ['src/core/diff.ts', 'src/core/redline.ts']) {
+      const violations = findFalseClaims(file, readDoc(file));
+      expect(violations, describeViolations(violations)).toEqual([]);
+    }
   });
 
   it('the published documents state the memo’s reuse window and capacity', () => {
