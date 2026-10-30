@@ -1,11 +1,12 @@
 import type { AppConfig } from '../config.js';
-import { HttpClient, HttpError } from '../core/http-client.js';
+import { HttpClient } from '../core/http-client.js';
 import { EcfrApi } from '../core/ecfr.js';
 import { CommandError, EXIT } from '../exit-codes.js';
 import type { Logger } from '../logger.js';
 import type { Store } from '../core/store.js';
 import { syncIndex, type SyncDeps, type SyncReport } from '../core/sync.js';
 import { CFRService } from '../core/service.js';
+import { upstreamFailure } from './upstream-guidance.js';
 import { VERSION } from '../version.js';
 
 /** Create the eCFR client with a versioned User-Agent. */
@@ -29,19 +30,16 @@ export async function syncWithGuidance(deps: SyncDeps, logger: Logger): Promise<
   try {
     return await syncIndex(deps);
   } catch (error) {
-    if (!(error instanceof HttpError)) throw error;
+    const failure = upstreamFailure(error);
+    if (failure === null) throw error;
     logger.error('eCFR request failed', {
-      url: error.url,
-      status: error.status ?? null,
-      message: error.message,
+      url: failure.url,
+      status: failure.status ?? null,
+      message: failure.detail,
     });
-    const reason =
-      error.status === undefined
-        ? 'eCFR could not be reached'
-        : `eCFR answered HTTP ${error.status}`;
     throw new CommandError(
-      `could not build the index from eCFR — ${reason}. Check your network connection and ` +
-        'run `cfr-free sync` again, or set CFR_AUTO_SYNC=0 and sync later.',
+      `could not build the index from eCFR — ${failure.reason}. Check your network connection ` +
+        'and run `cfr-free sync` again, or set CFR_AUTO_SYNC=0 and sync later.',
       EXIT.ERROR,
     );
   }

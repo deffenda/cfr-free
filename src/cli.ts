@@ -10,6 +10,7 @@ import { formatIssueDiff, runDiffCommand } from './commands/diff.js';
 import { formatSectionRedline, runRedlineCommand } from './commands/redline.js';
 import { formatHistoricalSection, runHistoricalCommand } from './commands/historical.js';
 import { formatSearchResults, runSearchCommand } from './commands/search.js';
+import { upstreamFailure } from './commands/upstream-guidance.js';
 import { SEARCH_QUERY_MAX_LENGTH, SEARCH_QUERY_MIN_LENGTH, ServiceError } from './core/service.js';
 import { CommandError, EXIT } from './exit-codes.js';
 import { createLogger, type Logger } from './logger.js';
@@ -250,6 +251,22 @@ async function runProvisionRead(
 }
 
 /**
+ * What a failure says to the user.
+ *
+ * An upstream failure is rewritten: the raw message names the endpoint
+ * that failed, which no user action depends on, and says nothing about
+ * the thing the user can fix — their network connection. The detail stays
+ * in the structured log.
+ */
+export function failureMessage(error: unknown): string {
+  const failure = upstreamFailure(error);
+  if (failure !== null) {
+    return `${failure.reason} — check your network connection and try again`;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
  * The exit code a failure maps to.
  *
  * An invalid input is a usage mistake, not a service failure. The README's
@@ -327,8 +344,7 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
     await runMcpCommand(config, logger);
     return 0;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    io.err(`cfr-free: ${message}\n`);
+    io.err(`cfr-free: ${failureMessage(error)}\n`);
     return exitCodeFor(error);
   }
 }

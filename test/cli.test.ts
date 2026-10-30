@@ -2,7 +2,8 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { CliError, main, parseArgs } from '../src/cli.js';
+import { CliError, failureMessage, main, parseArgs } from '../src/cli.js';
+import { HttpError } from '../src/core/http-client.js';
 import { formatIssueDiff } from '../src/commands/diff.js';
 import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
 import { formatSearchResults } from '../src/commands/search.js';
@@ -174,6 +175,29 @@ describe('main', () => {
     const code = await main(['historical', '2026-01-01', 'not a citation'], io);
     expect(code).toBe(2);
     expect(err.join('')).toContain('not a citation');
+  });
+
+  it('explains an upstream failure without the endpoint path', () => {
+    // `historical`, `diff` and `redline` reach eCFR directly, so their
+    // failures arrive as a raw HttpError. The user needs to know they are
+    // offline, not which endpoint failed: no user action depends on the
+    // path, and the raw message is developer-facing.
+    const failure = new HttpError(
+      'request failed for /api/versioner/v1/full/2026-01-01/title-38.xml: fetch failed',
+      '/api/versioner/v1/full/2026-01-01/title-38.xml',
+    );
+    const message = failureMessage(failure);
+    expect(message).toContain('eCFR could not be reached');
+    expect(message).toContain('network connection');
+    expect(message).not.toContain('/api/versioner');
+
+    const serverSide = new HttpError('request failed for /api/versioner/v1/titles.json', '/x', 503);
+    expect(failureMessage(serverSide)).toContain('eCFR answered HTTP 503');
+
+    // An ordinary failure keeps its own message.
+    expect(failureMessage(new Error('the index has no structure data'))).toBe(
+      'the index has no structure data',
+    );
   });
 });
 

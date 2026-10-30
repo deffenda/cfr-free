@@ -109,9 +109,12 @@ export async function historicalSection(
   } catch (error) {
     const status = (error as { status?: number }).status;
     if (status === 404) {
+      // A date before the archive is a bad argument, not a missing
+      // provision: it must exit 2 (usage), not 1 (a service failure a
+      // script would retry forever).
       throw new ServiceError(
         `eCFR serves no revision for ${date} — its point-in-time archive starts at ${ARCHIVE_FLOOR}`,
-        'not_found',
+        'invalid_input',
       );
     }
     throw error;

@@ -232,6 +232,29 @@ describe('CFRService.search', () => {
     });
   });
 
+  it('names the rule that was broken, not another one', () => {
+    // A hint must answer the question the request actually asked. `page`
+    // can be the wrong type (`?page=1.5` reaches the schema as 1.5) or out
+    // of range (`?page=0`), and a hint that always states the range
+    // answers a question the request did not ask.
+    withService((service) => {
+      expect(() => service.search({ query: 'mental disorder', page: 1.5 })).toThrow(
+        /invalid input: the page number must be a whole number/,
+      );
+      expect(() => service.search({ query: 'mental disorder', page: 0 })).toThrow(
+        /invalid input: the page number starts at 1/,
+      );
+      expect(() => service.search({ query: 'mental disorder', page: 99999 })).toThrow(
+        /invalid input: the page number may be at most 10000/,
+      );
+      // The subject group is the eCFR node id, not a label the hierarchy
+      // prints.
+      expect(() => service.browse({ subjgrp: 'x'.repeat(41) })).toThrow(
+        /invalid input: the subject group may be at most 40 characters/,
+      );
+    });
+  });
+
   it('constrains ranked results by kind and chapter', () => {
     withService((service) => {
       const appendixOnly = service.search({ query: 'rating schedule', kind: 'appendix' });
