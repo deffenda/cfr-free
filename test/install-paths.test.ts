@@ -194,6 +194,20 @@ describe('the prepare script', () => {
     expect(script).toContain('--include=dev');
   });
 
+  it('prefers the locked install, and audits what it installs', () => {
+    // The fallback install runs at INSTALL time, on the network, with every
+    // dependency's lifecycle scripts — so it is the one place in the package
+    // where a version nobody reviewed could be fetched. `npm ci` installs
+    // exactly what the committed lockfile pins, and the install audits what
+    // it fetched: `--no-audit` would suppress the audit of the very
+    // install that could carry the vulnerability.
+    expect(script).toContain("'ci'");
+    expect(script).toContain('--include=dev');
+    // The flag as an ARGUMENT: the script's prose may name the flag it no
+    // longer passes.
+    expect(script, 'the install must not suppress its own audit').not.toMatch(/'--no-audit'/);
+  });
+
   it('guards against the fallback install recursing into itself', () => {
     // npm runs `prepare` on every install, so the fallback's own
     // `npm install` would run this script again, which would start another

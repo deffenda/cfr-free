@@ -63,6 +63,7 @@ export default tseslint.config(
     // while the gate says nothing. `scripts/**/*.js` covers the repo's own
     // scripts; the browser script gets its own block below.
     files: ['**/*.mjs', 'scripts/**/*.js'],
+    plugins: { security },
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'module',
@@ -71,6 +72,14 @@ export default tseslint.config(
     rules: {
       // Developer tooling prints reports to stdout by design.
       'no-console': 'off',
+      // The repository's own security rules reach the TOOLING too: the
+      // install-time `prepare` script runs a child process and reaches the
+      // network, and it sat outside the security lint entirely because the
+      // block that covers the `.mjs` files had no `security` plugin.
+      'security/detect-unsafe-regex': 'error',
+      'security/detect-child-process': 'error',
+      'security/detect-eval-with-expression': 'error',
+      'security/detect-non-literal-require': 'error',
     },
   },
   {
