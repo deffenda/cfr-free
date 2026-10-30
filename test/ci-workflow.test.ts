@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -429,12 +430,28 @@ function checkoutFetchDepth(jobText: string): string | undefined {
   const lines = jobText.split('\n');
   const checkout = lines.findIndex((line) => /uses:\s*actions\/checkout@/.test(line));
   if (checkout === -1) return undefined;
-  const indent = /^\s*/.exec(lines[checkout] ?? '')?.[0] ?? '';
+  // The step that owns the `uses:` line. The `uses:` line is not always the
+  // step's first line — the `- name:` form puts it one line deeper — so the
+  // step's own indent comes from the nearest PRECEDING step marker, and the
+  // scan ends at the next marker at that indent or shallower. Deriving the
+  // boundary from the `uses:` line's indent instead would let the scan run
+  // past the checkout and read a LATER step's `fetch-depth`, which is how
+  // this guard could pass while the checkout stayed shallow.
+  let stepIndent = 0;
+  for (let index = checkout; index >= 0; index -= 1) {
+    const marker = /^(\s*)-\s/.exec(lines[index] ?? '');
+    if (marker !== null) {
+      stepIndent = (marker[1] ?? '').length;
+      break;
+    }
+  }
   for (const line of lines.slice(checkout + 1)) {
-    // The next step begins — nothing below it belongs to this one.
-    if (line.startsWith(`${indent}- `)) return undefined;
-    const found = /^\s*fetch-depth:\s*(\S+)\s*$/.exec(line);
-    if (found !== null) return found[1];
+    const marker = /^(\s*)-\s/.exec(line);
+    if (marker !== null && (marker[1] ?? '').length <= stepIndent) return undefined;
+    const found = /^\s*fetch-depth:\s*(.+?)\s*$/.exec(line);
+    // The value may be quoted (`fetch-depth: "0"`); the quotes are YAML
+    // syntax, not part of the value.
+    if (found !== null) return (found[1] ?? '').replace(/^["']|["']$/g, '');
   }
   return undefined;
 }
@@ -1321,6 +1338,52 @@ describe('the workflow files — what the merge gate runs', () => {
     }
   });
 
+  it('reads the checkout depth from the checkout step, not a later step', () => {
+    // The hole this closes: a job whose checkout is shallow, followed by a
+    // later step that asks for `fetch-depth: 0`, must NOT read as a
+    // checkout with full history. The step's own indent comes from the
+    // nearest preceding step marker, so the `- name:` form of a step (where
+    // `uses:` sits one line deeper) is handled too.
+    const shallowCheckout = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - uses: actions/checkout@abc123',
+      '      - uses: actions/setup-node@def456',
+      '        with:',
+      '          fetch-depth: 0',
+    ].join('\n');
+    expect(checkoutFetchDepth(shallowCheckout)).toBeUndefined();
+
+    const namedCheckout = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - name: Check out',
+      '        uses: actions/checkout@abc123',
+      '      - uses: actions/setup-node@def456',
+      '        with:',
+      '          fetch-depth: 0',
+    ].join('\n');
+    expect(checkoutFetchDepth(namedCheckout)).toBeUndefined();
+
+    const fullHistory = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - name: Check out',
+      '        uses: actions/checkout@abc123',
+      '        with:',
+      '          fetch-depth: 0',
+      '      - uses: actions/setup-node@def456',
+    ].join('\n');
+    expect(checkoutFetchDepth(fullHistory)).toBe('0');
+
+    // A quoted value is the same value: the quotes are YAML syntax.
+    const quoted = fullHistory.replace('fetch-depth: 0', 'fetch-depth: "0"');
+    expect(checkoutFetchDepth(quoted)).toBe('0');
+  });
+
   it('keeps a comment inside the security job from ending the block', () => {
     // A comment at the same indent as the job key is not a key: it ends
     // nothing. Ending the block there would drop the scanners below it
@@ -1746,6 +1809,36 @@ describe('the release guard — the packed package must carry what the program r
     const guard = readFileSync(VERIFIER_PATH, 'utf8');
     expect(guard).toMatch(/'run', 'build'/);
   });
+
+  it('the pack list still answers when it is reached through a symlink', () => {
+    // `import.meta.url` is the REAL path of the module and `argv[1]` is
+    // whatever the caller typed. Comparing the two without resolving them
+    // meant the script printed NOTHING through a symlink — and a caller
+    // read that as an empty package list.
+    const dir = mkdtempSync(join(tmpdir(), 'cfr-pack-link-'));
+    try {
+      const link = join(dir, 'pack-list.mjs');
+      symlinkSync(join(ROOT, 'scripts', 'pack-list.mjs'), link);
+      const out = execFileSync(process.execPath, [link, ROOT], { encoding: 'utf8' });
+      const paths = JSON.parse(out) as string[];
+      // The assertion is on paths the tarball carries WHETHER OR NOT the
+      // program has been built. `npm pack --dry-run --ignore-scripts` runs
+      // the `prepare` lifecycle script on npm 10 (which builds `dist/`) and
+      // skips it on npm 11 and 12 (which does not) — so asserting a `dist/`
+      // path here made this test answer differently on Node 22 and Node 24,
+      // and it failed on the Node 24 runner in CI. The BUILT package's
+      // contents are asserted by the guard test below, which builds before
+      // it packs.
+      //
+      // The regression this guards is an EMPTY list: the script printing
+      // nothing at all through a symlink.
+      expect(paths.length).toBeGreaterThan(0);
+      expect(paths).toContain('package.json');
+      expect(paths).toContain('README.md');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it('reads the package list whichever shape npm printed it in', () => {
     // `npm pack --json` is not one shape: npm 10 and 11 print an array of

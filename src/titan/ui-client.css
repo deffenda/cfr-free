@@ -173,9 +173,12 @@ blockquote {
 }
 
 /*
- * Present to a screen reader, absent to the eye: the view announcer and
- * the search view's heading exist so the page can be navigated by keyboard
- * and read aloud, not to be looked at twice.
+ * Present to a screen reader, absent to the eye: the view announcer
+ * exists so the change of view is read aloud, not to be looked at twice.
+ *
+ * The view HEADINGS are visible: they are where the keyboard lands on a
+ * route change, and a focus ring on a clipped element cannot be seen. A
+ * focus the reader cannot see is no focus at all.
  */
 .visually-hidden {
   position: absolute;
