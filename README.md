@@ -26,7 +26,7 @@ keys, no telemetry — one Node process and one SQLite file.
 - **MCP server** with nine read-only tools any MCP client can use: six
   offline index-backed ones (`search_regulations`, `get_section`,
   `browse_title38`, `index_status`, `list_parts`, `health`) plus three that
-  fetch the live eCFR versioner per call (`get_section_at` (one provision
+  fetch the live eCFR versioner on demand (`get_section_at` (one provision
   as it stood at a date), `diff_issues`, `redline`).
 - **HTTP JSON API** for scripts and apps: search, read sections, browse the
   CFR hierarchy, health check, Prometheus metrics.
@@ -51,7 +51,7 @@ keys, no telemetry — one Node process and one SQLite file.
   and `mcp` when `CFR_REFRESH_HOURS` is set (default 0 = off);
   `serve`'s `/api/v1/diff` and `/api/v1/redline` routes; and `mcp`'s
   three eCFR-backed tools (`get_section_at`, `diff_issues`, `redline`),
-  which fetch from eCFR on every call. Reads from a fresh index never
+  which fetch from eCFR on demand. Reads from a fresh index never
   touch the network.
 
 ## Quickstart
@@ -364,14 +364,16 @@ disorders?"_ or _"Search Title 38 for traumatic brain injury compensation."_
 | `index_status`       | —                                                           | Issue date, last sync, row counts, staleness, drift flag, corpus receipt hash, and what the last sync amended/added/removed                                                                                                                                                                                                                      |
 | `list_parts`         | —                                                           | Parts in the index with titles and section/appendix counts                                                                                                                                                                                                                                                                                       |
 | `health`             | —                                                           | One-call readiness verdict: `ready`, `stale`, `degraded` (structure drift), or `empty`                                                                                                                                                                                                                                                           |
-| `get_section_at`     | `at_date` (YYYY-MM-DD), `citation`                          | One provision as it stood at a date: the eCFR revision in force then, fetched statelessly on every call (no local index; the point-in-time archive starts 2017-01-01)                                                                                                                                                                            |
+| `get_section_at`     | `at_date` (YYYY-MM-DD), `citation`                          | One provision as it stood at a date: the eCFR revision in force then, fetched from eCFR on demand (no local index; a short-lived in-memory memo may reuse a document fetched moments ago; the point-in-time archive starts 2017-01-01)                                                                                                           |
 | `diff_issues`        | `from_date`, `to_date`                                      | Provision-level diff between two eCFR issue dates: changed/added/removed citations (capped, with a truncation flag)                                                                                                                                                                                                                              |
 | `redline`            | `from_date`, `to_date`, `citation`                          | Line-level redline of one provision between two eCFR issue dates: status, both sides' text, and per-line hunks                                                                                                                                                                                                                                   |
 
 All tools are **read-only**; the six index tools query only the local index and
 never hit the network, while `get_section_at`, `diff_issues` and `redline`
-fetch from eCFR on each call (a point-in-time revision, or two issue dates'
-full-title XML). Search and section responses carry a freshness envelope
+fetch from eCFR on demand (a point-in-time revision, or two issue dates'
+full-title XML); a fetched document is reused for up to five minutes by the
+process that fetched it (at most four documents are kept), and concurrent
+readers of the same date share one upstream fetch. Search and section responses carry a freshness envelope
 (`indexStale` + a `notice` when the local index has aged out) so a client can
 never unknowingly quote a lapsed version.
 
@@ -387,15 +389,15 @@ follow cross-references → paste-ready citations with source URLs.
 
 ### HTTP API
 
-| Method         | Path                         | Query params                                                           |
-| -------------- | ---------------------------- | ---------------------------------------------------------------------- |
-| `GET` / `HEAD` | `/health`                    | —                                                                      |
-| `GET` / `HEAD` | `/metrics`                   | — (Prometheus text format)                                             |
-| `GET` / `HEAD` | `/api/v1/search`             | `q` (required), `page`, `per_page`, `part`, `kind`, `chapter`          |
-| `GET` / `HEAD` | `/api/v1/sections/:citation` | — (URL-encode citations with spaces)                                   |
-| `GET` / `HEAD` | `/api/v1/browse`             | `chapter`, `part`, `subpart`, `subjgrp`                                |
-| `GET` / `HEAD` | `/api/v1/diff`               | `from`, `to` (both required; fetches from eCFR per request)            |
-| `GET` / `HEAD` | `/api/v1/redline`            | `from`, `to`, `citation` (all required; fetches from eCFR per request) |
+| Method         | Path                         | Query params                                                         |
+| -------------- | ---------------------------- | -------------------------------------------------------------------- |
+| `GET` / `HEAD` | `/health`                    | —                                                                    |
+| `GET` / `HEAD` | `/metrics`                   | — (Prometheus text format)                                           |
+| `GET` / `HEAD` | `/api/v1/search`             | `q` (required), `page`, `per_page`, `part`, `kind`, `chapter`        |
+| `GET` / `HEAD` | `/api/v1/sections/:citation` | — (URL-encode citations with spaces)                                 |
+| `GET` / `HEAD` | `/api/v1/browse`             | `chapter`, `part`, `subpart`, `subjgrp`                              |
+| `GET` / `HEAD` | `/api/v1/diff`               | `from`, `to` (both required; fetches from eCFR on demand)            |
+| `GET` / `HEAD` | `/api/v1/redline`            | `from`, `to`, `citation` (all required; fetches from eCFR on demand) |
 
 `/health` and `/metrics` additionally expose `diskFree`/`diskTotal` and the
 `cfr_free_disk_free_bytes`/`cfr_free_disk_total_bytes` gauges when the platform
