@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Semaphore } from '../src/core/semaphore.js';
+import { Semaphore, SemaphoreOverflowError } from '../src/core/semaphore.js';
 
 /** Wait until the predicate holds, so the test does not count microtasks. */
 async function waitFor(predicate: () => boolean): Promise<void> {
@@ -57,6 +57,38 @@ describe('Semaphore', () => {
 
   it('treats a zero permit count as one', async () => {
     const semaphore = new Semaphore(0);
+    await expect(semaphore.run(async () => 'ok')).resolves.toBe('ok');
+  });
+
+  it('refuses a request when the wait queue is full', async () => {
+    // The permit bounds the fetches that RUN; the queue behind it is where
+    // the unbounded growth lived. A full queue must refuse the request at
+    // once instead of parking it for minutes.
+    const semaphore = new Semaphore(1, 2);
+    const release: Array<() => void> = [];
+    const task = (): Promise<void> =>
+      semaphore.run(async () => {
+        await new Promise<void>((resolve) => release.push(resolve));
+      });
+
+    const running = task(); // takes the only permit
+    await waitFor(() => release.length === 1);
+    const first = task(); // waits (queue: 1)
+    const second = task(); // waits (queue: 2)
+
+    // The queue is full: this request is refused, not parked.
+    await expect(task()).rejects.toBeInstanceOf(SemaphoreOverflowError);
+    await expect(task()).rejects.toThrow('too many requests in flight');
+
+    // The refused requests took no permit and no queue slot: the parked
+    // ones still run, in order, and the permits come back.
+    release.splice(0).forEach((resolve) => resolve());
+    await waitFor(() => release.length === 1);
+    release.splice(0).forEach((resolve) => resolve());
+    await waitFor(() => release.length === 1);
+    release.splice(0).forEach((resolve) => resolve());
+
+    await Promise.all([running, first, second]);
     await expect(semaphore.run(async () => 'ok')).resolves.toBe('ok');
   });
 });

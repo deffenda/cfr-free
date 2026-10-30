@@ -106,10 +106,12 @@ export async function diffIssues(
   }
   const { ecfr, logger } = deps;
 
-  // Two independent GETs on a stateless HttpClient (http-client.ts keeps all
+  // Two parallel GETs on a stateless HttpClient (http-client.ts keeps all
   // request state function-local: fresh AbortSignal per call, function-local
   // retry counters, immutable options), so the fetches run in
-  // parallel — half the wall time of sequential on a ~2 s upstream.
+  // parallel — half the wall time of sequential on a ~2 s upstream. The
+  // client's own memo may serve either document from memory, or share an
+  // in-flight fetch with another reader of the same date.
   logger.info('fetching full title XML', { issueDate: fromDate });
   logger.info('fetching full title XML', { issueDate: toDate });
   const [fromXml, toXml] = await Promise.all([

@@ -50,7 +50,9 @@ export class RateLimiter {
    * The cost is what the request will COST, not how many requests it is:
    * a route that pulls the complete upstream document charges more than
    * one that reads the local index. Charging one token per request let a
-   * peer buy the whole upstream document with every token.
+   * peer buy the whole upstream document with every token — the
+   * published budget of ten requests a second bought TWENTY whole
+   * documents a second, because a diff or a redline pulls two of them.
    */
   consume(peer: string, cost = 1): RateVerdict {
     const nowMs = this.now();
@@ -67,8 +69,20 @@ export class RateLimiter {
       bucket.tokens -= wanted;
       return { allowed: true, retryAfterSec: 0 };
     }
-    const deficit = wanted - bucket.tokens;
-    return { allowed: false, retryAfterSec: deficit / this.refillPerSec };
+    // A cost the bucket cannot hold must not make the route unreachable:
+    // with a capacity of 5 and a cost of 10, zero of a thousand calls
+    // were admitted, at any clock. A FULL bucket still admits one such
+    // request and is emptied by it — the shortfall is not carried over.
+    if (wanted > this.capacity && bucket.tokens >= this.capacity) {
+      bucket.tokens = 0;
+      return { allowed: true, retryAfterSec: 0 };
+    }
+    // The wait is until the request becomes admissible: until the bucket
+    // is full again when the cost exceeds the capacity, until it holds
+    // the cost otherwise.
+    const shortfall =
+      wanted > this.capacity ? this.capacity - bucket.tokens : wanted - bucket.tokens;
+    return { allowed: false, retryAfterSec: shortfall / this.refillPerSec };
   }
 
   /**

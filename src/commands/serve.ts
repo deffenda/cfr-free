@@ -36,7 +36,7 @@ export async function runServeCommand(config: AppConfig, logger: Logger): Promis
   try {
     const freshness = await ensureIndex(store, config, logger);
     // The diff facade and /api/v1/diff need a live client; createEcfrApi() is
-    // the same stateless factory serve already uses for the refresh scheduler.
+    // the same factory serve already uses for the refresh scheduler.
     const service = new CFRService(store, config.maxAgeDays, createEcfrApi(), logger);
 
     // Disk capacity for /health and /metrics (SPEC §13 #22): probed once at

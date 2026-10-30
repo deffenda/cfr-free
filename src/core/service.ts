@@ -767,9 +767,10 @@ export class CFRService {
    * facade over `diffIssues` so the HTTP surface shares the core's exact
    * validation and error semantics. BOTH dates are required — no default-to
    * resolution happens here (the store's `issue_date` lookup is the CLI's
-   * convenience, deliberately not threaded behind this facade). Stateless by
-   * design: every call fetches both dates' full-title XML from eCFR — no
-   * prefetch, no cache.
+   * convenience, deliberately not threaded behind this facade). Nothing is
+   * prefetched: each call fetches both dates' full-title XML from eCFR,
+   * through the client's own per-process document memo (see `ecfr.ts` —
+   * short-lived, in memory, shared by concurrent readers of the same date).
    *
    * Every `serve`/`mcp` entrypoint injects the client and logger together;
    * the guard fails closed for test-constructed services without the diff
@@ -793,8 +794,10 @@ export class CFRService {
    * the core otherwise. BOTH dates are required on the wire (no default-to
    * resolution); the core owns every validation (malformed/impossible/identical
    * dates, non-citation) and the `not_found` tripwire for a citation missing
-   * from BOTH dates. Stateless by design: every call fetches both dates'
-   * full-title XML from eCFR — no prefetch, no cache.
+   * from BOTH dates. Nothing is prefetched: each call fetches both dates'
+   * full-title XML from eCFR, through the client's own per-process document
+   * memo (see `ecfr.ts` — short-lived, in memory, shared by concurrent
+   * readers of the same date).
    *
    * Every `serve`/`mcp` entrypoint injects the client and logger together;
    * the guard fails closed for test-constructed services without the redline

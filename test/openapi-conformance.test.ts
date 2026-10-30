@@ -42,6 +42,7 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import type { AnySchema } from 'ajv';
 import { parse as parseYaml } from 'yaml';
 import { EcfrApi } from '../src/core/ecfr.js';
+import { SemaphoreOverflowError } from '../src/core/semaphore.js';
 import { HttpClient } from '../src/core/http-client.js';
 import type { FetchLike } from '../src/core/http-client.js';
 import { CFRService } from '../src/core/service.js';
@@ -597,6 +598,23 @@ function makeRedlineEcfr(): EcfrApi {
   } as unknown as EcfrApi;
 }
 
+/** The issue date whose fetch refuses because the upstream queue is full. */
+const BUSY_DATE = '2026-03-03';
+
+/**
+ * Offline eCFR stub for the `503 upstream_busy` probe: the upstream wait
+ * queue was full, so the request is refused at once instead of being parked
+ * behind the fetches already in flight.
+ */
+function makeBusyEcfr(): EcfrApi {
+  return {
+    getFullTitleXml: async (issueDate: string) => {
+      if (issueDate === BUSY_DATE) throw new SemaphoreOverflowError(16);
+      throw new Error(`HTTP 404 for ${issueDate}`);
+    },
+  } as unknown as EcfrApi;
+}
+
 /**
  * Date-keyed stub merge: the happy probe for `/api/v1/diff` and the probes for
  * `/api/v1/redline` share the same two dates, so one client serves both — each
@@ -608,7 +626,11 @@ function mergeEcfr(...clients: readonly EcfrApi[]): EcfrApi {
       for (const client of clients) {
         try {
           return await client.getFullTitleXml(issueDate);
-        } catch {
+        } catch (error) {
+          // A full upstream queue is a real answer, not a "this stub has
+          // no such date" miss: it must reach the client as the
+          // documented 503, not be swallowed by the next stub.
+          if (error instanceof SemaphoreOverflowError) throw error;
           // Fall through to the next stub's registry.
         }
       }
@@ -739,6 +761,14 @@ const ERROR_PROBES: readonly ErrorProbeRow[] = [
     url: `/api/v1/search?q=${'x'.repeat(3000)}`,
     expectedStatus: 414,
   },
+  {
+    label: 'diff GET when the upstream fetch queue is full',
+    specPath: '/api/v1/diff',
+    operation: 'get',
+    method: 'GET',
+    url: `/api/v1/diff?from=${BUSY_DATE}&to=2026-06-01`,
+    expectedStatus: 503,
+  },
 ];
 
 describe('OpenAPI response conformance (in-process server vs spec)', () => {
@@ -753,7 +783,7 @@ describe('OpenAPI response conformance (in-process server vs spec)', () => {
     // The happy probes for /api/v1/diff and /api/v1/redline need a fetching
     // client, so this server carries the merged stub stack — every other route
     // still reads the fixture store exactly as before.
-    const ecfr = mergeEcfr(makeDiffEcfr(), makeRedlineEcfr());
+    const ecfr = mergeEcfr(makeDiffEcfr(), makeRedlineEcfr(), makeBusyEcfr());
     server = createHttpServer(
       new CFRService(temp.store, 7, ecfr, createTestLogger()),
       createTestLogger(),
