@@ -494,7 +494,8 @@ components:
   responses:
     BadRequest:
       # source: src/titan/http-server.ts#handleSection, precheck (encoding, URL parse, byte caps), statusFor (service input), handleDiff (diff params), handleRedline (redline params)
-      description: '{ error: "invalid_input", message } — malformed URL or citation encoding, oversized q (800 bytes) or part (10 bytes), a service-level input rejection (incl. missing/empty `from`/`to` on /api/v1/diff, missing/empty `from`/`to`/`citation` on /api/v1/redline, and impossible dates like month 13).'
+      # source: src/core/archive.ts#fetchFullTitleXml (a date before the archive floor is an invalid_input)
+      description: '{ error: "invalid_input", message } — malformed URL or citation encoding, oversized q (800 bytes) or part (10 bytes), a service-level input rejection (incl. missing/empty `from`/`to` on /api/v1/diff, missing/empty `from`/`to`/`citation` on /api/v1/redline, and impossible dates like month 13), and a date before eCFR''s point-in-time archive floor (2017-01-01) on /api/v1/diff or /api/v1/redline.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
