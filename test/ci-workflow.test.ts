@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,6 +51,8 @@ import { describe, expect, it } from 'vitest';
 const WORKFLOW_PATH = fileURLToPath(new URL('../.github/workflows/ci.yml', import.meta.url));
 const WORKFLOWS_DIR = fileURLToPath(new URL('../.github/workflows/', import.meta.url));
 const PACKAGE_PATH = fileURLToPath(new URL('../package.json', import.meta.url));
+/** The release-time guard: the packed tarball must carry what the program reads. */
+const VERIFIER_PATH = fileURLToPath(new URL('../scripts/verify-packed.mjs', import.meta.url));
 
 /** The checks branch protection on `main` requires. Keep in step with it. */
 const REQUIRED_CHECKS = ['quality (22)', 'quality (24)', 'security'] as const;
@@ -1675,24 +1678,34 @@ describe('the per-job gate guard — synthetic job snippets', () => {
 });
 
 describe('the release guard — the packed package must carry what the program reads', () => {
-  it('requires the runtime assets, not only the imports', () => {
-    // The UI script and stylesheet are read at RUNTIME — readFileSync
-    // beside the module — not imported, so the import scan cannot find
-    // them. A tarball published without them ships a package whose /ui.js
-    // route answers 404, and the guard would have passed it.
+  it('runs in EVERY job that publishes a tarball', () => {
+    // The npm job is disabled today — its trusted-publishing variable does
+    // not exist — so the tarball people actually download is made by the
+    // GitHub release job. A guard in the disabled job guards nothing.
     const release = readFileSync(join(WORKFLOWS_DIR, 'release.yml'), 'utf8');
-    const step = release.match(/verify packed executable and imports[\s\S]*?\n\s*NODE/);
-    expect(step?.[0], 'the packed-artifact guard is missing from release.yml').toBeDefined();
-    expect(step?.[0]).toContain('copy-assets.mjs');
+    const jobs = workflowJobs(release);
+    const githubRelease = jobs.find((job) => job.name === 'github-release');
+    expect(githubRelease?.lines.join('\n')).toContain('verify-packed.mjs');
+    const npmJob = jobs.find((job) => job.name === 'publish-npm');
+    expect(npmJob?.lines.join('\n')).toContain('verify-packed.mjs');
   });
 
   it('fails closed when the copy list changes shape', () => {
-    // The asset list is read from the copy script's own text, so a
-    // reformat that the scan cannot read would check nothing — and a
-    // guard that checks nothing passes. It must stop instead.
-    const release = readFileSync(join(WORKFLOWS_DIR, 'release.yml'), 'utf8');
-    const step = release.match(/verify packed executable and imports[\s\S]*?\n\s*NODE/);
-    expect(step?.[0]).toContain('assets.length === 0');
-    expect(step?.[0]).toContain('process.exit(1)');
+    // The asset list is read from the copy script's own text. A change of
+    // shape — a re-quoted entry, a template literal — must STOP the check
+    // rather than quietly shrink it: a list whose targets and sources
+    // disagree has lost an entry, and a check that has lost an entry would
+    // pass a tarball that does not have it.
+    const guard = readFileSync(VERIFIER_PATH, 'utf8');
+    expect(guard).toMatch(/targets\.length !== sources/);
+    expect(guard).toMatch(/process\.exit\(1\)/);
+  });
+
+  it('passes on this repository, and names the runtime assets', () => {
+    // The guard is run, not only read: a guard that always failed would
+    // satisfy every assertion above.
+    const out = execFileSync(process.execPath, [VERIFIER_PATH], { encoding: 'utf8' });
+    expect(out).toContain('dist/titan/ui-client.js');
+    expect(out).toContain('dist/titan/ui-client.css');
   });
 });
