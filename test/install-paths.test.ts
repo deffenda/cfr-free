@@ -70,7 +70,12 @@ function readRepoFile(relativePath: string): string {
 /** A semantic version as a comparable triple; the `v` prefix is optional. */
 type VersionTriple = readonly [number, number, number];
 
-const VERSION_PATTERN = /^v?(\d+)\.(\d+)\.(\d+)$/;
+// A strict three-part version, with no leading zeros — `v01.2.3` and
+// `v1.2.3` would otherwise be the same version to `Number()`, and two tags
+// would claim it.
+const VERSION_PATTERN = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+/** A release tag: `v` plus a strict three-part version. */
+const RELEASE_TAG_PATTERN = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 function parseVersion(raw: string): VersionTriple {
   const match = VERSION_PATTERN.exec(raw);
@@ -98,13 +103,26 @@ interface VersionTag {
   readonly version: VersionTriple;
 }
 
-/** Every `v`-prefixed tag in the checkout, parsed. */
-function versionTags(): VersionTag[] {
-  return git('tag')
-    .split('\n')
+/**
+ * The release tags in a tag list, parsed.
+ *
+ * Only strict `vX.Y.Z` tags count. A pre-release tag (`v0.3.0-rc.1`) is
+ * not a release — it does not claim the version, so it cannot make the
+ * manifest's version untag-able — and it is excluded rather than allowed
+ * to crash the suite. A tag that is not a version at all (`vnext`) is
+ * ignored for the same reason, and a version with a leading zero
+ * (`v01.2.3`) is not a version a release could carry.
+ */
+function parseReleaseTags(tags: readonly string[]): VersionTag[] {
+  return tags
     .map((tag) => tag.trim())
-    .filter((tag) => tag.startsWith('v'))
+    .filter((tag) => RELEASE_TAG_PATTERN.test(tag))
     .map((tag) => ({ tag, version: parseVersion(tag) }));
+}
+
+/** Every release tag in the checkout. */
+function versionTags(): VersionTag[] {
+  return parseReleaseTags(git('tag').split('\n'));
 }
 
 /** The version the manifest declared at the given tag's commit. */
@@ -701,6 +719,22 @@ describe('the build copies the UI assets', () => {
 });
 
 describe('the release guard', () => {
+  it('reads only strict release tags out of a tag list', () => {
+    // A tag that is not a release version must not crash the suite: the
+    // guard runs on every commit, and a pre-release tag (`v0.3.0-rc.1`) or
+    // a non-version tag (`vnext`) is a thing a repository can legitimately
+    // have. A leading zero is not a version a release could carry, and
+    // `Number('01')` is `1`, so `v01.2.3` would collide with `v1.2.3`.
+    expect(parseReleaseTags(['v0.3.0-rc.1', 'vnext', 'v1.0', 'v1.0.0+build', 'v01.2.3'])).toEqual(
+      [],
+    );
+    expect(parseReleaseTags(['v0.2.1', 'v0.3.0']).map((tag) => tag.tag)).toEqual([
+      'v0.2.1',
+      'v0.3.0',
+    ]);
+    expect(parseReleaseTags(['v0.2.1'])[0]?.version).toEqual([0, 2, 1]);
+  });
+
   it('has the tags it needs to judge the version', () => {
     // Every check below reads the tag list, so an EMPTY tag list makes them
     // vacuous — they would all pass while asserting nothing. That is not a
@@ -712,10 +746,11 @@ describe('the release guard', () => {
     const tags = versionTags();
     expect(
       tags.length,
-      'no v-prefixed git tag found — the release guard cannot run. A checkout ' +
-        'without tags (actions/checkout defaults to --depth 1) makes every check ' +
-        'below vacuous, so the suite fails instead of passing silently. CI must ' +
-        'check out with fetch-depth: 0.',
+      'no release tag (vX.Y.Z) found in this checkout — the release guard cannot ' +
+        'run. A checkout without tags (actions/checkout defaults to --depth 1) makes ' +
+        'every check below vacuous, so the suite fails instead of passing silently. ' +
+        'CI must check out with fetch-depth: 0; a shallow local clone needs ' +
+        '`git fetch --tags`.',
     ).toBeGreaterThan(0);
   });
 
@@ -747,7 +782,7 @@ describe('the release guard', () => {
     // failure above).
     const manifest = readManifest();
     const version = manifest.version ?? '';
-    expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(version).toMatch(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
     const current = parseVersion(version);
 
     const releasingTag =
@@ -762,8 +797,8 @@ describe('the release guard', () => {
     const tags = versionTags();
     expect(
       tags.length,
-      'no v-prefixed git tag found — the release guard cannot run; see the ' +
-        'companion assertion in this describe block.',
+      'no release tag (vX.Y.Z) found in this checkout — the release guard cannot ' +
+        'run; see the companion assertion in this describe block.',
     ).toBeGreaterThan(0);
 
     const newest = tags.reduce((a, b) => (compareVersions(b.version, a.version) > 0 ? b : a));
