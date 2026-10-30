@@ -29,7 +29,16 @@ import {
  * validation happens here so both surfaces behave identically.
  */
 
-export type ServiceErrorCode = 'invalid_input' | 'not_found';
+/**
+ * The codes a service failure carries.
+ *
+ * `invalid_input` is the READER's mistake (exit 2 on the CLI, HTTP 400) and
+ * `not_found` is a missing provision (HTTP 404). `unavailable` is neither:
+ * it is a DEPLOYMENT fault — the service was wired without the client it
+ * needs — so it is a service failure (exit 1, HTTP 500), never a usage
+ * error a script would retry forever.
+ */
+export type ServiceErrorCode = 'invalid_input' | 'not_found' | 'unavailable';
 
 /** Domain error carrying a machine-readable code and client-safe message. */
 export class ServiceError extends Error {
@@ -776,16 +785,17 @@ export class CFRService {
    * the guard fails closed for test-constructed services without the diff
    * stack, so the route answers a clean mapped error instead of a crash.
    *
-   * @throws {ServiceError} (`invalid_input`) when no eCFR client was
-   *   injected, or when a date is malformed/impossible or the two dates are
-   *   identical; upstream fetch failures surface as `HttpError`, or as
+   * @throws {ServiceError} (`unavailable`) when no eCFR client was
+   *   injected — a deployment fault, not the reader's argument;
+   *   (`invalid_input`) when a date is malformed/impossible or the two dates
+   *   are identical; upstream fetch failures surface as `HttpError`, or as
    *   `SemaphoreOverflowError` when the upstream fetch queue is full (the
    *   HTTP layer maps that to `503 upstream_busy`).
    */
   async diffBetween(fromDate: string, toDate: string): Promise<IssueDiff> {
     const { ecfr, logger } = this;
     if (ecfr === undefined || logger === undefined) {
-      throw new ServiceError('diff unavailable — no eCFR client injected', 'invalid_input');
+      throw new ServiceError('diff unavailable — no eCFR client injected', 'unavailable');
     }
     return diffIssues({ ecfr, logger }, fromDate, toDate);
   }
@@ -806,10 +816,11 @@ export class CFRService {
    * stack, so both wire surfaces answer a clean mapped error instead of a
    * crash.
    *
-   * @throws {ServiceError} (`invalid_input`) when no eCFR client was
-   *   injected, or when a date is malformed/impossible, the two dates are
-   *   identical, or the citation is not recognizable; (`not_found`) when the
-   *   citation is missing from BOTH dates' parse results; upstream fetch
+   * @throws {ServiceError} (`unavailable`) when no eCFR client was
+   *   injected — a deployment fault, not the reader's argument;
+   *   (`invalid_input`) when a date is malformed/impossible, the two dates
+   *   are identical, or the citation is not recognizable; (`not_found`) when
+   *   the citation is missing from BOTH dates' parse results; upstream fetch
    *   failures surface as `HttpError`, or as `SemaphoreOverflowError` when
    *   the upstream fetch queue is full (the HTTP layer maps that to
    *   `503 upstream_busy`).
@@ -821,7 +832,7 @@ export class CFRService {
   ): Promise<SectionRedline> {
     const { ecfr, logger } = this;
     if (ecfr === undefined || logger === undefined) {
-      throw new ServiceError('redline unavailable — no eCFR client injected', 'invalid_input');
+      throw new ServiceError('redline unavailable — no eCFR client injected', 'unavailable');
     }
     return redlineSection({ ecfr, logger }, fromDate, toDate, citation);
   }

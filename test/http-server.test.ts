@@ -1118,15 +1118,16 @@ describe('Titan HTTP /api/v1/diff', () => {
     expect(String(body['message'])).not.toContain('internal server error');
   });
 
-  it('answers a clean mapped 400 when no eCFR client was injected', async () => {
-    // Default construction (2-arg) — the facade fails closed; the packet
-    // allows "500/ServiceError-mapped", and statusFor maps invalid_input to a
-    // 400 with the client-safe message rather than a generic internal error.
+  it('answers a clean mapped 500 when no eCFR client was injected', async () => {
+    // Default construction (2-arg) — the facade fails closed. The fault is
+    // the DEPLOYMENT's (the service was wired without its eCFR client), not
+    // the caller's argument, so statusFor maps `unavailable` to a 500 and
+    // not to a 400 the caller would retry unchanged.
     const service = new CFRService(temp.store, 7);
     const { status, body } = await withService(service, `/api/v1/diff?${DIFF_QUERY}`);
-    expect(status).toBe(400);
+    expect(status).toBe(500);
     expect(body).toEqual({
-      error: 'invalid_input',
+      error: 'internal_error',
       message: 'diff unavailable — no eCFR client injected',
     });
   });
@@ -1339,14 +1340,15 @@ describe('Titan HTTP /api/v1/redline', () => {
     expect(String(body['message'])).toContain(TO_DATE);
   });
 
-  it('answers a clean mapped 400 when no eCFR client was injected', async () => {
-    // Default construction (2-arg) — the facade fails closed; statusFor maps
-    // invalid_input to a 400 with the client-safe message rather than a 500.
+  it('answers a clean mapped 500 when no eCFR client was injected', async () => {
+    // Default construction (2-arg) — the facade fails closed. The fault is
+    // the deployment's, not the caller's, so statusFor maps `unavailable`
+    // to a 500 rather than to a 400.
     const service = new CFRService(temp.store, 7);
     const { status, body } = await withService(service, `/api/v1/redline?${REDLINE_QUERY}`);
-    expect(status).toBe(400);
+    expect(status).toBe(500);
     expect(body).toEqual({
-      error: 'invalid_input',
+      error: 'internal_error',
       message: 'redline unavailable — no eCFR client injected',
     });
   });
