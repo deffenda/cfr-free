@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { ESLint } from 'eslint';
 import { describe, expect, it } from 'vitest';
+import { UI_JS } from '../src/titan/ui.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -30,6 +32,24 @@ describe('the browser script lint scope', () => {
     return result;
   }
 
+  it('lints the very bytes the browser is served', async () => {
+    // The gate's whole value here is that the file the linter reads is the
+    // file the browser runs. If the script were re-inlined into
+    // `src/titan/ui.ts` as a template literal while
+    // `src/titan/ui-client.js` stayed on disk, the linter would keep
+    // checking the clean file while the browser got the inlined copy —
+    // and the gate would stay green over a defective script.
+    const onDisk = readFileSync(path.join(ROOT, 'src/titan/ui-client.js'), 'utf8');
+    expect(UI_JS, 'the served script must be the file the linter reads, byte for byte').toBe(
+      onDisk,
+    );
+
+    // And the bytes the linter sees must carry the correctness rules: a
+    // defect in the served script must be reported against it.
+    const result = await lintProbe(path.join(ROOT, 'src/titan/ui-client.js'), UI_JS);
+    expect(result.messages.map((message) => message.ruleId)).not.toContain('eqeqeq');
+  }, 30_000);
+
   it('does not let the browser script reach for Node globals', async () => {
     const result = await lintProbe(
       path.join(ROOT, 'src/titan/ui-client.js'),
@@ -49,6 +69,23 @@ describe('the browser script lint scope', () => {
 
     const mjs = await lintProbe(path.join(ROOT, 'tools/probe.mjs'), 'void process.env.HOME;\n');
     expect(mjs.messages.map((message) => message.ruleId)).not.toContain('no-undef');
+  }, 30_000);
+
+  it('applies the correctness rules to the browser script', async () => {
+    // `CORRECTNESS_RULES` in `eslint.config.mjs` is spread into the browser
+    // block, so the browser script gets the same defect-catching rules as
+    // the TypeScript sources. That spread is the ONLY thing that carries
+    // them: `js.configs.recommended` does not enable `eqeqeq` or `no-var`,
+    // so a browser block without the spread would lint 800+ lines of
+    // browser JavaScript and catch nothing — the blind spot CR-03 exists
+    // to close, reopened by a one-line deletion.
+    const result = await lintProbe(
+      path.join(ROOT, 'src/titan/ui-client.js'),
+      'var probe = 1;\nif (probe == 1) {}\n',
+    );
+    const rules = result.messages.map((message) => message.ruleId);
+    expect(rules, 'the correctness rules must reach the browser script').toContain('eqeqeq');
+    expect(rules, 'the correctness rules must reach the browser script').toContain('no-var');
   }, 30_000);
 
   it('lets the browser script reach for the browser globals it uses', async () => {
