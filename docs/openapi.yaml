@@ -70,7 +70,7 @@ paths:
       summary: Web UI script (a real file, linted and copied into dist/ at build time)
       responses:
         '200':
-          description: 'The UI page script as text/javascript — served from src/titan/ui-client.js, which the build copies into dist/ so the gate can lint and format it, nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts#sendStatic).'
+          description: "The UI page script as text/javascript — served from the module's own directory: src/titan/ui-client.js in development, dist/titan/ui-client.js in a build (the build copies it there, so the gate can lint and format it), nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts#sendStatic)."
           content:
             text/javascript:
               schema: { type: string }
@@ -95,7 +95,7 @@ paths:
       summary: Web UI stylesheet (a real file, linted and copied into dist/ at build time)
       responses:
         '200':
-          description: 'The UI stylesheet as text/css — served from src/titan/ui-client.css, which the build copies into dist/ so the gate can lint and format it, nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts#sendStatic).'
+          description: "The UI stylesheet as text/css — served from the module's own directory: src/titan/ui-client.css in development, dist/titan/ui-client.css in a build (the build copies it there, so the gate can lint and format it), nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts#sendStatic)."
           content:
             text/css:
               schema: { type: string }
