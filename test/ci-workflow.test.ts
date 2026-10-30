@@ -184,8 +184,173 @@ function invokedScripts(run: string): string[] {
       index: match.index ?? 0,
       script: 'test',
     })),
+    ...[...run.matchAll(YARN_RUN_COMMAND)].map((match) => ({
+      index: match.index ?? 0,
+      script: match[1] ?? '',
+    })),
   ];
   return found.sort((a, b) => a.index - b.index).map((entry) => entry.script);
+}
+
+/**
+ * A `yarn <script>` command in command position: yarn's spelling of the
+ * `npm run <script>` form, resolving the same script names — `yarn test`
+ * is the `test` script, `yarn test:coverage` the script of that name.
+ * The name must END there, so `yarn testing` is not the `test` script.
+ */
+const YARN_RUN_COMMAND = /(?:^|[\s;&|(`'"])yarn[ \t]+(?:run)?[ \t]*([\w:.-]+)/g;
+
+/**
+ * A `vitest run` invocation in command position: `npx vitest run …`, or a
+ * bare `vitest run …`. The tail of the match is the command's own
+ * arguments, which may name FILE FILTERS.
+ *
+ * The spelling matters: the derived gate set names npm SCRIPTS, and a job
+ * that invokes vitest directly — the spelling `live-e2e.yml` already uses
+ * — named no script at all, so it was not a gate job and no checkout depth
+ * was demanded of it. A `vitest run` over the WHOLE suite runs the
+ * release guard, so it is one.
+ *
+ * The `--run` spelling counts too: `vitest --run` is the same command
+ * without the `run` subcommand, and it runs the same suite.
+ */
+const VITEST_RUN_COMMAND =
+  /(?:^|[\s;&|(`'"])(?:npx)?[ \t]*vitest[ \t]+(?:run|--run)\b([^\n;&|)]*)/g;
+
+/**
+ * The options that select tests by NAME rather than by file: `-t` and
+ * `--testNamePattern`. Such a run does not narrow the FILE set, so the
+ * whole suite — the release guard included — is what runs.
+ */
+const NAME_PATTERN_OPTIONS = new Set(['-t', '--testNamePattern']);
+
+/**
+ * A `vitest` invocation's own words, with a quoted string kept as ONE
+ * token: a test-name pattern (`-t "release guard"`) is two words to the
+ * shell but one argument to vitest.
+ */
+function vitestTokens(tail: string): string[] {
+  const tokens: string[] = [];
+  let current = '';
+  let quote = '';
+  for (const char of tail) {
+    if (quote) {
+      if (char === quote) {
+        quote = '';
+        continue;
+      }
+      current += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) tokens.push(current);
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+/**
+ * The file filters a `vitest` invocation names, and whether it selected
+ * tests by NAME.
+ *
+ * Every positional token is a filter, not just the first: a run may name
+ * several files, and it reaches the release guard when ANY of them is the
+ * guard's own file. A token right after an option is that option's VALUE
+ * (`--exclude test/live.test.ts`), not a filter: such a run still covers
+ * the whole suite but one file, so it is treated as no filter at all.
+ */
+function vitestFileFilters(tail: string): { filters: string[]; namePattern: boolean } {
+  const tokens = vitestTokens(tail);
+  const filters: string[] = [];
+  let namePattern = false;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index] ?? '';
+    if (!token.startsWith('-')) {
+      filters.push(token);
+      continue;
+    }
+    if (NAME_PATTERN_OPTIONS.has(token.split('=')[0] ?? token)) namePattern = true;
+    if (!token.includes('=')) {
+      const next = tokens[index + 1];
+      if (next !== undefined && !next.startsWith('-')) index += 1;
+    }
+  }
+  return { filters, namePattern };
+}
+
+/**
+ * Whether a filter names a WHOLE SET of files rather than one file: a glob
+ * (any name holding a `*` or a `?`), a directory (`test`, `test/`), or a
+ * name with no file extension at all. Such a filter reaches every file
+ * under it, the release guard included.
+ */
+function namesAWholeSuite(token: string): boolean {
+  if (/[*?[\]{}]/.test(token)) return true;
+  if (token.endsWith('/')) return true;
+  if (/\.[A-Za-z0-9]+$/.test(token)) return false;
+  return true;
+}
+
+/**
+ * Whether a `vitest` invocation's tail reaches the file that holds the
+ * release guard.
+ *
+ * A whole-suite run is a gate run: the release guard is one of its files,
+ * and a shallow checkout leaves it asserting nothing. A run with explicit
+ * file filters runs THOSE files only, so it is a gate run when one of them
+ * is the release guard's own file.
+ */
+function vitestReachesReleaseGuard(tail: string): boolean {
+  const { filters, namePattern } = vitestFileFilters(tail);
+  // A name pattern selects by NAME, not by file: the file set stays whole.
+  if (namePattern) return true;
+  // No filter at all: the whole suite runs, the release guard included.
+  if (filters.length === 0) return true;
+  for (const filter of filters) {
+    if (filter.includes('install-paths')) return true;
+    if (namesAWholeSuite(filter)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether a run value invokes vitest over the file that holds the
+ * release guard — either the whole suite, or that file itself.
+ */
+function runsReleaseGuardSuite(run: string): boolean {
+  for (const match of run.matchAll(VITEST_RUN_COMMAND)) {
+    if (vitestReachesReleaseGuard(match[1] ?? '')) return true;
+  }
+  return false;
+}
+
+/**
+ * The depth a `fetch-depth` value asks for, with a LITERAL expression
+ * resolved.
+ *
+ * GitHub evaluates `${{ … }}` before the action reads the input, so
+ * `fetch-depth: ${{ 0 }}` asks for depth 0 exactly as `fetch-depth: 0`
+ * does, and reading the raw text would fail a workflow that is correct.
+ * Only a LITERAL is resolved — an expression that names something else
+ * (`${{ inputs.depth }}`, `${{ matrix.depth }}`) cannot be read out of the
+ * workflow text at all, so the value is returned as written and the guard
+ * says what it can and cannot read.
+ */
+function resolveFetchDepth(value: string): string {
+  const expression = /^\$\{\{\s*(.+?)\s*\}\}$/.exec(value);
+  if (expression === null) return value;
+  const literal = expression[1] ?? '';
+  if (/^\d+$/.test(literal)) return literal;
+  const quoted = /^["'](\d+)["']$/.exec(literal);
+  return quoted === null ? value : (quoted[1] ?? '');
 }
 
 /**
@@ -348,8 +513,11 @@ function actionRepository(uses: string): string {
 function gateConsumerSteps(job: Job): number[] {
   const found: number[] = [];
   job.steps.forEach((step, index) => {
-    const invoked = invokedScripts(step.run ?? '');
-    if (invoked.some((name) => GATE_SCRIPTS.includes(name))) found.push(index);
+    const run = step.run ?? '';
+    const invoked = invokedScripts(run);
+    if (invoked.some((name) => GATE_SCRIPTS.includes(name)) || runsReleaseGuardSuite(run)) {
+      found.push(index);
+    }
   });
   return found;
 }
@@ -764,7 +932,7 @@ describe('the workflow files — what the merge gate runs', () => {
       );
       expect(checkout, `${file}: job \`${job}\` has no checkout step`).toBeDefined();
       expect(
-        String(checkout?.with['fetch-depth'] ?? ''),
+        resolveFetchDepth(String(checkout?.with['fetch-depth'] ?? '')),
         `${file}: job \`${job}\` must check out the full history`,
       ).toBe('0');
       checked += 1;
@@ -818,5 +986,94 @@ describe('the workflow files — what the merge gate runs', () => {
         'verify-packed.mjs',
       );
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The derived gate set — the spellings that reach the release guard.
+// ---------------------------------------------------------------------------
+
+/**
+ * How a job is recognised as a GATE job — the spellings that run the
+ * release guard without naming an npm script, and the checkout depth a
+ * gate job is read as asking for.
+ */
+describe('the derived gate set — the spellings that reach the release guard', () => {
+  /** The jobs of a synthetic workflow that run the gate. */
+  function gateJobs(run: string): string[] {
+    const workflow = parseWorkflow(
+      ['jobs:', '  gate:', '    steps:', `      - run: ${run}`].join('\n'),
+      'literal.yml',
+    );
+    return workflow.jobs.filter((job) => gateConsumerSteps(job).length > 0).map((job) => job.key);
+  }
+
+  it('reads every spelling that reaches the release guard as a gate job', () => {
+    // The classification, pinned on the matcher itself. Every spelling
+    // below RUNS the release guard: a filter that names it, a filter SET
+    // that names it among others, a directory, a glob, a test-name
+    // pattern, and the `--run` spelling without the `run` subcommand. A
+    // job that uses one of them runs the guard, so it must carry the tags
+    // a shallow checkout does not have.
+    const gate = [
+      'npx vitest run',
+      'npx vitest --run',
+      'npx vitest run test/install-paths.test.ts',
+      'npx vitest run test/live.test.ts test/install-paths.test.ts',
+      'npx vitest run test/',
+      'npx vitest run test',
+      'npx vitest run test/**',
+      'npx vitest run **/*.test.ts',
+      'npx vitest run -t "release guard"',
+      'npx vitest run --exclude test/live.test.ts',
+    ];
+    for (const run of gate) {
+      expect(runsReleaseGuardSuite(run), `${run} must be read as a gate run`).toBe(true);
+      expect(gateJobs(run), `${run} must make the job a gate job`).toEqual(['gate']);
+    }
+
+    // The CONTROL: a run filtered to another file runs that file only, so
+    // it does not reach the release guard and is not a gate job. This is
+    // the spelling `live-e2e.yml` uses, and it must not be forced to
+    // carry the tags.
+    // The same suite, run through yarn's spelling of the `test` script:
+    // a SCRIPT invocation rather than a vitest one, so it is read by the
+    // derived script set instead of the matcher — and it is a gate job.
+    expect(gateJobs('yarn test')).toEqual(['gate']);
+
+    const control = 'npx vitest run test/live.test.ts';
+    expect(runsReleaseGuardSuite(control), `${control} must not be read as a gate run`).toBe(false);
+    expect(gateJobs(control)).toEqual([]);
+  });
+
+  it('reads a fetch-depth written as a literal expression', () => {
+    // GitHub evaluates `${{ … }}` before the action reads the input, so
+    // `fetch-depth: ${{ 0 }}` asks for depth 0 exactly as `fetch-depth: 0`
+    // does. Reading the raw text failed a workflow that is correct — the
+    // guard was expression-blind in the unsafe direction, rejecting a
+    // legitimate spelling instead of reading it.
+    const expression = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - name: Check out',
+      '        uses: actions/checkout@abc123',
+      '        with:',
+      '          fetch-depth: ${{ 0 }}',
+    ].join('\n');
+    const workflow = parseWorkflow(expression, 'literal.yml');
+    const checkout = workflow.jobs[0]?.steps.find((step) =>
+      step.uses?.startsWith('actions/checkout'),
+    );
+    expect(checkout, 'the literal workflow has no checkout step').toBeDefined();
+    expect(
+      resolveFetchDepth(String(checkout?.with['fetch-depth'] ?? '')),
+      'a fetch-depth written as a literal expression must read as the value',
+    ).toBe('0');
+
+    // An expression that names something else cannot be read out of the
+    // workflow text, so it is returned as written — the guard says what
+    // it can and cannot read rather than guessing.
+    expect(resolveFetchDepth('${{ inputs.depth }}')).toBe('${{ inputs.depth }}');
   });
 });

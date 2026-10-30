@@ -1730,9 +1730,10 @@ surface it"_).
 
 | Test file                                                          | Reads                                                                                                                                                           | Cost of a false failure                                                                                                                         |
 | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/install-paths.test.ts:55,59,127,132,214,219,365,592,604,826` | **7** repo files: `package.json`, `src/cli.ts`, `scripts/prepare.mjs`, `Dockerfile`, `ci.yml`, `release.yml`, `live-e2e.yml`; plus the repository's tag history | renaming a script or env var breaks the test — **editing any workflow file breaks it** — a moved or pruned tag changes what the guard concludes |
-| `test/ci-workflow.test.ts` (1 876 lines)                           | **all** `.yml`/`.yaml` in `.github/workflows/` (`:61-66`, `:918`, `:945`, `:1030`, `:1384`) and `package.json` (`:52`)                                          | **any** reformat of **any** workflow file breaks the guard — see CR-30                                                                          |
-| `test/openapi-conformance.test.ts:1000-2072`                       | the SYMBOLS of `src/titan/http-server.ts` — its declarations, path constants and dispatch branches — plus `docs/openapi.yaml` and `vitest.config.ts`            | renaming a cited symbol, or moving a handler to another route, breaks the suite — see CR-11                                                     |
+| `test/install-paths.test.ts:110,336,341,539,766,840,857,1120,1136` | **11** files: `package.json`, `src/cli.ts`, `scripts/{prepare,copy-assets}.mjs`, `src/titan/ui*`, `Dockerfile`, `.github/workflows/*.yml`; plus the tag history | renaming a script or env var breaks the test — **editing any workflow file breaks it** — a moved or pruned tag changes what the guard concludes |
+| `test/ci-workflow.test.ts` (1 079 lines)                           | **all** `.yml`/`.yaml` in `.github/workflows/` (read by `test/workflows.ts:110,141`), `package.json` (`:58`), `docs/SPEC.md` (`:748`), `AGENTS.md` (`:774`)     | a reformat of a workflow file does NOT break it — the guard reads the document, not its text — but a change to a job's shape does               |
+| `test/eslint-scope.test.ts:42`                                     | the bytes of `src/titan/ui-client.js` and the `src/titan/ui.ts` module that serves them                                                                         | re-inlining the browser script into `src/titan/ui.ts` fails the byte-for-byte check                                                             |
+| `test/openapi-conformance.test.ts:1159-2194`                       | the SYMBOLS of `src/titan/http-server.ts` — its declarations, path constants and dispatch branches — plus `docs/openapi.yaml` and `vitest.config.ts`            | renaming a cited symbol, or moving a handler to another route, breaks the suite — see CR-11                                                     |
 | `test/markdown-tables.test.ts:152-171`                             | the text of every tracked `.md`                                                                                                                                 | a malformed table fails the suite                                                                                                               |
 | `test/no-conflict-markers.test.ts:75-96`                           | the text of every tracked file                                                                                                                                  | a conflict marker fails the suite                                                                                                               |
 | `test/{ci-scanner-jobs,release-guard,spec-limits}.test.ts`         | `.github/workflows/ci.yml`, `tools/security-scan.sh`, `scripts/verify-packed.mjs`, `eslint.config.mjs` and `docs/SPEC.md`                                       | renaming a scanner input or narrowing a scanner set breaks the guard — the cost is a scan that silently stopped scanning                        |
@@ -1740,7 +1741,7 @@ surface it"_).
 | `test/lint-contract.test.ts` (added by CR-19)                      | the text of `docs/SPEC.md` §7.1's lint-rules table and of `eslint.config.mjs`'s own rule blocks                                                                 | editing either file's rule set without following the other fails the suite                                                                      |
 
 **Assessment:** the first two are defensible inter-file contract tests —
-`install-paths.test.ts:36-40` states the rationale explicitly and each
+`install-paths.test.ts:44-52` states the rationale explicitly and each
 assertion names the file it reads — but their blast radius is wider than the
 "Reads" column first suggested, and the table above now names every file.
 Two edits that the earlier form of this table did not disclose were confirmed
@@ -1753,7 +1754,8 @@ are structural rather than textual-brittle, and both document precisely what
 they cannot see (a marker inside a fenced block; a setext `=======` underline)
 and skip vacuously rather than falsely when there is no git checkout
 (`markdown-tables.test.ts:155-162`). The cost asymmetry in
-`ci-workflow.test.ts` is the one that is not defensible — see CR-30.
+`ci-workflow.test.ts` was the one that was not defensible — see CR-30, whose
+own fix rewrites that guard to read the workflows as YAML instead of as text.
 
 ---
 

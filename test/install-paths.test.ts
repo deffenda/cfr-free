@@ -42,10 +42,13 @@ import { describe, expect, it } from 'vitest';
  * instead of in a stranger's terminal.
  *
  * The file list is read from the repository root, so this test asserts on
- * the TEXT of four other files (`package.json`, `src/cli.ts`, `Dockerfile`,
- * `scripts/prepare.mjs`). That is deliberate: each assertion below is about
- * an INTER-FILE contract that no single-file test can see, and each names
- * the file it reads.
+ * the TEXT of eleven other files (`package.json`, `src/cli.ts`,
+ * `scripts/prepare.mjs`, `scripts/copy-assets.mjs`, `src/titan/ui.ts`,
+ * `src/titan/ui-client.js`, `src/titan/ui-client.css`, `Dockerfile`,
+ * `ci.yml`, `release.yml`, `live-e2e.yml`) and on the repository's TAG
+ * HISTORY (`git tag`, `git show <tag>:package.json`). That is deliberate:
+ * each assertion below is about an INTER-FILE contract that no single-file
+ * test can see, and each names the file it reads.
  */
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -164,6 +167,117 @@ function releasingTagFindings(tag: string, version: string): string[] {
     `${tag} is not a release version — a release tag is vX.Y.Z, optionally with a pre-release part (vX.Y.Z-rc.N)`,
   ];
 }
+
+/** The facts the release guard's decision reads. */
+interface VersionVerdictInput {
+  /** The version the manifest declares. */
+  readonly current: string;
+  /** The newest released tag, e.g. `v0.2.1`. */
+  readonly newestTag: string;
+  /** The version that tag claims, e.g. `0.2.1`. */
+  readonly newestVersion: string;
+  /** The version the tag's OWN tree declared. */
+  readonly atTag: string;
+  /** The commit this tree is at (HEAD). */
+  readonly head: string;
+  /** The commit the tag was cut from. */
+  readonly tagCommit: string;
+}
+
+/**
+ * What the release guard requires of the manifest's version against the
+ * newest released tag: the findings, empty when the tree holds.
+ *
+ * The decision is a PURE function of its inputs, so every branch is
+ * exercised by a test instead of only by the incidental state of the
+ * working tree. That matters because the branches were DEAD CODE: at the
+ * head of this branch the manifest sat at 0.2.2 and the newest tag at
+ * v0.2.1, so the `relation === 0` branch never ran — and both branches
+ * could be deleted with the whole suite still green. A branch no test
+ * reaches is a branch no test can catch being broken, and the branch that
+ * mattered most (the tree must still be the commit the release was cut
+ * from) was reachable only through the working tree's own version.
+ *
+ * The findings, in the order the guard reports them:
+ *  - a version BEHIND the newest release cannot be published again;
+ *  - a version EQUAL to the newest release's is legitimate only on the
+ *    commit that release was cut from, and only when that tag's own tree
+ *    declared the same version.
+ */
+function versionVerdict(input: VersionVerdictInput): string[] {
+  const findings: string[] = [];
+  const relation = compareVersions(parseVersion(input.current), parseVersion(input.newestVersion));
+  if (relation < 0) {
+    findings.push(
+      `package.json ${input.current} is BEHIND the released tag ${input.newestTag} — the version ` +
+        'must move forward; a release cannot reuse or rewind a published version.',
+    );
+  }
+  if (relation === 0) {
+    // The manifest declares the newest release's version. That is
+    // legitimate only on the tree the release was cut from.
+    if (input.atTag !== input.current) {
+      findings.push(
+        `tag ${input.newestTag} was cut from a tree whose package.json says ${input.atTag}, not ` +
+          `${input.current} — the release names a version this manifest does not declare.`,
+      );
+    } else if (input.head !== input.tagCommit) {
+      findings.push(
+        `package.json ${input.current} is the version of the released tag ${input.newestTag}, but ` +
+          'this tree is not the commit that release was cut from — bump package.json to ' +
+          `a version above ${input.newestTag.slice(1)} before publishing again.`,
+      );
+    }
+  }
+  return findings;
+}
+
+/**
+ * The guard's FAILURE STEP: the findings, when there are any, fail the run.
+ *
+ * The verdict itself is a pure function, so a unit test reaches every
+ * branch of it. What no unit test could reach was the step that turns a
+ * finding into a failure — and that step is where CR-01's state could
+ * hide: replacing the `throw` with a `console.error` computes the finding
+ * and discards it, which is lint-clean and leaves the suite green. So the
+ * step is a function of its own, and a test drives a finding through it.
+ */
+function assertNoFindings(findings: readonly string[]): void {
+  if (findings.length > 0) {
+    throw new Error(findings.join('\n'));
+  }
+}
+
+/**
+ * The facts the release guard reads from THIS checkout, and the verdict it
+ * reaches on them: the findings, empty when the tree holds.
+ *
+ * The guard and the test that pins it read the facts through this one
+ * function, so the two cannot drift apart: a guard that judged different
+ * facts than its test checked would assert nothing.
+ */
+function releaseGuardFindings(): string[] {
+  const tags = versionTags();
+  if (tags.length === 0) {
+    throw new Error(
+      'no release tag (vX.Y.Z) found in this checkout — the release guard cannot run. ' +
+        'A checkout without tags (actions/checkout defaults to --depth 1) makes every ' +
+        'check vacuous, so the suite fails instead of passing silently. CI must check ' +
+        'out with fetch-depth: 0; a shallow local clone needs `git fetch --tags`.',
+    );
+  }
+  const newest = tags.reduce((a, b) => (compareVersions(b.version, a.version) > 0 ? b : a));
+  const manifest = readManifest();
+  return versionVerdict({
+    current: manifest.version ?? '',
+    newestTag: newest.tag,
+    newestVersion: newest.tag.slice(1),
+    atTag: manifestVersionAt(newest.tag),
+    head: git('rev-parse', 'HEAD').trim(),
+    tagCommit: git('rev-parse', `${newest.tag}^{commit}`).trim(),
+  });
+}
+
 describe('the npm manifest', () => {
   it('builds on prepare, so a git install ships a working binary', () => {
     // npm runs `prepare` when a package is installed from a git URL, and
@@ -724,6 +838,16 @@ describe('the build copies the UI assets', () => {
     expect(build, 'the build must run the asset copy').toContain('copy-assets.mjs');
 
     const uiModule = readRepoFile('src/titan/ui.ts');
+    // The UI module must read the browser script from a FILE. If the script
+    // were re-inlined into this module as a template literal while
+    // `src/titan/ui-client.js` stayed on disk, the read below would stop
+    // naming the script, the copy-list loop would no longer cover it, and
+    // the linter would keep checking the clean file on disk while the
+    // browser got the inlined one — the whole gate green over a defective
+    // script. The file must still be the source of the served bytes.
+    expect(uiModule, 'the UI module must read the browser script from a file').toContain(
+      "readAsset('ui-client.js')",
+    );
     const read = [...uiModule.matchAll(/readAsset\('([^']+)'\)/g)].map((match) => match[1] ?? '');
     expect(
       read.length,
@@ -855,6 +979,57 @@ describe('the release guard', () => {
     expect(parseVersion('0.3.0-rc.1')).toEqual([0, 3, 0]);
   });
 
+  it('judges the version against the newest release, branch by branch', () => {
+    // The decision the guard makes, exercised directly. It used to live
+    // INSIDE the guard, where its branches ran only when the working
+    // tree happened to hold the state they judged — and the tree held
+    // `relation > 0` (manifest 0.2.2, newest tag v0.2.1), so the
+    // `relation === 0` branch NEVER RAN. Both branches could then be
+    // deleted with the whole suite green, and the manifest could be put
+    // back to 0.2.1 — main's exact pre-pull-request state — with the
+    // suite green as well. Every branch below is pinned here instead, so
+    // each one is reached whether or not the tree is in that state.
+    const base = {
+      current: '0.2.1',
+      newestTag: 'v0.2.1',
+      newestVersion: '0.2.1',
+      atTag: '0.2.1',
+      head: 'abc1234',
+      tagCommit: 'abc1234',
+    };
+
+    // Past the newest release: the ordinary state of `main` between
+    // releases. No finding.
+    expect(versionVerdict({ ...base, current: '0.2.2' })).toEqual([]);
+
+    // Behind the newest release: a published version cannot be reused or
+    // rewound.
+    const behind = versionVerdict({ ...base, current: '0.2.0' });
+    expect(behind).toHaveLength(1);
+    expect(behind.join(' ')).toContain('is BEHIND the released tag v0.2.1');
+
+    // Equal to the newest release's version, on the commit the release
+    // was cut from: the legitimate form, and no finding.
+    expect(versionVerdict(base)).toEqual([]);
+
+    // Equal to the newest release's version, on a DIFFERENT commit: the
+    // version must move forward again. This is the branch that carried
+    // CR-01's headline state, and it is checked here rather than by the
+    // working tree's own version.
+    const otherCommit = versionVerdict({ ...base, tagCommit: 'def5678' });
+    expect(otherCommit).toHaveLength(1);
+    expect(otherCommit.join(' ')).toContain('not the commit that release was cut from');
+
+    // Equal to the newest release's version, but the tag's own tree
+    // declared another version: the tag names a release this manifest
+    // does not describe (the historical v0.2.0 shape).
+    const inconsistentTag = versionVerdict({ ...base, atTag: '0.1.0' });
+    expect(inconsistentTag).toHaveLength(1);
+    expect(inconsistentTag.join(' ')).toContain(
+      'the release names a version this manifest does not declare',
+    );
+  });
+
   it('has the tags it needs to judge the version', () => {
     // Every check below reads the tag list, so an EMPTY tag list makes them
     // vacuous — they would all pass while asserting nothing. That is not a
@@ -907,7 +1082,6 @@ describe('the release guard', () => {
     // that very version, and a manifest that cannot hold it would make
     // every pre-release release fail here first.
     expect(version).toMatch(MANIFEST_VERSION_PATTERN);
-    const current = parseVersion(version);
 
     const releasingTag =
       process.env.GITHUB_REF_TYPE === 'tag' ? (process.env.GITHUB_REF_NAME ?? '') : '';
@@ -921,43 +1095,11 @@ describe('the release guard', () => {
       ).toEqual([]);
     }
 
-    const tags = versionTags();
-    expect(
-      tags.length,
-      'no release tag (vX.Y.Z) found in this checkout — the release guard cannot ' +
-        'run; see the companion assertion in this describe block.',
-    ).toBeGreaterThan(0);
-
-    const newest = tags.reduce((a, b) => (compareVersions(b.version, a.version) > 0 ? b : a));
-    const relation = compareVersions(current, newest.version);
-
-    if (relation < 0) {
-      throw new Error(
-        `package.json ${version} is BEHIND the released tag ${newest.tag} — the version ` +
-          'must move forward; a release cannot reuse or rewind a published version.',
-      );
-    }
-
-    if (relation === 0) {
-      // The manifest declares the newest release's version. That is
-      // legitimate only on the tree the release was cut from.
-      const atTag = manifestVersionAt(newest.tag);
-      if (atTag !== version) {
-        throw new Error(
-          `tag ${newest.tag} was cut from a tree whose package.json says ${atTag}, not ` +
-            `${version} — the release names a version this manifest does not declare.`,
-        );
-      }
-      const head = git('rev-parse', 'HEAD').trim();
-      const tagCommit = git('rev-parse', `${newest.tag}^{commit}`).trim();
-      if (head !== tagCommit) {
-        throw new Error(
-          `package.json ${version} is the version of the released tag ${newest.tag}, but ` +
-            'this tree is not the commit that release was cut from — bump package.json to ' +
-            `a version above ${newest.tag.slice(1)} before publishing again.`,
-        );
-      }
-    }
+    const findings = releaseGuardFindings();
+    // A finding must FAIL the run, not be computed and discarded: the step
+    // that raises it is `assertNoFindings`, and a test drives a finding
+    // through that very step.
+    assertNoFindings(findings);
   });
 });
 
@@ -1008,4 +1150,43 @@ describe('the packed artifact', () => {
       rmSync(staging, { recursive: true, force: true });
     }
   }, 60_000);
+});
+
+/**
+ * The release guard's WIRING: the step that turns a finding into a failure,
+ * and the facts it reads in this checkout.
+ *
+ * The verdict is unit-tested branch by branch, and the guard's own state
+ * exercises it only when the tree happens to hold a state the verdict
+ * finds. The two steps between them — GATHER the facts, RAISE the
+ * finding — are what a one-line edit can break without any test
+ * noticing, so each is pinned here.
+ */
+describe('the release guard — the wiring from verdict to failure', () => {
+  it('fails the run when the verdict has a finding', () => {
+    // The step the guard's own state cannot reach: this tree holds, so the
+    // guard finds nothing and the failure step never runs. Swapping the
+    // `throw` for a `console.error` would compute the finding and discard
+    // it — lint-clean, and green. So the step is driven here with a
+    // finding it cannot ignore.
+    expect(() =>
+      assertNoFindings(['package.json 0.2.1 is BEHIND the released tag v0.2.1']),
+    ).toThrow('package.json 0.2.1 is BEHIND the released tag v0.2.1');
+
+    // And a run with nothing to report must NOT fail: the step is not a
+    // blanket failure, and the guard's green state depends on it.
+    expect(() => assertNoFindings([])).not.toThrow();
+  });
+
+  it('finds no violation in this checkout', () => {
+    // The live facts, as an assertion rather than a thrown error: when the
+    // tree is in CR-01's state — the manifest back at the released
+    // version, on a tree that is not the commit the release was cut from
+    // — this fails WHATEVER the failure step does. The guard's own test
+    // reads the same facts through the same function.
+    expect(
+      releaseGuardFindings(),
+      'the release guard must find no violation in this checkout',
+    ).toEqual([]);
+  });
 });
