@@ -44,8 +44,8 @@ export function isIssueDateString(value: string): boolean {
  *
  * The upstream fetches are the expensive ones: the complete Title 38
  * document is ~2 MB on the wire and ~16 MB parsed, and a peer with the
- * published image's budget could otherwise have hundreds of them in
- * flight at once.
+ * published image's budget could otherwise have tens of them in flight
+ * at once.
  */
 export const DEFAULT_MAX_CONCURRENT_FETCHES = 4;
 
