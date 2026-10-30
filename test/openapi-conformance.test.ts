@@ -35,7 +35,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
-import { resolve, sep } from 'node:path';
+import { resolve, sep, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import ts from 'typescript';
@@ -1079,6 +1079,18 @@ const GENERAL_CONSTRUCTS = [
 const ROUTER_FILE = 'src/titan/http-server.ts';
 
 /**
+ * True when `file` names the router.
+ *
+ * The path is NORMALIZED before the comparison: the expectations and the
+ * route binding belong to the router's CONTRACT, and a citation that
+ * spells the same file as `./src/titan/http-server.ts` must not slip out
+ * of it by spelling it differently.
+ */
+function isRouterFile(file: string): boolean {
+  return posix.normalize(file) === ROUTER_FILE;
+}
+
+/**
  * The constructs a citation of `symbol` in `file` expects its declaration
  * to carry.
  *
@@ -1087,7 +1099,7 @@ const ROUTER_FILE = 'src/titan/http-server.ts';
  * list, not to the router's contract.
  */
 function expectedConstructs(file: string, symbol: string): readonly string[] {
-  if (file === ROUTER_FILE) return SYMBOL_CONSTRUCTS[symbol] ?? GENERAL_CONSTRUCTS;
+  if (isRouterFile(file)) return SYMBOL_CONSTRUCTS[symbol] ?? GENERAL_CONSTRUCTS;
   return GENERAL_CONSTRUCTS;
 }
 
@@ -1111,11 +1123,16 @@ const BARE_SYMBOL_RE = /^[A-Za-z_$][\w$]*$/;
 /**
  * An inline `file#symbol` anchor in the document's prose.
  *
- * The file part must end in a SOURCE extension: without that, a URL with
- * a word fragment (`example.com#intro`) would be read as an anchor, and
- * the suite would fail on a link rather than on a citation.
+ * The file part must be a PATH inside the repository — a directory as well
+ * as a file — and it must end in a SOURCE or ASSET extension. Without the
+ * first, a link with a word fragment (`example.com#intro`) would be read
+ * as an anchor, and the suite would fail on a link rather than on a
+ * citation. Without the second, a citation of a file the suite cannot
+ * read would be skipped in silence — the defect this suite exists to
+ * catch.
  */
-const INLINE_ANCHOR_RE = /([\w./-]+\.(?:ts|tsx|js|mjs|cjs|json|ya?ml|md))#([A-Za-z_$][\w$]*)/g;
+const INLINE_ANCHOR_RE =
+  /((?=[\w./-]*\/)[\w./-]+\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json|ya?ml|md|css|html|htm))#([A-Za-z_$][\w$]*)/g;
 
 /** One symbol a citation names, and the file it must be defined in. */
 interface CitedSymbol {
@@ -1149,6 +1166,93 @@ function splitTail(tail: string): readonly string[] {
 }
 
 /**
+ * What a wrapped parenthetical contributed: the symbols it names, and the
+ * segments it should be read as.
+ */
+interface Wrapped {
+  readonly symbols: readonly CitedSymbol[];
+  /** Segments to put back on the queue — a pair is unwrapped into them. */
+  readonly segments: readonly string[];
+}
+
+/**
+ * Read one wrapped parenthetical.
+ *
+ * A wrapped PAIR names a symbol: it is unwrapped and read as segments. A
+ * wrapped BARE word is the ambiguous case — "(the router)" is prose and
+ * "(handleSearch)" is a citation, and the shape alone cannot tell them
+ * apart. So the FILE decides: a word the inherited file declares is a
+ * citation, and a word it does not declare is prose. `isDeclared` answers
+ * that question; without it a wrapped bare word is prose, because a word
+ * nothing declares must never become a violation.
+ */
+function readWrapped(
+  inner: string,
+  file: string,
+  isDeclared?: (file: string, symbol: string) => boolean,
+): Wrapped {
+  if (inner.includes('#')) return { symbols: [], segments: splitTail(inner) };
+  if (isDeclared === undefined || file === '' || !BARE_SYMBOL_RE.test(inner)) {
+    return { symbols: [], segments: [] };
+  }
+  const symbols: CitedSymbol[] = isDeclared(file, inner)
+    ? [{ file, symbol: inner, wellFormed: true }]
+    : [];
+  return { symbols, segments: [] };
+}
+
+/** What one segment of a tail contributes. */
+interface Read {
+  readonly symbols: readonly CitedSymbol[];
+  /** Segments to put back on the queue — a pair is unwrapped into them. */
+  readonly segments: readonly string[];
+  /** The file the segment leaves behind as the inherited one. */
+  readonly file: string;
+}
+
+/**
+ * Read one segment of a citation tail.
+ *
+ * A segment may carry parentheticals, and they are prose ("the router",
+ * "revalidatable send", "encoding, URL parse, byte caps"). A bare word
+ * among them is a citation only if the file declares it — see
+ * `readWrapped`.
+ */
+function readSegment(
+  segment: string,
+  file: string,
+  isDeclared?: (file: string, symbol: string) => boolean,
+): Read {
+  const symbols: CitedSymbol[] = [];
+  const segments: string[] = [];
+  let inherited = file;
+  for (const part of segment.split(/(\([^)]*\))/)) {
+    const text = part.trim();
+    if (text === '') continue;
+    if (text.startsWith('(') && text.endsWith(')')) {
+      const wrapped = readWrapped(text.slice(1, -1).trim(), inherited, isDeclared);
+      symbols.push(...wrapped.symbols);
+      segments.push(...wrapped.segments);
+      continue;
+    }
+    const pair = SYMBOL_PAIR_RE.exec(text);
+    if (pair !== null) {
+      inherited = pair[1] ?? '';
+      symbols.push({ file: inherited, symbol: pair[2] ?? '', wellFormed: true });
+      continue;
+    }
+    if (BARE_SYMBOL_RE.test(text) && inherited !== '') {
+      symbols.push({ file: inherited, symbol: text, wellFormed: true });
+      continue;
+    }
+    // An unparsable token is a violation, never a silent skip: a citation
+    // that names nothing checks out nothing.
+    symbols.push({ file: inherited, symbol: text, wellFormed: false });
+  }
+  return { symbols, segments, file: inherited };
+}
+
+/**
  * The symbols a `# source:` tail names.
  *
  * A parenthetical is prose ("(the router)", "(encoding, URL parse, byte
@@ -1159,10 +1263,12 @@ function splitTail(tail: string): readonly string[] {
  *
  * The rule for which is which is the PAIR: a wrapped segment names a
  * symbol when it carries a `file#symbol` pair, because a pair says which
- * file it is about. A wrapped bare word carries no file, so it cannot be
- * checked against one — it is prose, and it stays prose.
+ * file it is about.
  */
-function citedSymbols(tail: string): CitedSymbol[] {
+function citedSymbols(
+  tail: string,
+  isDeclared?: (file: string, symbol: string) => boolean,
+): CitedSymbol[] {
   const cited: CitedSymbol[] = [];
   let file = '';
   const pending = [...splitTail(tail)];
@@ -1170,30 +1276,10 @@ function citedSymbols(tail: string): CitedSymbol[] {
     const raw = pending.shift() ?? '';
     const segment = raw.trim();
     if (segment === '') continue;
-    if (segment.startsWith('(') && segment.endsWith(')')) {
-      const inner = segment.slice(1, -1).trim();
-      // A wrapped PAIR names a symbol and is a citation, unwrapped and
-      // checked. A wrapped bare word names no file, so it cannot be
-      // checked against one: it is prose, and it stays prose.
-      if (!inner.includes('#')) continue;
-      pending.unshift(...splitTail(inner));
-      continue;
-    }
-    const token = segment.replace(/\([^)]*\)/g, ' ').trim();
-    if (token === '') continue;
-    const pair = SYMBOL_PAIR_RE.exec(token);
-    if (pair !== null) {
-      file = pair[1] ?? '';
-      cited.push({ file, symbol: pair[2] ?? '', wellFormed: true });
-      continue;
-    }
-    if (BARE_SYMBOL_RE.test(token) && file !== '') {
-      cited.push({ file, symbol: token, wellFormed: true });
-      continue;
-    }
-    // An unparsable token is a violation, never a silent skip: a citation
-    // that names nothing checks out nothing.
-    cited.push({ file, symbol: token, wellFormed: false });
+    const read = readSegment(segment, file, isDeclared);
+    cited.push(...read.symbols);
+    file = read.file;
+    pending.unshift(...read.segments);
   }
   return cited;
 }
@@ -1241,9 +1327,71 @@ function declaredName(node: ts.Node): string | null {
   return declarationName(node) ?? memberName(node);
 }
 
-/** The cited file, parsed by the TypeScript compiler. */
-function parseCited(source: string): ts.SourceFile {
-  return ts.createSourceFile('cited.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+/**
+ * The parsed form of a cited file: the compiler's tree, the names it
+ * declares, the path constants it holds, and what each of those
+ * constants' branches calls.
+ *
+ * The file is parsed ONCE and everything is read out of it in ONE walk.
+ * The resolver asks the same file the same questions many times — once
+ * per citation, once per wrapped bare word, once per route binding — and
+ * walking the tree again for each of them cost the suite its timeout.
+ */
+interface CitedFile {
+  /** Every name the file declares, mapped to its declaration text. */
+  readonly names: ReadonlyMap<string, string>;
+  /** The path constants the file holds. */
+  readonly paths: readonly { readonly name: string; readonly path: string }[];
+  /** The symbols each path constant's branch calls. */
+  readonly branches: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
+const citedFiles = new Map<string, CitedFile>();
+
+function citedFile(source: string): CitedFile {
+  const cached = citedFiles.get(source);
+  if (cached !== undefined) return cached;
+  const tree = ts.createSourceFile(
+    'cited.ts',
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const names = new Map<string, string>();
+  const paths: { name: string; path: string }[] = [];
+  const branches = new Map<string, Set<string>>();
+  const visit = (node: ts.Node): void => {
+    const name = declaredName(node);
+    if (name !== null && !names.has(name)) names.set(name, node.getText(tree));
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+      const init = node.initializer;
+      if (init !== undefined && ts.isStringLiteral(init)) {
+        paths.push({ name: node.name.text, path: init.text });
+      }
+    }
+    if (ts.isIfStatement(node)) {
+      // The router compares the path against a constant and calls one
+      // handler: the branch is the authority on which handler serves
+      // which route.
+      const called = new Set<string>();
+      const inner = (current: ts.Node): void => {
+        if (ts.isIdentifier(current)) called.add(current.text);
+        ts.forEachChild(current, inner);
+      };
+      inner(node.thenStatement);
+      for (const constant of identifierNames(node.expression)) {
+        const existing = branches.get(constant);
+        if (existing === undefined) branches.set(constant, new Set(called));
+        else for (const name of called) existing.add(name);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(tree);
+  const file: CitedFile = { names, paths, branches };
+  citedFiles.set(source, file);
+  return file;
 }
 
 /**
@@ -1255,18 +1403,7 @@ function parseCited(source: string): ts.SourceFile {
  * all, and a method is a declaration wherever it lives.
  */
 function declarationText(source: string, symbol: string): string | null {
-  const parsed = parseCited(source);
-  let found: string | null = null;
-  const visit = (node: ts.Node): void => {
-    if (found !== null) return;
-    if (declaredName(node) === symbol) {
-      found = node.getText(parsed);
-      return;
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(parsed);
-  return found;
+  return citedFile(source).names.get(symbol) ?? null;
 }
 
 /**
@@ -1275,19 +1412,7 @@ function declarationText(source: string, symbol: string): string | null {
 function pathConstants(
   source: string,
 ): readonly { readonly name: string; readonly path: string }[] {
-  const parsed = parseCited(source);
-  const found: { name: string; path: string }[] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
-      const init = node.initializer;
-      if (init !== undefined && ts.isStringLiteral(init)) {
-        found.push({ name: node.name.text, path: init.text });
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(parsed);
-  return found;
+  return citedFile(source).paths;
 }
 
 /**
@@ -1317,26 +1442,7 @@ function identifierNames(node: ts.Node): readonly string[] {
  * repointed at another route's handler fail.
  */
 function branchCalls(source: string, constant: string, symbol: string): boolean {
-  const parsed = parseCited(source);
-  let called = false;
-  const visit = (node: ts.Node): void => {
-    if (called) return;
-    if (ts.isIfStatement(node) && identifierNames(node.expression).includes(constant)) {
-      const inner = (current: ts.Node): void => {
-        if (called) return;
-        if (ts.isIdentifier(current) && current.text === symbol) {
-          called = true;
-          return;
-        }
-        ts.forEachChild(current, inner);
-      };
-      inner(node.thenStatement);
-      return;
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(parsed);
-  return called;
+  return citedFile(source).branches.get(constant)?.has(symbol) ?? false;
 }
 
 /** The repository root — a cited path may not leave it. */
@@ -1351,6 +1457,25 @@ function citedFilePath(file: string): string | null {
   const resolved = resolve(REPO_ROOT, file);
   if (resolved !== REPO_ROOT && !resolved.startsWith(`${REPO_ROOT}${sep}`)) return null;
   return resolved;
+}
+
+/**
+ * The source of a cited file, cached by its path.
+ *
+ * The resolver reads the same cited file once per citation and once per
+ * wrapped bare word; reading it from disk each time was pure overhead.
+ */
+const sourceCache = new Map<string, string>();
+
+function citedSource(file: string): string | null {
+  const path = citedFilePath(file);
+  if (path === null) return null;
+  const cached = sourceCache.get(path);
+  if (cached !== undefined) return cached;
+  if (!existsSync(path)) return null;
+  const source = readFileSync(path, 'utf8');
+  sourceCache.set(path, source);
+  return source;
 }
 
 /**
@@ -1380,10 +1505,13 @@ function checkDeclaration(
  * The violation message for one cited symbol, or null when it checks out.
  */
 function checkCitation(where: string, file: string, symbol: string): string | null {
-  const path = citedFilePath(file);
-  if (path === null) return `${where} — ${file} resolves outside the repository`;
-  if (!existsSync(path)) return `${where} — ${file} does not exist`;
-  return checkDeclaration(where, file, readFileSync(path, 'utf8'), symbol);
+  const source = citedSource(file);
+  if (source === null) {
+    const path = citedFilePath(file);
+    if (path === null) return `${where} — ${file} resolves outside the repository`;
+    return `${where} — ${file} does not exist`;
+  }
+  return checkDeclaration(where, file, source, symbol);
 }
 
 /**
@@ -1549,9 +1677,15 @@ describe('OpenAPI source citations (docs/openapi.yaml # source: lines)', () => {
     const specText = readFileSync(SPEC_PATH, 'utf8');
     const violations: string[] = [];
     let citations = 0;
+    // A wrapped bare word is a citation only if the file declares it, so
+    // the parser asks the file.
+    const isDeclared = (file: string, symbol: string): boolean => {
+      const source = citedSource(file);
+      return source !== null && declarationText(source, symbol) !== null;
+    };
     for (const citation of citationsIn(specText)) {
       const path = citation.path;
-      for (const cited of citedSymbols(citation.tail)) {
+      for (const cited of citedSymbols(citation.tail, isDeclared)) {
         citations += 1;
         const where = `docs/openapi.yaml:${citation.line} cites ${cited.file}#${cited.symbol}`;
         if (!cited.wellFormed) {
@@ -1564,6 +1698,10 @@ describe('OpenAPI source citations (docs/openapi.yaml # source: lines)', () => {
           continue;
         }
         if (path === null) continue;
+        // The route binding is a claim about the ROUTER's dispatch. A
+        // citation of another file's symbol is not a claim about a
+        // route, so it is not judged against one.
+        if (!isRouterFile(cited.file)) continue;
         const source = readFileSync(citedFilePath(cited.file) ?? '', 'utf8');
         const bound = checkRouteBinding(where, source, path, cited.symbol);
         if (bound !== null) violations.push(bound);
@@ -1571,7 +1709,7 @@ describe('OpenAPI source citations (docs/openapi.yaml # source: lines)', () => {
     }
     expect(citations, 'docs/openapi.yaml must contain # source: citations').toBeGreaterThan(0);
     expect(violations, 'drifted # source: citations in docs/openapi.yaml').toEqual([]);
-  });
+  }, 30_000);
 
   it('every inline anchor in the document names a symbol that exists', () => {
     // The response descriptions name the symbol they come from in prose,
@@ -1812,7 +1950,14 @@ describe('OpenAPI citation resolver: guards pinned against fixtures', () => {
     // only there: a same-named symbol in another file is held to the general
     // list, not to the router's contract. The same source is a violation in
     // the router and a pass elsewhere.
+    //
+    // They follow the FILE, not the spelling: the expectations belong to
+    // the router's contract, and a citation that writes the same file as
+    // `./src/titan/http-server.ts` names the same contract.
     expect(expectedConstructs('src/titan/http-server.ts', 'handleSearch')).toEqual([
+      'service.search',
+    ]);
+    expect(expectedConstructs('./src/titan/http-server.ts', 'handleSearch')).toEqual([
       'service.search',
     ]);
     expect(expectedConstructs('src/core/other.ts', 'handleSearch')).toEqual(GENERAL_CONSTRUCTS);
@@ -1820,19 +1965,28 @@ describe('OpenAPI citation resolver: guards pinned against fixtures', () => {
       checkDeclaration('w', 'src/titan/http-server.ts', SAME_NAME_FIXTURE, 'handleSearch'),
     ).toContain('service.search');
     expect(
+      checkDeclaration('w', './src/titan/http-server.ts', SAME_NAME_FIXTURE, 'handleSearch'),
+    ).toContain('service.search');
+    expect(
       checkDeclaration('w', 'src/core/other.ts', SAME_NAME_FIXTURE, 'handleSearch'),
     ).toBeNull();
   });
 
-  it('pins the inline anchor: a URL fragment is not an anchor', () => {
-    // The file part of an inline anchor must end in a SOURCE extension:
-    // without that, a link with a word fragment (`example.com#intro`) would
-    // be read as an anchor, and the suite would fail on a link rather than
-    // on a citation.
-    const spec = ['info:', '  description: served by src/titan/http-server.ts#sendJson', ''].join(
-      '\n',
-    );
-    expect(inlineAnchorsIn(spec).map((anchor) => anchor.symbol)).toEqual(['sendJson']);
+  it('pins the inline anchor: a URL fragment is not an anchor, and a source file is', () => {
+    // The file part of an inline anchor must end in a SOURCE or ASSET
+    // extension: without that, a link with a word fragment
+    // (`example.com#intro`) would be read as an anchor, and the suite
+    // would fail on a link rather than on a citation. It must also name a
+    // PATH inside the repository — a bare filename names no place.
+    //
+    // The list is wide enough for the repository's own assets: a citation
+    // of the stylesheet must not be skipped in silence.
+    const spec = [
+      'info:',
+      '  description: served by src/titan/http-server.ts#sendJson, styled by src/titan/ui-client.css#bodyRule',
+      '',
+    ].join('\n');
+    expect(inlineAnchorsIn(spec).map((anchor) => anchor.symbol)).toEqual(['sendJson', 'bodyRule']);
     const linked = ['info:', '  description: see example.com#intro for details', ''].join('\n');
     expect(inlineAnchorsIn(linked)).toEqual([]);
   });
@@ -1840,13 +1994,36 @@ describe('OpenAPI citation resolver: guards pinned against fixtures', () => {
   it('pins the wrapped citation: a wrapped pair is a citation, a wrapped bare word is prose', () => {
     // The rule for which is which is the PAIR: a wrapped segment names a
     // symbol when it carries a `file#symbol` pair, because a pair says which
-    // file it is about. A wrapped bare word carries no file, so it cannot be
-    // checked against one — it is prose, and it stays prose.
+    // file it is about. A wrapped bare word is the ambiguous case — it
+    // carries no file of its own — so the FILE decides, and that is pinned
+    // by the next test.
     const pair = { file: 'src/titan/http-server.ts', symbol: 'dispatch', wellFormed: true };
     expect(citedSymbols('(src/titan/http-server.ts#dispatch)')).toEqual([pair]);
     expect(citedSymbols('src/titan/http-server.ts#dispatch (the router)')).toEqual([pair]);
     expect(citedSymbols('src/titan/http-server.ts#dispatch, (the router)')).toEqual([pair]);
     expect(citedSymbols('src/titan/http-server.ts#dispatch, (router)')).toEqual([pair]);
+  });
+
+  it('pins the wrapped bare word: the FILE decides whether it is a citation', () => {
+    // "(the router)" is prose and "(handleSearch)" is a citation, and the
+    // shape alone cannot tell them apart. So the FILE decides: a word the
+    // inherited file declares is a citation, and a word it does not
+    // declare is prose. Without the file's answer a wrapped bare word is
+    // prose, because a word nothing declares must never become a
+    // violation.
+    const pair = { file: 'src/titan/http-server.ts', symbol: 'dispatch', wellFormed: true };
+    const declared = { file: 'src/titan/http-server.ts', symbol: 'handleSearch', wellFormed: true };
+    const declares = (_file: string, symbol: string): boolean => symbol === 'handleSearch';
+    expect(citedSymbols('src/titan/http-server.ts#dispatch (handleSearch)', declares)).toEqual([
+      pair,
+      declared,
+    ]);
+    // The same word, when the file does not declare it, is prose.
+    expect(citedSymbols('src/titan/http-server.ts#dispatch (handleSearch)', () => false)).toEqual([
+      pair,
+    ]);
+    // And with no file to ask, it is prose.
+    expect(citedSymbols('src/titan/http-server.ts#dispatch (handleSearch)')).toEqual([pair]);
   });
 
   it('pins the unchecked citation: a route with no path constant is reported, not skipped', () => {
