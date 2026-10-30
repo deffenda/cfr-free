@@ -238,6 +238,21 @@ const ACTIONLINT_INSTALL = 'go install github.com/rhysd/actionlint/cmd/actionlin
 const SEMGREP_INVOCATION = 'scan --config auto --error --quiet';
 
 /**
+ * The semgrep image CI runs, pinned by digest.
+ *
+ * The digest names the image; the version in the comment beside the pin
+ * is a claim about a moment. Pinning the digest HERE as well means the
+ * image the comment names and the image CI pulls cannot drift apart
+ * silently: a repin that leaves the comment behind fails here, and a
+ * repin that changes the comment fails there.
+ */
+const SEMGREP_IMAGE_DIGEST =
+  'sha256:2e45517a85e13a9cca14a2a00df6bb48affd66b8ebfae1b0991cd57578362fb0';
+
+/** The release the pinned digest is: named in the comment beside the pin. */
+const SEMGREP_IMAGE_VERSION = '1.183.0';
+
+/**
  * The scanner jobs, and the step in each that does the scanning.
  *
  * The checkout matters as much as the scan: a scanner job with no
@@ -879,6 +894,23 @@ describe('the workflow files — what the merge gate runs', () => {
       SEMGREP_INVOCATION,
       'the pinned invocation must not exclude the tree it scans',
     ).not.toMatch(/--exclude(?:-rule)?\b/);
+  });
+
+  it('pins the semgrep image to the digest the comment names', () => {
+    // A digest pin says WHICH image; the comment beside it says which
+    // RELEASE. They are separate claims, and a repin that leaves the
+    // comment behind turns the comment into a claim about a moment — or
+    // about a different image entirely. Both are pinned here.
+    const semgrepJob = jobOf(ci, 'semgrep');
+    expect(semgrepJob?.image ?? '', 'the semgrep job must run the pinned semgrep image').toBe(
+      `semgrep/semgrep@${SEMGREP_IMAGE_DIGEST}`,
+    );
+    const line = ci.text.split('\n').find((entry) => entry.includes(SEMGREP_IMAGE_DIGEST));
+    expect(line, 'the pinned semgrep digest must appear in ci.yml').toBeDefined();
+    expect(
+      line,
+      'the pinned semgrep digest must name its release in the comment beside it',
+    ).toContain(`# ${SEMGREP_IMAGE_VERSION}`);
   });
 
   it('checks out the tags the release guard reads', () => {
