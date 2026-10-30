@@ -389,10 +389,24 @@ function checkoutFetchDepth(jobText: string): string | undefined {
   const lines = jobText.split('\n');
   const checkout = lines.findIndex((line) => /uses:\s*actions\/checkout@/.test(line));
   if (checkout === -1) return undefined;
-  const indent = /^\s*/.exec(lines[checkout] ?? '')?.[0] ?? '';
+  // The step that owns the `uses:` line. The `uses:` line is not always the
+  // step's first line — the `- name:` form puts it one line deeper — so the
+  // step's own indent comes from the nearest PRECEDING step marker, and the
+  // scan ends at the next marker at that indent or shallower. Deriving the
+  // boundary from the `uses:` line's indent instead would let the scan run
+  // past the checkout and read a LATER step's `fetch-depth`, which is how
+  // this guard could pass while the checkout stayed shallow.
+  let stepIndent = 0;
+  for (let index = checkout; index >= 0; index -= 1) {
+    const marker = /^(\s*)-\s/.exec(lines[index] ?? '');
+    if (marker !== null) {
+      stepIndent = (marker[1] ?? '').length;
+      break;
+    }
+  }
   for (const line of lines.slice(checkout + 1)) {
-    // The next step begins — nothing below it belongs to this one.
-    if (line.startsWith(`${indent}- `)) return undefined;
+    const marker = /^(\s*)-\s/.exec(line);
+    if (marker !== null && (marker[1] ?? '').length <= stepIndent) return undefined;
     const found = /^\s*fetch-depth:\s*(.+?)\s*$/.exec(line);
     // The value may be quoted (`fetch-depth: "0"`); the quotes are YAML
     // syntax, not part of the value.
@@ -1281,6 +1295,52 @@ describe('the workflow files — what the merge gate runs', () => {
           'checkout carries no tags, which leaves the release guard asserting nothing',
       ).toBe('0');
     }
+  });
+
+  it('reads the checkout depth from the checkout step, not a later step', () => {
+    // The hole this closes: a job whose checkout is shallow, followed by a
+    // later step that asks for `fetch-depth: 0`, must NOT read as a
+    // checkout with full history. The step's own indent comes from the
+    // nearest preceding step marker, so the `- name:` form of a step (where
+    // `uses:` sits one line deeper) is handled too.
+    const shallowCheckout = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - uses: actions/checkout@abc123',
+      '      - uses: actions/setup-node@def456',
+      '        with:',
+      '          fetch-depth: 0',
+    ].join('\n');
+    expect(checkoutFetchDepth(shallowCheckout)).toBeUndefined();
+
+    const namedCheckout = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - name: Check out',
+      '        uses: actions/checkout@abc123',
+      '      - uses: actions/setup-node@def456',
+      '        with:',
+      '          fetch-depth: 0',
+    ].join('\n');
+    expect(checkoutFetchDepth(namedCheckout)).toBeUndefined();
+
+    const fullHistory = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - name: Check out',
+      '        uses: actions/checkout@abc123',
+      '        with:',
+      '          fetch-depth: 0',
+      '      - uses: actions/setup-node@def456',
+    ].join('\n');
+    expect(checkoutFetchDepth(fullHistory)).toBe('0');
+
+    // A quoted value is the same value: the quotes are YAML syntax.
+    const quoted = fullHistory.replace('fetch-depth: 0', 'fetch-depth: "0"');
+    expect(checkoutFetchDepth(quoted)).toBe('0');
   });
 
   it('keeps a comment inside the security job from ending the block', () => {
