@@ -276,8 +276,19 @@ function wholeNumber(name: string, raw: string): number {
 function parseSearchArgs(rest: readonly string[]): ParsedCommand {
   const { words, values, switches } = splitSearchArgs(rest);
   const query = words.join(' ').trim();
-  if (query.length === 0)
-    throw new CliError('search requires a query (e.g. `cfr-free search PTSD`)');
+  if (query.length === 0) {
+    // A flag that takes a value swallows the word after it, so
+    // `--page PTSD` leaves no query behind. The usual advice then
+    // reproduces the command that just failed and points at the wrong
+    // thing, so it says what happened instead.
+    const takers = Object.keys(values);
+    throw new CliError(
+      takers.length === 0
+        ? 'search requires a query (e.g. `cfr-free search PTSD`)'
+        : `search requires a query — ${takers.join(' and ')} took the word; ` +
+            'put the query first, or write the flag as --flag=value',
+    );
+  }
   if (query.length < SEARCH_QUERY_MIN_LENGTH)
     throw new CliError(
       `the search query needs at least ${SEARCH_QUERY_MIN_LENGTH} characters ` +
@@ -291,16 +302,17 @@ function parseSearchArgs(rest: readonly string[]): ParsedCommand {
   const part = values['--part'];
   const chapter = values['--chapter'];
   const kind = values['--kind'];
-  if (kind !== undefined && kind !== 'section' && kind !== 'appendix') {
-    throw new CliError('--kind must be `section` or `appendix`');
-  }
 
   const input = validateSearchInput({
     query,
     ...(page === undefined ? {} : { page: wholeNumber('--page', page) }),
     ...(perPage === undefined ? {} : { perPage: wholeNumber('--per-page', perPage) }),
     ...(part === undefined ? {} : { part }),
-    ...(kind === undefined ? {} : { kind }),
+    // The kind is handed over as it was typed. The SERVICE owns the rule
+    // and the wording — it rejects what it does not accept, and says so in
+    // its own words — so the cast only says "this is the shape the service
+    // checks", and the service is what decides.
+    ...(kind === undefined ? {} : { kind: kind as 'section' | 'appendix' }),
     ...(chapter === undefined ? {} : { chapter }),
   });
 

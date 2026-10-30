@@ -119,6 +119,13 @@ describe('ensureIndex', () => {
       expect(logged.length).toBeGreaterThan(0);
       expect(logged.map((record) => record.message).join(' ')).toContain('eCFR request failed');
       expect(JSON.stringify(logged)).toContain('/api/versioner');
+      // The kind travels with it. The reader's line tells the kinds apart
+      // ("eCFR could not be reached" against "eCFR answered, but not with
+      // valid JSON"), and the operator's record must say the same thing:
+      // a status alone cannot tell an upstream that answered 200 with a
+      // page of HTML from one that answered 200 with a body over the cap.
+      const fields = logged[logged.length - 1]?.fields as Record<string, unknown> | undefined;
+      expect(fields?.['kind']).toBe('transport');
     } finally {
       temp.cleanup();
     }

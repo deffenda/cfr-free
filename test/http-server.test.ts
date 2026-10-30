@@ -771,6 +771,36 @@ describe('Titan web UI routes', () => {
     expect(html).toContain('id="browse-list"');
   });
 
+  it('pinned posture: the served HTML carries the keyboard posture the SPEC promises', async () => {
+    const { text: html } = await fetchUi('/');
+    // The skip link is the FIRST thing in the body, and it names the
+    // content it reaches. A skip link that points nowhere is worse than
+    // none: it is the first thing a keyboard user reaches.
+    const body = (html.match(/<body>([\s\S]*?)<script/) ?? ['', ''])[1] ?? '';
+    expect(body.trimStart().startsWith('<a class="skip-link"')).toBe(true);
+    expect(html).toContain('href="#main"');
+    // The content it reaches can take the focus.
+    expect(html).toContain('<main id="main" tabindex="-1">');
+    // The live region that announces the change of view.
+    expect(html).toContain('role="status"');
+    expect(html).toContain('aria-live="polite"');
+    // Every view's heading takes the focus on a route change without
+    // becoming a tab stop. The search heading is VISIBLE: a focus ring on a
+    // clipped element cannot be seen, so a hidden heading fails WCAG 2.4.7
+    // on every transition into the search view.
+    for (const id of ['search-heading', 'section-heading', 'browse-heading', 'redline-heading']) {
+      expect(html).toMatch(new RegExp(`<h2 id="${id}"[^>]*tabindex="-1"`));
+    }
+    expect(html).not.toContain('id="search-heading" class="visually-hidden"');
+    // The form's own rules are visible in the form, not only in a schema.
+    expect(html).toMatch(/id="part"[^>]*pattern="\[0-9\]\{1,3\}"/);
+    expect(html).toMatch(/id="part"[^>]*maxlength="3"/);
+    expect(html).toMatch(/id="part"[^>]*title="/);
+    expect(html).toMatch(/id="chapter"[^>]*pattern="\[IVXLCDM\]\{1,8\}"/);
+    expect(html).toMatch(/id="chapter"[^>]*maxlength="8"/);
+    expect(html).toMatch(/id="chapter"[^>]*title="/);
+  });
+
   it('pinned posture: ui.js guards route ownership (a late response cannot repaint a route the user left)', async () => {
     // Behaviour is proven in test/ui.test.ts, which EXECUTES this served
     // script against a DOM/fetch stub; these string pins keep the guard
