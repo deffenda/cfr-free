@@ -70,8 +70,8 @@ function localTypeScript() {
  * The child's stdout goes to THIS script's stderr. npm's stdout is not
  * the program's alone: `npm pack --json` writes its payload there, and
  * whatever a lifecycle script prints joins it in the same stream. npm
- * runs `prepare` during `npm pack` — npm 10.9.9 and 12.2.1 do so even
- * with --ignore-scripts (measured) — so a line printed to stdout during
+ * runs `prepare` during `npm pack` — npm 10.9.9 does so even
+ * with --ignore-scripts (measured; npm 11 and 12 honour the flag) — so a line printed to stdout during
  * a pack corrupts that payload, and the release guard cannot tell a
  * broken package from a broken parser. The scripts npm runs therefore
  * write to stderr and leave stdout alone.
