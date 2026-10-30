@@ -19,8 +19,9 @@ info:
     and the non-JSON routes are `GET /metrics` (Prometheus exposition) and the
     read-only web UI (`GET /`, `/ui.js`, `/ui.css` — the HTML shell is a string
     constant in src/titan/ui.ts, while the script and the stylesheet are real
-    files (src/titan/ui-client.js, src/titan/ui-client.css) that the build
-    copies into dist/ so the gate's linter and formatter can see them; the
+    files (src/titan/ui-client.js, src/titan/ui-client.css): being files is
+    what lets the gate's linter and formatter see them, and the build copies
+    them into dist/ so the server can serve them; the
     document ships a strict Content-Security-Policy and zero inline script).
     The three index-backed reads (`/api/v1/search`, `/api/v1/sections/{citation}`,
     `/api/v1/browse`) carry a strong `ETag` over the response payload and answer
@@ -68,7 +69,7 @@ paths:
       summary: Web UI script (a real file, linted and copied into dist/ at build time)
       responses:
         '200':
-          description: "The UI page script as text/javascript — served from the module's own directory: src/titan/ui-client.js in development, dist/titan/ui-client.js in a build (the build copies it there, so the gate can lint and format it), nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts:222)."
+          description: "The UI page script as text/javascript — served from the module's own directory: src/titan/ui-client.js in development, dist/titan/ui-client.js in a build (being a file is what lets the gate lint and format it; the build copies it into dist/ so the server can serve it), nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts:222)."
           content:
             text/javascript:
               schema: { type: string }
@@ -93,7 +94,7 @@ paths:
       summary: Web UI stylesheet (a real file, linted and copied into dist/ at build time)
       responses:
         '200':
-          description: "The UI stylesheet as text/css — served from the module's own directory: src/titan/ui-client.css in development, dist/titan/ui-client.css in a build (the build copies it there, so the gate can lint and format it), nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts:222)."
+          description: "The UI stylesheet as text/css — served from the module's own directory: src/titan/ui-client.css in development, dist/titan/ui-client.css in a build (being a file is what lets the gate lint and format it; the build copies it into dist/ so the server can serve it), nosniff + CORP same-origin + Cache-Control: no-store via sendStatic (src/titan/http-server.ts:222)."
           content:
             text/css:
               schema: { type: string }
