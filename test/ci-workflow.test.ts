@@ -163,11 +163,11 @@ const PINNED_ACTION = /^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/;
  * A SHA pin says the COMMIT is fixed; it says nothing about whether the
  * repository is an action at all. `semgrep/semgrep` is the semgrep CLI's
  * repository: it publishes no action manifest, so `uses: semgrep/semgrep@
- * <sha>` names a repository GitHub cannot run an action from — the job
- * that referenced it reported green while scanning nothing (the pinned
- * commit has no action.yml; HTTP 404, verified 2026-10-30). A repository
- * that is not an action is not on this list, so the reference fails the
- * check instead of the run.
+ * <sha>` did not name an action — GitHub fell back to building the
+ * repository's root Dockerfile, whose `CMD` is `semgrep --help`, and the
+ * step exited 0 without scanning anything (verified 2026-10-30). A
+ * repository that is not an action is not on this list, so the reference
+ * fails the check instead of the run.
  *
  * The repository is the first TWO segments of the reference: an action
  * that lives in a subdirectory of its repository (`google/osv-scanner-
@@ -481,20 +481,28 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
     // consumer at all. A detection rule that stopped matching `npm run ci`
     // would leave every rule below it holding nothing and the whole file
     // green. The count is asserted per workflow: a workflow that NAMES
-    // the gate must SHOW a consumer, and one that never names it must
-    // show none.
-    for (const workflow of workflowFiles) {
+    // the gate must SHOW a consumer.
+    //
+    // The converse is NOT asserted: `GATE_COMMAND` is a subset of
+    // `GATE_NAMED`, so a workflow that names the gate cannot fail to
+    // match the narrower pattern in a way that makes the other side
+    // mean anything — it would be a tautology, and a tautology that
+    // reads like an assertion is worse than none.
+    //
+    // The first assertion is what keeps the per-workflow one from going
+    // vacuous: if the pattern that RECOGNISES the gate ever stopped
+    // matching, every workflow would be skipped and the count would
+    // never be checked at all.
+    const naming = workflowFiles.filter((workflow) => GATE_NAMED.test(workflow.text));
+    expect(
+      naming.length,
+      'no workflow names the gate — the guard would hold nothing',
+    ).toBeGreaterThan(0);
+    for (const workflow of naming) {
       const consumers = workflow.jobs.reduce(
         (count, job) => count + gateConsumerSteps(job).length,
         0,
       );
-      if (!GATE_NAMED.test(workflow.text)) {
-        expect(
-          consumers,
-          `${workflow.file}: the guard found a gate consumer in a workflow that names none`,
-        ).toBe(0);
-        continue;
-      }
       expect(consumers, `${workflow.file}: no gate consumer seen`).toBeGreaterThan(0);
     }
   });

@@ -3,7 +3,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { CliError, commandUsage, failureMessage, main, parseArgs } from '../src/cli.js';
+import { CliError, commandUsage, failureMessage, main, parseArgs, USAGE } from '../src/cli.js';
 import { HttpError } from '../src/core/http-client.js';
 import { formatIssueDiff } from '../src/commands/diff.js';
 import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
@@ -102,6 +102,33 @@ describe('parseArgs', () => {
     // A KNOWN command still gets its own usage — the membership test
     // rejects the unknown one, it does not reject the flag.
     expect(parseArgs(['search', '--help'])).toEqual({ command: 'help', topic: 'search' });
+  });
+
+  it('explains every command the usage text advertises', () => {
+    // The set of commands that have their own usage text is load-bearing:
+    // it is what turns `cfr-free export --help` into an explanation
+    // instead of "unknown option". Its CONTENTS were not pinned — dropping
+    // one command from it left every other CLI test green, and that
+    // command stopped explaining itself.
+    //
+    // The usage text is the list of commands the tool advertises, so the
+    // two are checked against each other: every command the usage block
+    // names must be one the CLI will explain. `help` and `version` are
+    // the global commands and answer for themselves.
+    const global = new Map([
+      ['help', { command: 'help' }],
+      ['version', { command: 'version' }],
+    ]);
+    const advertised = [...USAGE.matchAll(/^ {2}cfr-free \[?(\w[\w-]*)\]?/gm)].map(
+      (match) => match[1] ?? '',
+    );
+    expect(advertised.length, 'the usage text must name some commands').toBeGreaterThan(0);
+    for (const command of advertised) {
+      expect(
+        parseArgs([command, '--help']),
+        `cfr-free ${command} --help must explain itself`,
+      ).toEqual(global.get(command) ?? { command: 'help', topic: command });
+    }
   });
 
   it('rejects export without exactly one target', () => {

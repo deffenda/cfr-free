@@ -154,17 +154,20 @@ jobs:
     #
     # The scanner runs from the PUBLISHED CONTAINER IMAGE, pinned by
     # digest — the same scanner the local sweep in `tools/security-scan.sh`
-    # runs, in the job shape semgrep documents for CI. `semgrep/semgrep` is
-    # the CLI's repository, NOT a GitHub Action: it publishes no action
-    # manifest, so `uses: semgrep/semgrep@<sha>` names a repository GitHub
-    # cannot run an action from (verified 2026-10-30: the referenced commit
-    # has no action.yml — HTTP 404 — and the job that referenced it
-    # reported green while scanning nothing).
+    # runs, in the job shape semgrep documents for CI.
+    #
+    # `semgrep/semgrep` is the CLI's repository, not an action: it
+    # publishes no action manifest, so `uses: semgrep/semgrep@<sha>` did
+    # not name an action. It was RUNNABLE all the same — GitHub builds a
+    # repository's root Dockerfile when there is no action.yml — and that
+    # Dockerfile's `CMD` is `semgrep --help`, which exits 0 without
+    # scanning anything. The job reported green over a scan that never
+    # happened (verified 2026-10-30).
     #
     # The container is JOB-level: GitHub's workflow schema has no
     # step-level `container` key (`actionlint` rejects one), so the whole
     # job runs in the image — the checkout included, which is why the image
-    # needs git.
+    # needs git. The image is x64-only, so the job runs on an x64 runner.
     container:
       image: semgrep/semgrep@sha256:2e45517a85e13a9cca14a2a00df6bb48affd66b8ebfae1b0991cd57578362fb0 # 1.183.0
     steps:
