@@ -599,6 +599,9 @@ function parseRequestUrl(raw: string | undefined): URL | null {
   }
 }
 
+/** The token cost of a route that pulls the whole upstream document. */
+export const EXPENSIVE_ROUTE_COST = 10;
+
 /**
  * What a request costs the server, in rate-limit tokens.
  *
@@ -609,9 +612,6 @@ function parseRequestUrl(raw: string | undefined): URL | null {
  * (60 burst, 10 a second) bought ten whole upstream documents a second —
  * twenty of them, counting the two documents a diff or a redline pulls.
  */
-/** The token cost of a route that pulls the whole upstream document. */
-export const EXPENSIVE_ROUTE_COST = 10;
-
 function requestCost(pathname: string): number {
   if (pathname === DIFF_PATH || pathname === REDLINE_PATH) return EXPENSIVE_ROUTE_COST;
   return 1;

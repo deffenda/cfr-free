@@ -182,23 +182,32 @@ function spellings(value: number, words: Readonly<Record<number, string>>): stri
   return word === undefined ? String(value) : `${value}|${word}`;
 }
 
+/** One row of the published token-cost table. */
+interface TokenCostRow {
+  readonly label: string;
+  /** The last cell: a bare number, or a phrase that names one. */
+  readonly cell: string;
+}
+
 /**
  * The token-cost table published in a document's API description.
  *
  * The table is MARKDOWN inside the description string, so it is read as
- * text: a row is a label and a number, and the number is the one the
- * code charges.
+ * text: a row is a label and a cell, and the cell is the price the router
+ * charges.
  */
-function publishedTokenCosts(
-  doc: string,
-): readonly { readonly label: string; readonly tokens: number }[] {
+function publishedTokenCosts(doc: string): readonly TokenCostRow[] {
   const description = parseDocument(readDoc(doc)).getIn(['info', 'description']);
   if (typeof description !== 'string') return [];
-  const rows: { label: string; tokens: number }[] = [];
+  const rows: TokenCostRow[] = [];
   for (const line of description.split('\n')) {
-    const match = /^\|\s*(.+?)\s*\|\s*(\d+)\s*\|$/.exec(line.trim());
+    const match = /^\|\s*(.+?)\s*\|\s*([^|]+?)\s*\|$/.exec(line.trim());
     if (match === null) continue;
-    rows.push({ label: match[1] ?? '', tokens: Number(match[2] ?? '0') });
+    const label = match[1] ?? '';
+    const cell = match[2] ?? '';
+    // The header and the separator are not rows.
+    if (label === 'request' || label === '---') continue;
+    rows.push({ label, cell });
   }
   return rows;
 }
@@ -277,9 +286,20 @@ describe('published contract: the upstream fetch path is not "stateless"', () =>
     const rows = publishedTokenCosts('docs/openapi.yaml');
     const expensive = rows.find((row) => row.label.includes('/api/v1/diff'));
     expect(expensive, 'the API description must publish the cost of the diff route').toBeDefined();
-    expect(expensive?.tokens).toBe(EXPENSIVE_ROUTE_COST);
+    expect(expensive?.cell).toBe(String(EXPENSIVE_ROUTE_COST));
     const cheap = rows.find((row) => row.label.includes('every other path'));
-    expect(cheap?.tokens).toBe(1);
+    expect(cheap?.cell).toBe('1');
+    // Every OTHER price the table names must be one the router charges
+    // too: a row that quoted a third number would contradict the rows
+    // beside it, and the diff row's pin would not see it.
+    for (const row of rows) {
+      for (const [, digits] of row.cell.matchAll(/\b(\d+)\b/g)) {
+        expect(
+          [1, EXPENSIVE_ROUTE_COST],
+          `the token-cost table must publish only 1 or ${EXPENSIVE_ROUTE_COST}: "${row.label}" quotes ${digits}`,
+        ).toContain(Number(digits));
+      }
+    }
   });
 
   it('the published upstream-fetch bounds match the code', () => {

@@ -44,17 +44,17 @@ info:
     | --- | --- |
     | `/api/v1/diff`, `/api/v1/redline` — they pull the complete Title 38 document from eCFR (~2 MB on the wire, ~16 MB parsed) | 10 |
     | every other path — the index-backed reads, `/health`, `/metrics`, the web UI and its assets | 1 |
-    | a request the router refuses BEFORE it routes — a method other than GET/HEAD (`405`), a URL over 2048 bytes (`414`), a malformed URL (`400`) | 1 |
-    | a request the ROUTE itself rejects — a malformed date, a `q` over 800 bytes — on an expensive route | the route's own price (10 on `/api/v1/diff` and `/api/v1/redline`) |
+    | a request the router refuses BEFORE it can price the route — a method other than GET/HEAD (`405`), a URL over 2048 bytes (`414`), a malformed URL (`400`) | 1 |
+    | a request the router rejects AFTER it has priced the route — the route's own validation (a malformed date) or a param cap (`q` over 800 bytes) | the route's own price (10 on `/api/v1/diff` and `/api/v1/redline`) |
 
     The bucket is checked FIRST, so an exhausted budget answers `429
     rate_limited` even to a request that would have been refused with
     `405`/`414`/`400` anyway: a refusal is never free to repeat. A request
-    the router refuses BEFORE it routes costs the refusal price, not the
-    price of the route it aimed at — a `POST` to `/api/v1/diff` costs one
-    token, not ten. A request the ROUTE itself rejects (a malformed date, a
-    `q` over 800 bytes) has already been priced at the route it aimed at,
-    so it costs that route's price. All schema
+    the router refuses before it can price the route costs the refusal
+    price, not the price of the route it aimed at — a `POST` to
+    `/api/v1/diff` costs one token, not ten. A request the router rejects
+    after it has priced the route (a malformed date, an oversized `q`)
+    costs that route's price. All schema
     fields listed under `required` are always
     present (the optional `Health.diskFree`/`diskTotal` and
     `RedlineResult.fromText`/`toText` are the deliberate exceptions); nullable
@@ -547,7 +547,7 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
     RateLimited:
       # source: src/titan/http-server.ts#precheck
-      description: '{ error: "rate_limited", message } — per-peer token bucket exhausted (armed only when CFR_ALLOW_REMOTE=1; loopback never throttles). The bucket is spent BEFORE the router: a diff or a redline costs 10 tokens, every other path 1, and a request the router refuses before routing (405/414/400) 1 — so an exhausted budget answers 429 even to a request that would have been refused anyway. A request the ROUTE itself rejects (a malformed date, an oversized q) has already been priced at the route it aimed at, so it costs that route''s price. See the token-cost table in the API description.'
+      description: '{ error: "rate_limited", message } — per-peer token bucket exhausted (armed only when CFR_ALLOW_REMOTE=1; loopback never throttles). The bucket is spent BEFORE the router: a diff or a redline costs 10 tokens, every other path 1, and a request the router refuses before it can price the route (405/414/400) 1 — so an exhausted budget answers 429 even to a request that would have been refused anyway. A request the router rejects after it has priced the route (a malformed date, an oversized q) costs that route''s price. See the token-cost table in the API description.'
       headers:
         retry-after: { description: Seconds to wait., schema: { type: integer } }
       content:

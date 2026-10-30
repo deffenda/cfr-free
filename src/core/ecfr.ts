@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { HttpClient } from './http-client.js';
-import { Semaphore } from './semaphore.js';
+import { DEFAULT_MAX_WAITERS, Semaphore } from './semaphore.js';
 
 /** Title handled by this service (v1 scope). */
 export const TITLE_38 = 38;
@@ -55,8 +55,13 @@ export function isIssueDateString(value: string): boolean {
  */
 export const DEFAULT_MAX_CONCURRENT_FETCHES = 4;
 
-/** How many fetches may WAIT for a permit before a request is refused. */
-export const DEFAULT_MAX_QUEUED_FETCHES = 16;
+/**
+ * How many fetches may WAIT for a permit before a request is refused.
+ *
+ * The same bound as the semaphore's own wait queue — it IS that queue, so
+ * the published number and the code's number cannot drift apart.
+ */
+export const DEFAULT_MAX_QUEUED_FETCHES = DEFAULT_MAX_WAITERS;
 /** How long a fetched document is reused, from the fetch (not from a read). */
 export const DEFAULT_FULL_TITLE_XML_TTL_MS = 5 * 60_000;
 /** How many fetched documents are kept: ~2-3 MB each. */
