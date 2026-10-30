@@ -215,6 +215,181 @@ function publishedTokenCosts(doc: string): readonly TokenCostRow[] {
   return rows;
 }
 
+/**
+ * One priced claim the published token-cost table must state.
+ *
+ * The `id` names the claim so another guard can read its price by name, and
+ * `matches` says which published row states it.
+ */
+interface TokenCostClaim {
+  /** The claim's id. */
+  readonly id: string;
+  /** What the price is the price OF, for the failure message. */
+  readonly what: string;
+  /** The price the router charges for it. */
+  readonly price: number;
+  /** True for the label of the row that states this claim. */
+  readonly matches: (label: string) => boolean;
+}
+
+/**
+ * The prices the published token-cost table states, and the row that states
+ * each one.
+ *
+ * The table is the SOURCE of truth for the prices. The 429 response's
+ * description states the same prices in PROSE, so the guard that ties the
+ * two surfaces together reads its expectation from the table: a table that
+ * says twenty with a prose that still says ten fails, and a table that says
+ * twenty with a prose that says twenty passes.
+ */
+const TOKEN_COST_CLAIMS: readonly TokenCostClaim[] = [
+  {
+    id: 'upstream',
+    // The upstream routes: BOTH of them, in one row.
+    what: 'the upstream routes (`/api/v1/diff`, `/api/v1/redline`)',
+    price: EXPENSIVE_ROUTE_COST,
+    matches: (label) =>
+      label.includes('/api/v1/diff') &&
+      label.includes('/api/v1/redline') &&
+      !label.includes('rejects AFTER'),
+  },
+  {
+    id: 'cheap',
+    what: 'every other path',
+    price: 1,
+    matches: (label) => label.includes('every other path'),
+  },
+  {
+    id: 'refused',
+    // A request the router refuses BEFORE it can price the route costs the
+    // refusal price, not the price of the route it aimed at: a POST to
+    // `/api/v1/diff` costs one token, not ten.
+    what: 'a request the router refuses BEFORE it can price the route',
+    price: 1,
+    matches: (label) => label.includes('refuses BEFORE'),
+  },
+  {
+    id: 'rejected-cheap',
+    // A request the router rejects AFTER it priced the route is charged the
+    // route's OWN price, and the two classes of route charge different
+    // prices. The table has to publish BOTH: the row that said so could be
+    // deleted, and nothing said it had to be there.
+    what: 'an oversized `q` on an index-backed read',
+    price: 1,
+    matches: (label) => label.includes('`q` over 800 bytes') && label.includes('index-backed read'),
+  },
+  {
+    id: 'rejected-expensive',
+    what: 'an oversized `q` on the upstream routes',
+    price: EXPENSIVE_ROUTE_COST,
+    matches: (label) => label.includes('`q` over 800 bytes') && label.includes('/api/v1/diff'),
+  },
+];
+
+/** The claim with an id. */
+function tokenCostClaim(id: string): TokenCostClaim {
+  const claim = TOKEN_COST_CLAIMS.find((entry) => entry.id === id);
+  if (claim === undefined) throw new Error(`unknown token-cost claim: ${id}`);
+  return claim;
+}
+
+/**
+ * The price a published row states, read from the TABLE itself.
+ *
+ * The number comes from the published cell, not from the claim: the claim
+ * says what the row must be, the cell says what it says.
+ */
+function publishedPrice(rows: readonly TokenCostRow[], claim: TokenCostClaim): number | null {
+  const row = rows.find((entry) => claim.matches(entry.label));
+  if (row === undefined) return null;
+  const cell = row.cells.at(-1);
+  if (cell === undefined) return null;
+  const price = Number(cell);
+  return Number.isFinite(price) ? price : null;
+}
+
+/** The published 429 response's description, or null when there is none. */
+function rateLimitedDescription(): string | null {
+  const description = parseDocument(readDoc('docs/openapi.yaml')).getIn([
+    'components',
+    'responses',
+    'RateLimited',
+    'description',
+  ]);
+  return typeof description === 'string' && description.trim() !== '' ? description : null;
+}
+
+/**
+ * A price the 429 description states, and the PHRASE that carries it.
+ *
+ * The phrase is what the price is the price OF. The sentence around it may
+ * be reworded — only the phrase and the number are read.
+ */
+interface PriceRole {
+  /** What the price is the price OF, for the failure message. */
+  readonly what: string;
+  /** The phrase the price follows. */
+  readonly phrase: string;
+  /** The unit the price is counted in, when the prose counts it. */
+  readonly unit?: string;
+}
+
+/** The English words a price may be written in. */
+const PRICE_WORDS: Readonly<Record<string, number>> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  twelve: 12,
+  sixteen: 16,
+  twenty: 20,
+};
+
+/** The first price a text states — digits, or an English word. */
+function firstPrice(text: string): number | null {
+  for (const token of text.match(/[a-z]+|\d+/gi) ?? []) {
+    const word = PRICE_WORDS[token.toLowerCase()];
+    if (word !== undefined) return word;
+    if (/^\d+$/.test(token)) return Number(token);
+  }
+  return null;
+}
+
+/** The last price a text states — digits, or an English word. */
+function lastPrice(text: string): number | null {
+  const tokens = text.match(/[a-z]+|\d+/gi) ?? [];
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
+    const token = tokens[index];
+    if (token === undefined) continue;
+    const word = PRICE_WORDS[token.toLowerCase()];
+    if (word !== undefined) return word;
+    if (/^\d+$/.test(token)) return Number(token);
+  }
+  return null;
+}
+
+/**
+ * The number a description states for a role, or null when it states none.
+ *
+ * The role is a PHRASE the price follows. A parenthesised group between the
+ * phrase and its price states codes, not a price, so it is skipped.
+ */
+function statedPrice(description: string, role: PriceRole): number | null {
+  const at = description.toLowerCase().indexOf(role.phrase.toLowerCase());
+  if (at === -1) return null;
+  const rest = description.slice(at + role.phrase.length).replace(/\([^)]*\)/g, ' ');
+  if (role.unit === undefined) return firstPrice(rest);
+  const unitAt = rest.toLowerCase().indexOf(role.unit.toLowerCase());
+  if (unitAt === -1) return null;
+  return lastPrice(rest.slice(0, unitAt));
+}
+
 /** Render the violations so the failure message says what is wrong. */
 function describeViolations(violations: readonly Violation[]): string {
   return violations
@@ -293,57 +468,13 @@ describe('published contract: the upstream fetch path is not "stateless"', () =>
     // refuses BEFORE it can price the route costs could claim ten while
     // the router charged one, and nothing would have said so.
     const rows = publishedTokenCosts('docs/openapi.yaml');
-    const claims: readonly {
-      readonly what: string;
-      readonly price: number;
-      readonly matches: (label: string) => boolean;
-    }[] = [
-      {
-        // The upstream routes: BOTH of them, in one row.
-        what: 'the upstream routes (`/api/v1/diff`, `/api/v1/redline`)',
-        price: EXPENSIVE_ROUTE_COST,
-        matches: (label) =>
-          label.includes('/api/v1/diff') &&
-          label.includes('/api/v1/redline') &&
-          !label.includes('rejects AFTER'),
-      },
-      {
-        what: 'every other path',
-        price: 1,
-        matches: (label) => label.includes('every other path'),
-      },
-      {
-        // A request the router refuses BEFORE it can price the route
-        // costs the refusal price, not the price of the route it aimed
-        // at: a POST to `/api/v1/diff` costs one token, not ten.
-        what: 'a request the router refuses BEFORE it can price the route',
-        price: 1,
-        matches: (label) => label.includes('refuses BEFORE'),
-      },
-      {
-        // A request the router rejects AFTER it priced the route is
-        // charged the route's OWN price, and the two classes of route
-        // charge different prices. The table has to publish BOTH: the row
-        // that said so could be deleted, and nothing said it had to be
-        // there.
-        what: 'an oversized `q` on an index-backed read',
-        price: 1,
-        matches: (label) =>
-          label.includes('`q` over 800 bytes') && label.includes('index-backed read'),
-      },
-      {
-        what: 'an oversized `q` on the upstream routes',
-        price: EXPENSIVE_ROUTE_COST,
-        matches: (label) => label.includes('`q` over 800 bytes') && label.includes('/api/v1/diff'),
-      },
-    ];
     // Every published row is a claim above: a row that is not listed
     // here is a price nothing checks, and a claim with no row is a
     // contract the document dropped.
     expect(rows, 'the token-cost table must publish exactly the priced claims').toHaveLength(
-      claims.length,
+      TOKEN_COST_CLAIMS.length,
     );
-    for (const claim of claims) {
+    for (const claim of TOKEN_COST_CLAIMS) {
       const matching = rows.filter((row) => claim.matches(row.label));
       expect(matching, `the API description must publish the cost of ${claim.what}`).toHaveLength(
         1,
@@ -365,6 +496,55 @@ describe('published contract: the upstream fetch path is not "stateless"', () =>
           ).toContain(Number(digits));
         }
       }
+    }
+  });
+
+  it('the 429 description states the prices the token-cost table publishes', () => {
+    // The 429 response's description publishes the prices AGAIN, in prose:
+    // "a diff or a redline costs 10 tokens, every other path 1, and a
+    // request the router refuses before it can price the route
+    // (405/414/400) 1". Nothing compared the two surfaces: the table could
+    // say twenty while the prose still said ten, and the document would
+    // contradict itself.
+    //
+    // The expectation is DERIVED from the table, not written here, and each
+    // price is matched where the prose states it: the expensive price where
+    // the diff and the redline are priced, the cheap price where "every
+    // other path" is priced, and the refused price where a request the
+    // router refuses before pricing is priced. Only the PHRASE that carries
+    // a price is matched — the sentence around it may be reworded without
+    // the price changing.
+    const description = rateLimitedDescription();
+    expect(description, 'the API description must publish the 429 response').not.toBeNull();
+    const prose = description ?? '';
+    const rows = publishedTokenCosts('docs/openapi.yaml');
+    const roles: readonly { readonly claim: TokenCostClaim; readonly role: PriceRole }[] = [
+      {
+        claim: tokenCostClaim('upstream'),
+        role: { what: 'a diff or a redline', phrase: 'diff', unit: 'tokens' },
+      },
+      {
+        claim: tokenCostClaim('cheap'),
+        role: { what: 'every other path', phrase: 'every other path' },
+      },
+      {
+        claim: tokenCostClaim('refused'),
+        role: {
+          what: 'a request the router refuses before it can price the route',
+          phrase: 'refuses before',
+        },
+      },
+    ];
+    for (const { claim, role } of roles) {
+      const published = publishedPrice(rows, claim);
+      expect(
+        published,
+        `the token-cost table must publish the price of ${role.what}`,
+      ).not.toBeNull();
+      expect(
+        statedPrice(prose, role),
+        `the 429 description must state the price of ${role.what} (${published})`,
+      ).toBe(published);
     }
   });
 

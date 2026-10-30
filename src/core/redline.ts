@@ -9,15 +9,6 @@ import { ServiceError } from './service.js';
 import { SyncError } from './sync.js';
 import { parseTitleXml, type RawSection } from './xml.js';
 
-/**
- * Per-provision line redline: "what lines changed in 38 CFR 4.125 between
- * issue date A and B?". Both dates' full-title XML is fetched through the
- * SAME document endpoint `diff` uses (no new eCFR URL shape = no new failure
- * modes), the one requested provision is extracted from each parse, and its
- * text is diffed line by line. A provision absent on one date is reported as
- * added/removed; one absent from BOTH dates is `not_found` after the fetches.
- */
-
 /** Above this many lines on EITHER side, the LCS is replaced by coarse blocks. */
 export const MAX_REDLINE_LINES = 2_000;
 
@@ -298,11 +289,17 @@ function deriveRedline(
 }
 
 /**
- * Redline one eCFR provision across two issue dates.
+ * Redline one eCFR provision across two issue dates: "what lines changed in
+ * 38 CFR 4.125 between issue date A and B?".
  *
  * Pure function of the two dates + citation: no store interaction and no
  * structure fetch — same stance as {@link diffIssues} (a textual diff of two
  * parsed documents does not need the index).
+ *
+ * Both dates' full-title XML is fetched through the SAME document endpoint
+ * `diff` uses (no new eCFR URL shape = no new failure modes); the one
+ * requested provision is extracted from each parse, and its text is diffed
+ * line by line. A provision absent on one date is reported as added/removed.
  *
  * @throws {ServiceError} (`invalid_input`) for malformed, impossible
  *   (out-of-range month/day), or identical dates, and for a non-citation —
