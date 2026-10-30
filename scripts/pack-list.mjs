@@ -42,10 +42,12 @@ export function filePaths(payload) {
  * The JSON payload npm printed, with anything a lifecycle script put
  * in front of it removed.
  *
- * The payload is the LAST document npm printed: whatever a lifecycle
- * script printed came before it. The scan therefore starts at each
- * candidate line and takes the tail that parses, so the last complete
- * document wins.
+ * The payload is the LAST thing npm printed: whatever a lifecycle script
+ * printed came before it. The scan therefore starts at each candidate
+ * line and takes the tail that parses — the tail must be a complete
+ * document, right to the end of the output, or the candidate is not the
+ * payload. Anything else fails closed: a payload that cannot be read is
+ * reported, not guessed at.
  */
 export function parsePayload(stdout) {
   const text = stdout.trim();
