@@ -377,6 +377,7 @@ function reportFailure(error: unknown, logger: Logger | undefined, io: MainIO): 
     (logger ?? createLogger('error')).error('eCFR request failed', {
       url: failure.url,
       status: failure.status ?? null,
+      kind: failure.kind,
       message: failure.detail,
     });
   }
