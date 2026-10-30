@@ -16,10 +16,12 @@
  * This runs before the tarball is packed, in EVERY job that publishes one.
  */
 
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { packedPaths } from './pack-list.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -55,12 +57,53 @@ function expectedAssets() {
 
 const expected = [...new Set([...expectedImports(), ...expectedAssets()])];
 
-const out = execFileSync('npm', ['pack', '--dry-run', '--ignore-scripts', '--json'], {
-  cwd: ROOT,
-  encoding: 'utf8',
-});
-const parsed = JSON.parse(out);
-const files = new Set((parsed[0]?.files || []).map((file) => file.path));
+/**
+ * The tarball is built from `dist/`, so the guard needs the build.
+ *
+ * The test suite runs before the build step in `npm run ci`, so at test
+ * time the checkout has no `dist/` at all — and a pack of an unbuilt
+ * checkout lists a package with no program in it: a true fact about the
+ * checkout, and nothing about the package that would be published. The
+ * build is run here so the guard measures the package.
+ *
+ * It is run every time, not only when `dist/` is missing: a stale
+ * `dist/` is as misleading as an absent one, and the guard's verdict
+ * must not depend on what happened to be lying in the working tree.
+ */
+function buildPackage() {
+  const result = spawnSync('npm', ['run', 'build'], {
+    cwd: ROOT,
+    stdio: ['inherit', process.stderr, 'inherit'],
+  });
+  if (result.status !== 0) {
+    console.error('The build failed, so there is no package to check.');
+    process.exit(1);
+  }
+}
+
+/**
+ * The paths the packed tarball carries.
+ *
+ * The npm-specific knowledge — which shape `npm pack --json` printed,
+ * and what a lifecycle script may have put in front of it — lives in
+ * the pack list, so this guard does not have to know it. A payload
+ * that cannot be read at all is reported as such: the guard must be
+ * able to tell a broken package from a broken reader.
+ */
+function packedFiles() {
+  try {
+    return new Set(packedPaths(ROOT));
+  } catch (error) {
+    console.error(
+      'Could not read the packed package list: ' +
+        (error instanceof Error ? error.message : String(error)),
+    );
+    process.exit(1);
+  }
+}
+
+buildPackage();
+const files = packedFiles();
 const missing = expected.filter((file) => !files.has(file));
 if (missing.length > 0) {
   console.error('Missing from the packed package:');
