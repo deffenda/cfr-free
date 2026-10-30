@@ -801,12 +801,28 @@ describe('Titan HTTP /api/v1/diff', () => {
     diffSection('4.125', 'Amended body.') + diffSection('4.130', 'RFC text.'),
   );
 
-  /** Offline eCFR stub keyed by date; unknown dates reject like upstream 404. */
-  function stubEcfr(xmlByDate: Readonly<Record<string, string>> = {}): EcfrApi {
+  /**
+   * Offline eCFR stub keyed by date; unknown dates reject like the upstream
+   * does, carrying the status the real client throws.
+   *
+   * The default is 500 — a genuine upstream failure, which the API masks as
+   * a generic 500. A 404 is a different thing: eCFR has no revision for
+   * that date, which is the reader's argument, not a service failure.
+   */
+  function stubEcfr(
+    xmlByDate: Readonly<Record<string, string>> = {},
+    failureStatus = 500,
+  ): EcfrApi {
     return {
       getFullTitleXml: async (issueDate: string) => {
         const xml = xmlByDate[issueDate];
-        if (xml === undefined) throw new Error(`HTTP 404 for ${issueDate}`);
+        if (xml === undefined) {
+          const error = new Error(`HTTP ${failureStatus} for ${issueDate}`) as Error & {
+            status?: number;
+          };
+          error.status = failureStatus;
+          throw error;
+        }
         return xml;
       },
     } as unknown as EcfrApi;
@@ -927,6 +943,24 @@ describe('Titan HTTP /api/v1/diff', () => {
     expect(body).toEqual({ error: 'internal_error', message: 'internal server error' });
   });
 
+  it("answers a 400 for a date before eCFR's archive, not a generic 500", async () => {
+    // eCFR answers 404 for a date outside its point-in-time archive. That is
+    // the reader's argument, not a service failure: it must be the same usage
+    // error the CLI exits 2 on, so a script does not retry it forever.
+    const service = new CFRService(temp.store, 7, stubEcfr({}, 404), createTestLogger());
+    const { status, body } = await withService(
+      service,
+      '/api/v1/diff?from=2016-06-01&to=2020-01-01',
+    );
+    expect(status).toBe(400);
+    expect(body['error']).toBe('invalid_input');
+    expect(String(body['message'])).toContain('serves no revision');
+    expect(String(body['message'])).toContain('2016-06-01');
+    expect(String(body['message'])).toContain('2017-01-01');
+    // No upstream detail reaches the client.
+    expect(String(body['message'])).not.toContain('HTTP 404');
+  });
+
   it('mirrors GET on HEAD with identical headers and an empty body', async () => {
     const getResponse = await fetch(`${base}/api/v1/diff?${DIFF_QUERY}`);
     const getBody = await getResponse.text();
@@ -972,12 +1006,28 @@ describe('Titan HTTP /api/v1/redline', () => {
     diffSection('4.125', 'Amended body.') + diffSection('4.130', 'RFC text.'),
   );
 
-  /** Offline eCFR stub keyed by date; unknown dates reject like upstream 404. */
-  function stubEcfr(xmlByDate: Readonly<Record<string, string>> = {}): EcfrApi {
+  /**
+   * Offline eCFR stub keyed by date; unknown dates reject like the upstream
+   * does, carrying the status the real client throws.
+   *
+   * The default is 500 — a genuine upstream failure, which the API masks as
+   * a generic 500. A 404 is a different thing: eCFR has no revision for
+   * that date, which is the reader's argument, not a service failure.
+   */
+  function stubEcfr(
+    xmlByDate: Readonly<Record<string, string>> = {},
+    failureStatus = 500,
+  ): EcfrApi {
     return {
       getFullTitleXml: async (issueDate: string) => {
         const xml = xmlByDate[issueDate];
-        if (xml === undefined) throw new Error(`HTTP 404 for ${issueDate}`);
+        if (xml === undefined) {
+          const error = new Error(`HTTP ${failureStatus} for ${issueDate}`) as Error & {
+            status?: number;
+          };
+          error.status = failureStatus;
+          throw error;
+        }
         return xml;
       },
     } as unknown as EcfrApi;
@@ -1111,6 +1161,20 @@ describe('Titan HTTP /api/v1/redline', () => {
     const { status, body } = await withService(service, `/api/v1/redline?${REDLINE_QUERY}`);
     expect(status).toBe(500);
     expect(body).toEqual({ error: 'internal_error', message: 'internal server error' });
+  });
+
+  it("answers a 400 for a date before eCFR's archive, not a generic 500", async () => {
+    // The same translation the diff route gets: a date outside the archive
+    // is the reader's argument, so it is a 400 and not a service failure.
+    const service = new CFRService(temp.store, 7, stubEcfr({}, 404), createTestLogger());
+    const { status, body } = await withService(
+      service,
+      `/api/v1/redline?from=2016-06-01&to=2020-01-01&citation=4.125`,
+    );
+    expect(status).toBe(400);
+    expect(body['error']).toBe('invalid_input');
+    expect(String(body['message'])).toContain('serves no revision');
+    expect(String(body['message'])).not.toContain('HTTP 404');
   });
 
   it('mirrors GET on HEAD with identical headers and an empty body', async () => {

@@ -5,8 +5,13 @@ import { CHANGE_LIST_CAP } from '../core/changes.js';
 import { diffIssues } from '../core/diff.js';
 import type { EcfrApi } from '../core/ecfr.js';
 import { redlineSection } from '../core/redline.js';
-import { ARCHIVE_FLOOR, historicalSection } from '../core/historical.js';
-import type { CFRService } from '../core/service.js';
+import { ARCHIVE_FLOOR } from '../core/archive.js';
+import { historicalSection } from '../core/historical.js';
+import {
+  SEARCH_QUERY_MAX_LENGTH,
+  SEARCH_QUERY_MIN_LENGTH,
+  type CFRService,
+} from '../core/service.js';
 import { clientSafeMessage } from './client-safe.js';
 
 /**
@@ -271,8 +276,8 @@ export function registerTools(
       inputSchema: {
         query: z
           .string()
-          .min(3)
-          .max(200)
+          .min(SEARCH_QUERY_MIN_LENGTH)
+          .max(SEARCH_QUERY_MAX_LENGTH)
           .describe('search terms, e.g. "traumatic brain injury compensation"'),
         page: z
           .number()
@@ -553,7 +558,7 @@ export function registerTools(
           'report which issue date it served, so the response names the REQUESTED date and ' +
           'never a served-revision date. Stateless: the revision is fetched from eCFR on ' +
           "every call — no local index, no cache. eCFR's point-in-time archive starts at " +
-          `${ARCHIVE_FLOOR}; a date before that is rejected as not_found. Use this for ` +
+          `${ARCHIVE_FLOOR}; a date before that is rejected as invalid_input. Use this for ` +
           'date-of-claim and CUE questions ("what did this section say when the claim was ' +
           'filed?"); for the CURRENT text use get_section.',
         inputSchema: {
