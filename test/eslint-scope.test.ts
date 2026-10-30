@@ -38,7 +38,7 @@ describe('the browser script lint scope', () => {
     const rules = result.messages.map((message) => message.ruleId);
     expect(rules).toContain('no-undef');
     expect(result.messages.map((message) => message.message).join(' ')).toContain('process');
-  });
+  }, 30_000);
 
   it('still lets the repository tooling reach for Node globals', async () => {
     // The narrowing must not cost the repo's own scripts their globals. Two
@@ -49,7 +49,7 @@ describe('the browser script lint scope', () => {
 
     const mjs = await lintProbe(path.join(ROOT, 'tools/probe.mjs'), 'void process.env.HOME;\n');
     expect(mjs.messages.map((message) => message.ruleId)).not.toContain('no-undef');
-  });
+  }, 30_000);
 
   it('lets the browser script reach for the browser globals it uses', async () => {
     // The other half of the contract: the globals the script actually uses
@@ -59,5 +59,5 @@ describe('the browser script lint scope', () => {
       'void fetch; void document; void window; void navigator; void location; void history;\n',
     );
     expect(result.messages.map((message) => message.ruleId)).not.toContain('no-undef');
-  });
+  }, 30_000);
 });

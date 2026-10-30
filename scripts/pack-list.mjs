@@ -7,7 +7,7 @@
  * the package name (both measured). The payload also arrives with
  * whatever a lifecycle script printed in front of it, because npm
  * shares stdout with the scripts it runs: npm runs `prepare` during a
- * pack — npm 10.9.9 and 12.2.1 do so even with --ignore-scripts
+ * pack — npm 10.9.9 does so even with --ignore-scripts
  * (measured) — and that output lands in the same stream.
  *
  * So the npm-specific knowledge lives here, in one place, and the
@@ -21,7 +21,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 /**
  * The file paths in an `npm pack --json` payload, whichever shape npm
@@ -40,6 +41,11 @@ export function filePaths(payload) {
 /**
  * The JSON payload npm printed, with anything a lifecycle script put
  * in front of it removed.
+ *
+ * The payload is the LAST document npm printed: whatever a lifecycle
+ * script printed came before it. The scan therefore starts at each
+ * candidate line and takes the tail that parses, so the last complete
+ * document wins.
  */
 export function parsePayload(stdout) {
   const text = stdout.trim();
@@ -70,8 +76,25 @@ export function packedPaths(cwd) {
   return filePaths(parsePayload(out));
 }
 
+/**
+ * True when this file is the one the process was started with.
+ *
+ * `import.meta.url` is the REAL path of this module and `argv[1]` is
+ * whatever the caller typed, so a symlinked path would not compare equal
+ * and the script would print nothing at all. Both sides are resolved.
+ */
+function isMainModule() {
+  const entry = process.argv[1];
+  if (entry === undefined) return false;
+  try {
+    return realpathSync(entry) === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
+  }
+}
+
 // Run directly: print the paths as JSON. The callers that cannot
 // import this file use this form.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule()) {
   process.stdout.write(JSON.stringify(packedPaths(process.argv[2] ?? process.cwd())));
 }

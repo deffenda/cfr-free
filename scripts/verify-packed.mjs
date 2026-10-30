@@ -17,7 +17,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -25,11 +25,43 @@ import { packedPaths } from './pack-list.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
-/** The entry point and every module it imports. */
+/**
+ * The entry point and every module it imports, transitively.
+ *
+ * The closure matters: the entry point pulls in the service, which pulls in
+ * the store, the MCP server and the HTTP server. A tarball that carried
+ * the entry point but not the module two levels down would pass a check
+ * that only looked at the first level — and would fail at runtime, in a
+ * stranger's terminal, with "cannot find module".
+ */
 function expectedImports() {
-  const src = readFileSync(join(ROOT, 'src/cli.ts'), 'utf8');
-  const imports = [...src.matchAll(/from\s+['"](\.\/[^'"]+\.js)['"]/g)].map((match) => match[1]);
-  return ['dist/cli.js', ...imports.map((imp) => 'dist/' + imp.replace(/^\.\//, ''))];
+  const sources = new Set(['src/cli.ts']);
+  const queue = ['src/cli.ts'];
+  while (queue.length > 0) {
+    const source = queue.pop() ?? '';
+    const text = readFileSync(join(ROOT, source), 'utf8');
+    for (const match of text.matchAll(/from\s+['"](\.[^'"]+)['"]/g)) {
+      const target = sourceFor(source, match[1] ?? '');
+      if (target === null || sources.has(target)) continue;
+      sources.add(target);
+      queue.push(target);
+    }
+  }
+  return [...sources].map(
+    (source) => 'dist/' + source.slice('src/'.length).replace(/\.ts$/, '.js'),
+  );
+}
+
+/**
+ * The source file a relative import names, or null when there is none.
+ *
+ * The specifier is the COMPILED name ('./service.js'), so the source is the
+ * same path with the TypeScript extension. An import that names no source
+ * file — a directory, a package — is not part of the closure.
+ */
+function sourceFor(from, specifier) {
+  const target = join(dirname(from), specifier).replace(/\.js$/, '.ts');
+  return existsSync(join(ROOT, target)) ? target : null;
 }
 
 /**
@@ -71,6 +103,10 @@ const expected = [...new Set([...expectedImports(), ...expectedAssets()])];
  * must not depend on what happened to be lying in the working tree.
  */
 function buildPackage() {
+  // The build does not clean `dist/`, so a file the build no longer
+  // produces would survive it — and be packed. The guard measures what a
+  // CLEAN build produces, so it starts from an empty directory.
+  rmSync(join(ROOT, 'dist'), { recursive: true, force: true });
   const result = spawnSync('npm', ['run', 'build'], {
     cwd: ROOT,
     stdio: ['inherit', process.stderr, 'inherit'],
