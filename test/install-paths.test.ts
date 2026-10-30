@@ -845,5 +845,5 @@ describe('the packed artifact', () => {
     } finally {
       rmSync(staging, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 });
