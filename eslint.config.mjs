@@ -53,7 +53,16 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/*.mjs', '**/*.js'],
+    // Node's globals, for the repository's own tooling.
+    //
+    // NOT `**/*.js`: the browser script is a `.js` file too, and flat config
+    // MERGES `languageOptions.globals` across every matching block rather
+    // than replacing them. A `**/*.js` block would therefore leave `process`,
+    // `require`, `module` and `Buffer` DEFINED in the browser script — where
+    // they throw a ReferenceError at runtime, in the operator's browser,
+    // while the gate says nothing. `scripts/**/*.js` covers the repo's own
+    // scripts; the browser script gets its own block below.
+    files: ['**/*.mjs', 'scripts/**/*.js'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'module',
