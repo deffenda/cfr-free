@@ -47,5 +47,12 @@ for (const asset of ASSETS) {
     );
     process.exit(1);
   }
-  console.log(`copy-assets: ${asset.from} -> ${asset.to}`);
+  // Progress goes to stderr, never to stdout. npm's stdout is not the
+  // program's alone: `npm pack --json` writes its payload there, and
+  // whatever a lifecycle script prints joins it in the same stream. npm
+  // runs `prepare` during `npm pack` — npm 10.9.9 and 12.2.1 do so even
+  // with --ignore-scripts (measured) — so a line printed here corrupts
+  // that payload, and the release guard cannot tell a broken package
+  // from a broken parser.
+  console.error(`copy-assets: ${asset.from} -> ${asset.to}`);
 }
