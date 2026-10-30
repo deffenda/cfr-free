@@ -92,8 +92,15 @@ function readPackedPaths(payload: string): string[] {
   }
 }
 
-/** The checks branch protection on `main` requires. Keep in step with it. */
-const REQUIRED_CHECKS = ['quality (22)', 'quality (24)', 'security'] as const;
+/**
+ * The checks branch protection on `main` requires. Keep in step with it.
+ *
+ * The list is FOUR checks, not three: `actionlint` is a required check too
+ * (it is its own workflow job), and a guard that names only the three it
+ * remembered under-states the merge floor the same way the documentation
+ * did.
+ */
+const REQUIRED_CHECKS = ['quality (22)', 'quality (24)', 'security', 'actionlint'] as const;
 
 const workflow = readFileSync(WORKFLOW_PATH, 'utf8');
 const manifest = JSON.parse(readFileSync(PACKAGE_PATH, 'utf8')) as {
@@ -457,11 +464,18 @@ function checkoutFetchDepth(jobText: string): string | undefined {
 }
 
 /**
- * The actionlint version every WORKFLOW install pins. One version across
- * the workflows — ci.yml's quality job, ci.yml's `actionlint` job and
- * release's `ci` job — or a change is green on one leg and red on
- * another. The local leg names its own copy of the version in AGENTS.md
- * and CONTRIBUTING.md; this test reads the workflow files and
+ * The actionlint COMMIT every WORKFLOW install pins.
+ *
+ * The pin is the commit, not the tag: every other dependency these
+ * workflows fetch is SHA-pinned, and this `go install` was the one
+ * unpinned fetch — a retagged upstream release would have executed in CI
+ * with the runner's credentials. The human version is named in the
+ * comment beside the pin, the convention the actions already follow.
+ *
+ * One commit across the workflows — ci.yml's quality job, ci.yml's
+ * `actionlint` job and release's `ci` job — or a change is green on one
+ * leg and red on another. The local leg names its own copy of the version
+ * in AGENTS.md and CONTRIBUTING.md; this test reads the workflow files and
  * package.json only, so a version mentioned only in prose is unguarded
  * BY CHOICE — every workflow install must equal the constant below.
  */
@@ -900,6 +914,26 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
     }
   });
 
+  it('names every required check in AGENTS.md', () => {
+    // AGENTS.md is the file an agent reads to decide which checks to wait
+    // for. It named THREE of the FOUR checks branch protection requires,
+    // and the guard that was supposed to keep the list in step repeated
+    // the same three — so the two agreed with each other and disagreed
+    // with the merge floor. The list is now the four, and this test keeps
+    // the prose and the guard in step with each other.
+    const agents = readFileSync(fileURLToPath(new URL('../AGENTS.md', import.meta.url)), 'utf8');
+    const sentence = agents.split('\n').find((line) => line.includes('Required checks on'));
+    expect(sentence, 'AGENTS.md must state the required checks').toBeDefined();
+    // The LIST, not the file: a check named anywhere else in AGENTS.md
+    // would satisfy a "does the file mention it" test even when the list
+    // itself still names only three of the four.
+    const listed = sentence?.split('Required checks on `main` are ')[1]?.split(';')[0] ?? '';
+    const named = [...listed.matchAll(/`([^`]+)`/g)].map((match) => match[1] ?? '').sort();
+    expect(named, 'AGENTS.md must name exactly the required checks').toEqual(
+      [...REQUIRED_CHECKS].sort(),
+    );
+  });
+
   it('still produces every check branch protection requires', () => {
     // The matrix legs become the check names, so the matrix has to contain
     // the versions branch protection names.
@@ -909,6 +943,7 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
     const produced = new Set([
       ...pullRequestNodes(workflow).map((node) => `quality (${node})`),
       'security',
+      'actionlint',
     ]);
     for (const required of REQUIRED_CHECKS) {
       expect(produced, `required check "${required}" would never report`).toContain(required);
