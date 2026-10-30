@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { z } from 'zod';
 
 /**
  * What changed between the previous sync and the current one, computed from
@@ -11,6 +12,20 @@ import { createHash } from 'node:crypto';
 
 /** Citations listed per category; counts always reflect the full diff. */
 export const CHANGE_LIST_CAP = 100;
+
+/**
+ * What the corpus receipt covers — and what it does not — in one sentence
+ * the MCP surface and the SPEC both state.
+ *
+ * The receipt is computed from the per-provision content hashes and stored
+ * in the same SQLite file it covers, so anyone who can write the index can
+ * recompute it. It is a RECEIPT over the local copy: it detects ACCIDENTAL
+ * corruption of that copy and nothing more. It is not a signature, not a
+ * tamper-evidence anchor, and it makes no claim about the upstream text.
+ */
+export const CORPUS_RECEIPT_LIMIT =
+  'a receipt over this index that detects ACCIDENTAL corruption of the local copy — ' +
+  'not a signature, and no claim about the upstream text';
 
 export interface SyncChanges {
   /** Issue date of the previous index (null on the very first sync). */
@@ -28,6 +43,33 @@ export interface SyncChanges {
   readonly parserChanged: boolean;
   readonly recordedAt: string;
 }
+
+/**
+ * The validator for the persisted sync-change record.
+ *
+ * CR-20 found that the record was read back with a bare `JSON.parse(raw) as
+ * SyncChanges`. The `catch` covered only PARSE failure — a syntactically
+ * valid record with a different shape passed straight through the cast and
+ * onto the wire (`/health`'s `lastChanges`, MCP `index_status`). The cast
+ * silently disabled the guarantee the doc comment claimed, and a future
+ * change to {@link SyncChanges} would not have been caught.
+ *
+ * This schema is the shape check. A record that does not satisfy it is
+ * treated as absent, not as a crash.
+ */
+export const syncChangesSchema = z.object({
+  fromIssueDate: z.string().nullable(),
+  toIssueDate: z.string(),
+  changed: z.number().int().nonnegative(),
+  added: z.number().int().nonnegative(),
+  removed: z.number().int().nonnegative(),
+  changedCitations: z.array(z.string()),
+  addedCitations: z.array(z.string()),
+  removedCitations: z.array(z.string()),
+  baseline: z.boolean(),
+  parserChanged: z.boolean(),
+  recordedAt: z.string(),
+});
 
 /**
  * sha256 of a section's TEXT — the unit of "did this provision change?".
@@ -76,8 +118,11 @@ export function hashContent(text: string, heading: string): string {
  *
  * Each per-provision hash is the same content hash the change diff uses
  * (text + heading), so the receipt moves whenever a provision amendment does.
- */
-export function corpusHash(hashes: ReadonlyMap<string, string>): string {
+ *
+ * What it is NOT: the receipt lives in the index it covers, so it detects
+ * ACCIDENTAL corruption of the local copy and proves nothing about tampering
+ * or about the upstream — see {@link CORPUS_RECEIPT_LIMIT}.
+ */ export function corpusHash(hashes: ReadonlyMap<string, string>): string {
   const digest = createHash('sha256');
   // Sorted by citation, then hashed as `citation\0hash\n` pairs. The pairs
   // are taken from the map's own entries, so a key always carries its hash

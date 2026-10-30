@@ -59,6 +59,7 @@ function specLintRules(): Map<string, LintRule> {
 /** The rules `eslint.config.mjs` sets, keyed `scope|rule`. */
 function configLintRules(): Map<string, LintRule> {
   const source = readFileSync(path.join(ROOT, 'eslint.config.mjs'), 'utf8');
+  const shared = sharedRuleObjects(source);
   const rules = new Map<string, LintRule>();
   let scope = '(default)';
   const token = /(files:\s*\[)|(rules:\s*\{)/g;
@@ -75,7 +76,24 @@ function configLintRules(): Map<string, LintRule> {
     } else {
       const block = readBalanced(source, token.lastIndex - 1);
       expect(block, 'the rules: block must close').not.toBeNull();
-      for (const [rule, raw] of parseEntries(block?.text ?? '')) {
+      const text = block?.text ?? '';
+      // A block may SPREAD a shared rule object (`...CORRECTNESS_RULES`)
+      // instead of repeating the rules. The spread rules are the block's own,
+      // at the scope the block sets, so they are expanded before the two
+      // sides are compared — otherwise a rule the config really enforces
+      // would read as one the config never states.
+      const entries = new Map<string, string>();
+      for (const spread of text.matchAll(/\.\.\.([A-Za-z_$][\w$]*)/g)) {
+        const sharedEntries = shared.get(spread[1] ?? '');
+        expect(
+          sharedEntries,
+          `the rules: block spreads ${spread[1]}, which the config does not declare`,
+        ).toBeDefined();
+        for (const [rule, raw] of sharedEntries ?? []) entries.set(rule, raw);
+      }
+      // The block's own entries come last: they override the spread.
+      for (const [rule, raw] of parseEntries(text)) entries.set(rule, raw);
+      for (const [rule, raw] of entries) {
         const described = describeValue(raw);
         rules.set(`${scope}|${rule}`, { rule, ...described });
       }
@@ -83,6 +101,26 @@ function configLintRules(): Map<string, LintRule> {
     match = token.exec(source);
   }
   return rules;
+}
+
+/**
+ * The rule objects the config declares at the top level, keyed by name.
+ *
+ * The config states the correctness rules ONCE and spreads them into the
+ * scopes that enforce them, so a comparison that reads only a block's own
+ * entries would miss every rule the spread carries.
+ */
+function sharedRuleObjects(source: string): Map<string, Map<string, string>> {
+  const shared = new Map<string, Map<string, string>>();
+  const declaration = /const\s+([A-Za-z_$][\w$]*)\s*=\s*\{/g;
+  let match = declaration.exec(source);
+  while (match !== null) {
+    const block = readBalanced(source, declaration.lastIndex - 1);
+    expect(block, 'a shared rule object must close').not.toBeNull();
+    shared.set(match[1] ?? '', parseEntries(block?.text ?? ''));
+    match = declaration.exec(source);
+  }
+  return shared;
 }
 
 /** The text between the bracket at `open` and its matching close. */

@@ -9,6 +9,13 @@ COPY package.json package-lock.json tsconfig.json tsconfig.build.json ./
 # run against an empty source tree and fail. The build is run explicitly below.
 RUN npm ci --ignore-scripts
 COPY src ./src
+# The build copies the browser assets (src/titan/ui-client.js and .css)
+# into dist/ itself — `tsc` compiles TypeScript and copies nothing else —
+# so the copy script has to be in the tree the build runs in.
+COPY scripts ./scripts
+# The OpenAPI document: the service serves it at /openapi.yaml, so a
+# running instance carries its own contract.
+COPY docs/openapi.yaml ./docs/openapi.yaml
 RUN npm run build && npm prune --omit=dev
 
 # --- runtime stage: minimal image, non-root, index in /data -----------------
@@ -27,6 +34,8 @@ ENV NODE_ENV=production \
 COPY --from=build --chown=cfr:cfr /app/dist ./dist
 COPY --from=build --chown=cfr:cfr /app/node_modules ./node_modules
 COPY --from=build --chown=cfr:cfr /app/package.json ./package.json
+# The OpenAPI document, served at /openapi.yaml.
+COPY --from=build --chown=cfr:cfr /app/docs/openapi.yaml ./docs/openapi.yaml
 RUN mkdir -p /data && chown cfr:cfr /data
 USER cfr
 

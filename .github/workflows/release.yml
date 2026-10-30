@@ -21,6 +21,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history AND tags: the release guard (test/install-paths.test.ts)
+          # reads `git tag` and the tree a tag was cut from. The default
+          # checkout is --depth 1 with no tags, which made that guard VACUOUS
+          # in CI — it asserted nothing at all (measured 2026-10-29).
+          fetch-depth: 0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
@@ -58,6 +64,10 @@ jobs:
           curl -fsS http://127.0.0.1:8787/health | grep '"status":"ok"'
           curl -fsS http://127.0.0.1:8787/metrics | grep -E '^cfr_free_sections [1-9]'
           curl -fsS 'http://127.0.0.1:8787/api/v1/search?q=mental+disorder&per_page=1' | grep '"citation"'
+          # The UI assets are read from disk at startup: a container that
+          # does not ship them serves a 404 for /ui.js, and the page is dead.
+          curl -fsS http://127.0.0.1:8787/ui.js | grep -q 'function byId'
+          curl -fsS http://127.0.0.1:8787/ui.css | grep -q 'body'
           docker rm -f cfr
       - name: MCP stdio handshake against the synced index
         run: |
@@ -141,6 +151,12 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run build
+      - name: verify the tarball will carry everything the program reads
+        # This is the job that publishes the tarball people download, so
+        # this is where the check has to be. (The npm job runs the same
+        # script; a check that only guards a job that never runs guards
+        # nothing.)
+        run: node scripts/verify-packed.mjs
       - name: pack the tarball
         run: |
           PKG="$(node -p "require('./package.json').version")"
@@ -244,27 +260,8 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           PKG="$(node -p "require('./package.json').version")"
           test "$TAG" = "$PKG" || { echo "tag v$TAG != package.json $PKG — bump package.json before tagging"; exit 1; }
-      - name: verify packed executable and imports
-        run: |
-          node <<'NODE'
-          const { execSync } = require('node:child_process');
-          const fs = require('node:fs');
-          const src = fs.readFileSync('src/cli.ts', 'utf8');
-          const imports = [...src.matchAll(/from\s+['"](\.\/[^'"]+\.js)['"]/g)].map(m => m[1]);
-          const expected = new Set(['dist/cli.js']);
-          for (const imp of imports) expected.add('dist/' + imp.replace(/^\.\//, ''));
-          const out = execSync('npm pack --dry-run --ignore-scripts --json', { encoding: 'utf8' });
-          const parsed = JSON.parse(out);
-          const files = new Set((parsed[0]?.files || []).map(f => f.path));
-          const missing = [...expected].filter(f => !files.has(f));
-          if (missing.length) {
-            console.error('Missing from packed package:');
-            for (const f of missing) console.error('  ' + f);
-            process.exit(1);
-          }
-          console.log('Packed package contains executable and all imports:');
-          for (const f of expected) console.log('  ' + f);
-          NODE
+      - name: verify packed executable, imports and runtime assets
+        run: node scripts/verify-packed.mjs
       - name: executable smoke
         run: node dist/cli.js --help
       - name: publish (dry-run first)
