@@ -73,6 +73,13 @@ export class RateLimiter {
     // with a capacity of 5 and a cost of 10, zero of a thousand calls
     // were admitted, at any clock. A FULL bucket still admits one such
     // request and is emptied by it — the shortfall is not carried over.
+    //
+    // The escape has a price worth naming: a bucket SMALLER than the
+    // cost buys one expensive request per refill interval, so a smaller
+    // bucket buys MORE expensive requests than a larger one. The
+    // published default (capacity 60, cost 10) never reaches this
+    // branch — it is reachable only by configuring the bucket below the
+    // route's own cost.
     if (wanted > this.capacity && bucket.tokens >= this.capacity) {
       bucket.tokens = 0;
       return { allowed: true, retryAfterSec: 0 };

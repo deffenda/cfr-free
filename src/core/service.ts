@@ -778,7 +778,9 @@ export class CFRService {
    *
    * @throws {ServiceError} (`invalid_input`) when no eCFR client was
    *   injected, or when a date is malformed/impossible or the two dates are
-   *   identical; upstream fetch failures surface as `HttpError`.
+   *   identical; upstream fetch failures surface as `HttpError`, or as
+   *   `SemaphoreOverflowError` when the upstream fetch queue is full (the
+   *   HTTP layer maps that to `503 upstream_busy`).
    */
   async diffBetween(fromDate: string, toDate: string): Promise<IssueDiff> {
     const { ecfr, logger } = this;
@@ -808,7 +810,9 @@ export class CFRService {
    *   injected, or when a date is malformed/impossible, the two dates are
    *   identical, or the citation is not recognizable; (`not_found`) when the
    *   citation is missing from BOTH dates' parse results; upstream fetch
-   *   failures surface as `HttpError`.
+   *   failures surface as `HttpError`, or as `SemaphoreOverflowError` when
+   *   the upstream fetch queue is full (the HTTP layer maps that to
+   *   `503 upstream_busy`).
    */
   async redlineBetween(
     fromDate: string,

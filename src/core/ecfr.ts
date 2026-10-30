@@ -53,9 +53,10 @@ export function isIssueDateString(value: string): boolean {
  * published image's budget could otherwise have hundreds of them in
  * flight at once.
  */
-const DEFAULT_MAX_CONCURRENT_FETCHES = 4;
+export const DEFAULT_MAX_CONCURRENT_FETCHES = 4;
+
 /** How many fetches may WAIT for a permit before a request is refused. */
-const DEFAULT_MAX_QUEUED_FETCHES = 16;
+export const DEFAULT_MAX_QUEUED_FETCHES = 16;
 /** How long a fetched document is reused, from the fetch (not from a read). */
 export const DEFAULT_FULL_TITLE_XML_TTL_MS = 5 * 60_000;
 /** How many fetched documents are kept: ~2-3 MB each. */

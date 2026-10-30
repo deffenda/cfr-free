@@ -1,12 +1,19 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { describe, expect, it } from 'vitest';
+import { parseDocument } from 'yaml';
 import type { EcfrApi } from '../src/core/ecfr.js';
-import { DEFAULT_FULL_TITLE_XML_TTL_MS, FULL_TITLE_XML_MEMO_CAP } from '../src/core/ecfr.js';
+import {
+  DEFAULT_FULL_TITLE_XML_TTL_MS,
+  DEFAULT_MAX_CONCURRENT_FETCHES,
+  DEFAULT_MAX_QUEUED_FETCHES,
+  FULL_TITLE_XML_MEMO_CAP,
+} from '../src/core/ecfr.js';
 import { CFRService } from '../src/core/service.js';
 import { buildMcpServer } from '../src/mcp/server.js';
+import { EXPENSIVE_ROUTE_COST } from '../src/titan/http-server.js';
 import { createTestLogger, openTempStore } from './helpers.js';
 
 /**
@@ -19,18 +26,21 @@ import { createTestLogger, openTempStore } from './helpers.js';
  * shared by concurrent readers of the same date (SPEC §5). It is not a
  * cross-process or persistent cache.
  *
- * Six places in the published surface used to say the opposite — "no cache",
+ * Many places in the published surface used to say the opposite — "no cache",
  * "stateless", "fetched per call" — and nothing in the suite would have
  * noticed: the implementation was right and the documents were wrong. This
- * suite is the tripwire. It checks the documents and the tool descriptions an
- * LLM caller actually reads, not their formatting, so a rewrap does not break
- * it while a re-introduced false claim does.
+ * suite is the tripwire. It checks the documents, the tool descriptions an
+ * LLM caller actually reads, and EVERY source file, not their formatting, so
+ * a rewrap does not break it while a re-introduced false claim does.
  */
 
 /** A claim that contradicts the per-process document memo, and why. */
 const FALSE_CLAIMS: readonly { readonly pattern: RegExp; readonly because: string }[] = [
   {
-    pattern: /\bno cache\b/i,
+    // The lookahead keeps an HTTP header statement out of it: "no
+    // Cache-Control header" is a claim about a response header, not
+    // about the memo, and reading it as one would flag a true sentence.
+    pattern: /\bno cache\b(?!-)/i,
     because:
       'a fetched document is reused for five minutes by the process that fetched it (SPEC §5)',
   },
@@ -132,8 +142,65 @@ function findFalseClaims(surface: string, text: string): Violation[] {
   return violations;
 }
 
+/** The absolute path of a repository file. */
+function repoPath(relative: string): string {
+  return fileURLToPath(new URL(`../${relative}`, import.meta.url));
+}
+
 function readDoc(relative: string): string {
-  return readFileSync(fileURLToPath(new URL(`../${relative}`, import.meta.url)), 'utf8');
+  return readFileSync(repoPath(relative), 'utf8');
+}
+
+/**
+ * Every source file under `src/`, as repository-relative paths.
+ *
+ * The list is WALKED, not written out: a hand-written file list is
+ * exactly what let three command docstrings keep a false claim the
+ * tripwire could not see.
+ */
+function sourceFiles(relative = 'src'): readonly string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(repoPath(relative), { withFileTypes: true })) {
+    const child = `${relative}/${entry.name}`;
+    if (entry.isDirectory()) found.push(...sourceFiles(child));
+    else if (/\.(?:ts|js|mjs|cjs)$/.test(entry.name)) found.push(child);
+  }
+  return found;
+}
+
+/**
+ * A number the way a document may spell it: the digits, or the word.
+ *
+ * A number with no word is spelled by its digits ALONE. An empty
+ * alternative would leave the pattern matching the bare words that
+ * follow it — "waiting", "run at a time" — and the pin would then pass
+ * for ANY value at all, which is how a queue bound of a hundred
+ * thousand went unnoticed.
+ */
+function spellings(value: number, words: Readonly<Record<number, string>>): string {
+  const word = words[value];
+  return word === undefined ? String(value) : `${value}|${word}`;
+}
+
+/**
+ * The token-cost table published in a document's API description.
+ *
+ * The table is MARKDOWN inside the description string, so it is read as
+ * text: a row is a label and a number, and the number is the one the
+ * code charges.
+ */
+function publishedTokenCosts(
+  doc: string,
+): readonly { readonly label: string; readonly tokens: number }[] {
+  const description = parseDocument(readDoc(doc)).getIn(['info', 'description']);
+  if (typeof description !== 'string') return [];
+  const rows: { label: string; tokens: number }[] = [];
+  for (const line of description.split('\n')) {
+    const match = /^\|\s*(.+?)\s*\|\s*(\d+)\s*\|$/.exec(line.trim());
+    if (match === null) continue;
+    rows.push({ label: match[1] ?? '', tokens: Number(match[2] ?? '0') });
+  }
+  return rows;
 }
 
 /** Render the violations so the failure message says what is wrong. */
@@ -165,21 +232,16 @@ describe('published contract: the upstream fetch path is not "stateless"', () =>
     expect(violations, describeViolations(violations)).toEqual([]);
   });
 
-  it('the service module makes no false claim', () => {
-    // The WHOLE module, not only the two docstrings the first pass
-    // happened to look at: a false claim in any other comment of this file
-    // is just as false, and pinning two of them left the rest unpoliced.
-    const violations = findFalseClaims('src/core/service.ts', readDoc('src/core/service.ts'));
-    expect(violations, describeViolations(violations)).toEqual([]);
-  });
-
-  it('the core diff/redline modules make no false claim', () => {
-    // The review found `src/core/diff.ts` still opening with "Stateless
-    // point-in-time diff" while the same file, further down, said the memo
-    // may serve either document — the file contradicted itself, and this
-    // suite could not see it because it only read the published documents
-    // and the service's docstrings.
-    for (const file of ['src/core/diff.ts', 'src/core/redline.ts']) {
+  it('no source file makes a false claim', () => {
+    // EVERY file under src/, not the two the first pass happened to look
+    // at. The review found `src/core/diff.ts` still opening with
+    // "Stateless point-in-time diff" while the same file, further down,
+    // said the memo may serve either document — the file contradicted
+    // itself, and this suite could not see it because it only read the
+    // published documents and the service's docstrings. The same review
+    // then found three MORE in `src/commands/`, which a hand-written
+    // file list would have kept missing.
+    for (const file of sourceFiles()) {
       const violations = findFalseClaims(file, readDoc(file));
       expect(violations, describeViolations(violations)).toEqual([]);
     }
@@ -192,7 +254,7 @@ describe('published contract: the upstream fetch path is not "stateless"', () =>
     // them out ("five-minute") or use digits ("5-minute") — both are the
     // number the code uses.
     const words: Record<number, string> = { 4: 'four', 5: 'five' };
-    const spelled = (value: number): string => `${value}|${words[value] ?? ''}`;
+    const spelled = (value: number): string => spellings(value, words);
     const minutes = DEFAULT_FULL_TITLE_XML_TTL_MS / 60_000;
     const cap = FULL_TITLE_XML_MEMO_CAP;
     for (const doc of ['docs/SPEC.md', 'docs/openapi.yaml', 'README.md']) {
@@ -205,6 +267,33 @@ describe('published contract: the upstream fetch path is not "stateless"', () =>
         new RegExp(`\\b(?:${spelled(cap)}) documents`, 'i'),
       );
     }
+  });
+
+  it('the published token-cost table matches the code', () => {
+    // The API description publishes a NUMBER the code charges. Nothing
+    // compared the two: changing the published 10 to a 1 left every test
+    // green, and the document then lied about the budget the router
+    // spends.
+    const rows = publishedTokenCosts('docs/openapi.yaml');
+    const expensive = rows.find((row) => row.label.includes('/api/v1/diff'));
+    expect(expensive, 'the API description must publish the cost of the diff route').toBeDefined();
+    expect(expensive?.tokens).toBe(EXPENSIVE_ROUTE_COST);
+    const cheap = rows.find((row) => row.label.includes('every other path'));
+    expect(cheap?.tokens).toBe(1);
+  });
+
+  it('the published upstream-fetch bounds match the code', () => {
+    // The SPEC publishes the semaphore's two numbers: how many fetches run
+    // at once and how many may wait. Changing the code's queue bound from
+    // sixteen to a hundred thousand left every test green, and the
+    // published "sixteen waiting" became a lie.
+    const words: Record<number, string> = { 4: 'four', 16: 'sixteen' };
+    const spelled = (value: number): string => spellings(value, words);
+    const spec = readDoc('docs/SPEC.md');
+    expect(spec).toMatch(
+      new RegExp(`\\b(?:${spelled(DEFAULT_MAX_CONCURRENT_FETCHES)}) run at a time`, 'i'),
+    );
+    expect(spec).toMatch(new RegExp(`\\b(?:${spelled(DEFAULT_MAX_QUEUED_FETCHES)}) waiting`, 'i'));
   });
 
   it('the MCP tool descriptions make no false claim', async () => {

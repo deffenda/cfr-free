@@ -422,7 +422,7 @@ async function handleRedline(
   // Pure function of two fixed dates + one citation: cacheable like the diff
   // route. 5 min (not 3600) because a redline spans two upstream fetches and
   // the from/to window is only rarely an identical document; errors below carry
-  // no cache-control (matching handleDiff's shape).
+  // no Cache-Control header (matching handleDiff's shape).
   sendJson(req, res, 200, { ...redline }, 'public, max-age=300');
 }
 
@@ -609,13 +609,13 @@ function parseRequestUrl(raw: string | undefined): URL | null {
  * (60 burst, 10 a second) bought ten whole upstream documents a second —
  * twenty of them, counting the two documents a diff or a redline pulls.
  */
+/** The token cost of a route that pulls the whole upstream document. */
+export const EXPENSIVE_ROUTE_COST = 10;
+
 function requestCost(pathname: string): number {
   if (pathname === DIFF_PATH || pathname === REDLINE_PATH) return EXPENSIVE_ROUTE_COST;
   return 1;
 }
-
-/** The token cost of a route that pulls the whole upstream document. */
-const EXPENSIVE_ROUTE_COST = 10;
 
 /**
  * The cost of a request the router will REFUSE (a bad method, an
