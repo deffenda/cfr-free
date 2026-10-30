@@ -5,8 +5,8 @@ import { hashContent } from './changes.js';
 import {
   EXCEPTION_DEMOTION_KEY,
   asksAboutExceptions,
+  buildFtsQueries,
   contentTerms,
-  ftsParts,
   queryTerms,
   tidySnippet,
   toFtsQuery,
@@ -654,7 +654,6 @@ export class Store {
     return rows.map((row) => String(row['citation']));
   }
 
-  /** sha256 of every indexed section's text — the pre-sync snapshot. */
   /**
    * SHA-256 of every section's text, keyed by citation. Read in bounded
    * rowid batches: materializing the whole corpus in one `.all()` would
@@ -726,13 +725,14 @@ export class Store {
     // ONE parse of the query feeds both tiers: the candidate query (OR) and
     // the AND-tier membership query (AND) are the same fragments joined
     // differently, so a query with no usable terms has no candidate set.
+    // The builder is the SAME one `toFtsQuery` uses, so the hits and the
+    // `inResults` membership check can never disagree (CR-15).
     const terms = queryTerms(query.query);
-    const parts = ftsParts(terms);
-    if (parts.length === 0) {
+    const queries = buildFtsQueries(terms);
+    if (queries === null) {
       return { hits: [], total: 0, page: query.page, perPage, matchMode: 'or' };
     }
-    const orQuery = parts.join(' OR ');
-    const andQuery = parts.join(' AND ');
+    const { or: orQuery, and: andQuery } = queries;
 
     const total = this.countMatches(orQuery, filters);
     if (total === 0) {

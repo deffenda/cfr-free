@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { diffIssues } from '../src/core/diff.js';
 import { EcfrApi } from '../src/core/ecfr.js';
-import { HttpClient, HttpError } from '../src/core/http-client.js';
-import { ServiceError } from '../src/core/service.js';
+import { HttpClient } from '../src/core/http-client.js';
+import { ServiceError } from '../src/core/errors.js';
 import { SyncError } from '../src/core/sync.js';
 import { createTestLogger, type TestLogger } from './helpers.js';
 import type { FetchLike } from '../src/core/http-client.js';
@@ -170,8 +170,12 @@ describe('diffIssues', () => {
     const requested: string[] = [];
     const deps = makeDeps(makeDiffFetch(requested, { [TO_DATE]: TO_XML }));
     const error = await rejection(diffIssues(deps, '2025-02-29', TO_DATE));
-    expect(error).toBeInstanceOf(HttpError);
-    expect((error as HttpError).status).toBe(404);
+    // The upstream's 404 is translated into the usage error it is: the
+    // date is the reader's argument, and a script must not retry it
+    // forever.
+    expect(error).toBeInstanceOf(ServiceError);
+    expect((error as ServiceError).code).toBe('invalid_input');
+    expect((error as Error).message).toContain('2025-02-29');
     expect(requested).toEqual(['2025-02-29', TO_DATE]);
   });
 

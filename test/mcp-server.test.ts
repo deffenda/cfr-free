@@ -3,6 +3,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { corpusHash, hashContent } from '../src/core/changes.js';
 import type { EcfrApi } from '../src/core/ecfr.js';
+import { HttpError } from '../src/core/http-client.js';
 import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
 import { CFRService } from '../src/core/service.js';
 import { buildMcpServer } from '../src/mcp/server.js';
@@ -683,17 +684,17 @@ describe('MCP diff_issues tool (ecfr injected)', () => {
   );
 
   /** Offline eCFR stub keyed by date; unknown dates reject like upstream 404. */
-  function stubEcfr(xmlByDate: Readonly<Record<string, string>>): EcfrApi {
+  function stubEcfr(xmlByDate: Readonly<Record<string, string>>, failureStatus = 404): EcfrApi {
     return {
       getFullTitleXml: async (issueDate: string) => {
         const xml = xmlByDate[issueDate];
         if (xml === undefined) {
-          // The real client throws an HttpError carrying the status; the
-          // historical read maps a 404 to a clean not_found, so the stub
-          // must be faithful about it.
-          const error = new Error(`HTTP 404 for ${issueDate}`) as Error & { status?: number };
-          error.status = 404;
-          throw error;
+          // The real client throws an `HttpError` carrying the status; a 404
+          // means "no revision for this date" and is translated into a
+          // usage error, so the stub must be faithful about the type — the
+          // archive guard recognises it by `instanceof` (CR-22), not by a
+          // loose object that merely happens to have a `status` property.
+          throw new HttpError(`HTTP ${failureStatus} for ${issueDate}`, issueDate, failureStatus);
         }
         return xml;
       },
@@ -910,8 +911,9 @@ describe('MCP diff_issues tool (ecfr injected)', () => {
       await probe.close();
     }
 
-    // Upstream fetch failure: HttpError is NOT client-safe → generic text.
-    const upstream = await connectedServer(stubEcfr({}));
+    // Upstream fetch failure: an HttpError is NOT client-safe → generic
+    // text.
+    const upstream = await connectedServer(stubEcfr({}, 500));
     try {
       const result = (await upstream.client.callTool({
         name: 'diff_issues',
@@ -919,9 +921,25 @@ describe('MCP diff_issues tool (ecfr injected)', () => {
       })) as ToolCallResult;
       expect(result.isError).toBe(true);
       expect(result.content[0]?.text).toContain('internal server error');
-      expect(result.content[0]?.text).not.toContain('HTTP 404');
+      expect(result.content[0]?.text).not.toContain('HTTP 500');
     } finally {
       await upstream.close();
+    }
+
+    // A date the upstream has no revision for is the reader's argument,
+    // not an upstream failure: the guidance names the date and nothing
+    // else.
+    const noRevision = await connectedServer(stubEcfr({}));
+    try {
+      const result = (await noRevision.client.callTool({
+        name: 'diff_issues',
+        arguments: { from_date: FROM_DATE, to_date: TO_DATE },
+      })) as ToolCallResult;
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain('serves no revision');
+      expect(result.content[0]?.text).not.toContain('HTTP 404');
+    } finally {
+      await noRevision.close();
     }
   });
 
@@ -964,17 +982,17 @@ describe('MCP redline tool (ecfr injected)', () => {
   );
 
   /** Offline eCFR stub keyed by date; unknown dates reject like upstream 404. */
-  function stubEcfr(xmlByDate: Readonly<Record<string, string>>): EcfrApi {
+  function stubEcfr(xmlByDate: Readonly<Record<string, string>>, failureStatus = 404): EcfrApi {
     return {
       getFullTitleXml: async (issueDate: string) => {
         const xml = xmlByDate[issueDate];
         if (xml === undefined) {
-          // The real client throws an HttpError carrying the status; the
-          // historical read maps a 404 to a clean not_found, so the stub
-          // must be faithful about it.
-          const error = new Error(`HTTP 404 for ${issueDate}`) as Error & { status?: number };
-          error.status = 404;
-          throw error;
+          // The real client throws an `HttpError` carrying the status; a 404
+          // means "no revision for this date" and is translated into a
+          // usage error, so the stub must be faithful about the type — the
+          // archive guard recognises it by `instanceof` (CR-22), not by a
+          // loose object that merely happens to have a `status` property.
+          throw new HttpError(`HTTP ${failureStatus} for ${issueDate}`, issueDate, failureStatus);
         }
         return xml;
       },
@@ -1123,7 +1141,9 @@ describe('MCP redline tool (ecfr injected)', () => {
   });
 
   it('masks upstream fetch failures as the generic internal server error', async () => {
-    const upstream = await connectedServer(stubEcfr({}));
+    // A 500 is a genuine upstream failure: it is masked, and nothing of
+    // the upstream's answer reaches the client.
+    const upstream = await connectedServer(stubEcfr({}, 500));
     try {
       const result = (await upstream.client.callTool({
         name: 'redline',
@@ -1131,6 +1151,24 @@ describe('MCP redline tool (ecfr injected)', () => {
       })) as ToolCallResult;
       expect(result.isError).toBe(true);
       expect(result.content[0]?.text).toContain('internal server error');
+      expect(result.content[0]?.text).not.toContain('HTTP 500');
+    } finally {
+      await upstream.close();
+    }
+  });
+
+  it('explains a date the upstream has no revision for', async () => {
+    // A 404 is the reader's argument, not an upstream failure: the
+    // guidance names the date and nothing else — no endpoint, no upstream
+    // body.
+    const upstream = await connectedServer(stubEcfr({}));
+    try {
+      const result = (await upstream.client.callTool({
+        name: 'redline',
+        arguments: { from_date: FROM_DATE, to_date: TO_DATE, citation: '4.125' },
+      })) as ToolCallResult;
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain('serves no revision');
       expect(result.content[0]?.text).not.toContain('HTTP 404');
     } finally {
       await upstream.close();

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { CFRService, ServiceError } from '../src/core/service.js';
-import { StructureError } from '../src/core/structure.js';
+import { CFRService } from '../src/core/service.js';
+import { ServiceError } from '../src/core/errors.js';
+import { StructureError } from '../src/core/errors.js';
 import { syncIndex } from '../src/core/sync.js';
 import type { EcfrApi } from '../src/core/ecfr.js';
 import {
@@ -211,6 +212,47 @@ describe('CFRService.search', () => {
   ])('rejects invalid input %#', (input) => {
     withService((service) => {
       expect(() => service.search(input)).toThrow(/invalid input/);
+    });
+  });
+
+  it('explains a rejected input in plain language', () => {
+    // The validation library's own phrasing — "Too small: expected string
+    // to have >=3 characters", "Invalid string: must match pattern" — is
+    // developer-facing. The people reading this tool are claims
+    // practitioners, so a rejected input says what to type instead.
+    withService((service) => {
+      expect(() => service.search({ query: 'ab' })).toThrow(
+        /invalid input: the query needs at least 3 characters/,
+      );
+      expect(() => service.search({ query: 'mental disorder', chapter: '4' })).toThrow(
+        /invalid input: the chapter must be a Roman numeral such as I, II or IV/,
+      );
+      expect(() => service.search({ query: 'mental disorder', kind: 'policy' as never })).toThrow(
+        /invalid input: the kind must be `section` or `appendix`/,
+      );
+    });
+  });
+
+  it('names the rule that was broken, not another one', () => {
+    // A hint must answer the question the request actually asked. `page`
+    // can be the wrong type (`?page=1.5` reaches the schema as 1.5) or out
+    // of range (`?page=0`), and a hint that always states the range
+    // answers a question the request did not ask.
+    withService((service) => {
+      expect(() => service.search({ query: 'mental disorder', page: 1.5 })).toThrow(
+        /invalid input: the page number must be a whole number/,
+      );
+      expect(() => service.search({ query: 'mental disorder', page: 0 })).toThrow(
+        /invalid input: the page number starts at 1/,
+      );
+      expect(() => service.search({ query: 'mental disorder', page: 99999 })).toThrow(
+        /invalid input: the page number may be at most 10000/,
+      );
+      // The subject group is the eCFR node id, not a label the hierarchy
+      // prints.
+      expect(() => service.browse({ subjgrp: 'x'.repeat(41) })).toThrow(
+        /invalid input: the subject group may be at most 40 characters/,
+      );
     });
   });
 
