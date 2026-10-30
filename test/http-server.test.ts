@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type http from 'node:http';
 import type { EcfrApi } from '../src/core/ecfr.js';
 import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
+import { SemaphoreOverflowError } from '../src/core/semaphore.js';
 import { CFRService } from '../src/core/service.js';
 import { createHttpServer, type HttpServerOptions } from '../src/titan/http-server.js';
 import { createTestLogger, makeSection, openTempStore, type TempStore } from './helpers.js';
@@ -530,6 +531,17 @@ describe('Titan HTTP rate limiting', () => {
   let server: http.Server;
   let base: string;
 
+  /** One document, for the routes that fetch the whole upstream title. */
+  const DIFF_XML =
+    '<ECFR><DIV1 N="38" TYPE="TITLE"><HEAD>Title 38</HEAD><DIV3 N="I" TYPE="CHAPTER"><HEAD>Chapter I</HEAD>' +
+    '<DIV5 N="4" TYPE="PART"><HEAD>Part 4</HEAD><DIV8 N="4.125" TYPE="SECTION"><HEAD>§ 4.125 Test.</HEAD>' +
+    '<P>Body.</P></DIV8></DIV5></DIV3></DIV1>';
+
+  /** Offline eCFR stub: every issue date serves the same document. */
+  function diffEcfr(): EcfrApi {
+    return { getFullTitleXml: async () => DIFF_XML } as unknown as EcfrApi;
+  }
+
   beforeEach(async () => {
     temp = openTempStore();
   });
@@ -571,23 +583,182 @@ describe('Titan HTTP rate limiting', () => {
     }
   });
 
-  it('charges the routes that pull the whole upstream document', async () => {
-    // The cost of a request is what it COSTS. The diff route fetches the
-    // complete Title 38 document from eCFR — ~2 MB on the wire, ~16 MB
-    // parsed — so it must not be buyable with one token: a budget of one
-    // token per request bought ten whole documents a second.
-    server = createHttpServer(new CFRService(temp.store, 7), createTestLogger(), {
-      rateLimit: { capacity: 5, refillPerSec: 0.1 },
-    });
+  it.each([
+    '/api/v1/diff?from=2026-01-01&to=2026-02-01',
+    '/api/v1/redline?from=2026-01-01&to=2026-02-01&citation=4.125',
+  ])('charges the route that pulls the whole upstream document: %s', async (query) => {
+    // The cost of a request is what it COSTS. The diff and the redline
+    // route fetch the complete Title 38 document from eCFR — ~2 MB on the
+    // wire, ~16 MB parsed — so NEITHER may be buyable with one token: a
+    // budget of one token per request bought twenty whole documents a
+    // second. The redline pulls TWO documents, exactly as the diff does.
+    // Only the diff was pinned: dropping `|| pathname === REDLINE_PATH`
+    // from the price left every test green, while the published table
+    // still said the redline costs ten.
+    server = createHttpServer(
+      new CFRService(temp.store, 7, diffEcfr(), createTestLogger()),
+      createTestLogger(),
+      { rateLimit: { capacity: 20, refillPerSec: 0.1 } },
+    );
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
     // A cheap route fits the budget.
     expect((await fetch(`${base}/health`)).status).toBe(200);
-    // The expensive route costs ten tokens, and only five are there.
-    const expensive = await fetch(`${base}/api/v1/diff?from=2026-01-01&to=2026-02-01`);
-    expect(expensive.status).toBe(429);
-    expect(((await expensive.json()) as Json)['error']).toBe('rate_limited');
+    // The expensive route costs ten tokens: the first fits in what is
+    // left of twenty, the second does not.
+    const first = await fetch(`${base}${query}`);
+    expect(first.status).toBe(200);
+    const second = await fetch(`${base}${query}`);
+    expect(second.status).toBe(429);
+    expect(((await second.json()) as Json)['error']).toBe('rate_limited');
+  });
+
+  it('keeps the expensive route reachable when the capacity is below its cost', async () => {
+    // A capacity of five is smaller than the expensive route's cost of
+    // ten. The bucket must still hold ONE expensive request, or the route
+    // is unreachable at any clock (zero of a thousand calls admitted).
+    server = createHttpServer(
+      new CFRService(temp.store, 7, diffEcfr(), createTestLogger()),
+      createTestLogger(),
+      { rateLimit: { capacity: 5, refillPerSec: 0.1 } },
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const admitted = await fetch(`${base}/api/v1/diff?from=2026-01-01&to=2026-02-01`);
+    expect(admitted.status).toBe(200);
+    // The bucket is empty now: the next expensive request is refused.
+    const refused = await fetch(`${base}/api/v1/diff?from=2026-01-01&to=2026-02-01`);
+    expect(refused.status).toBe(429);
+  });
+
+  it('charges a request the method gate refuses', async () => {
+    // A refused request is still a request: leaving the refusal free
+    // would let a peer send unlimited POSTs without touching the budget.
+    server = createHttpServer(new CFRService(temp.store, 7), createTestLogger(), {
+      rateLimit: { capacity: 1, refillPerSec: 0.1 },
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const refused = await fetch(`${base}/health`, { method: 'POST' });
+    expect(refused.status).toBe(405);
+    // The one token is spent: the next request is rate limited.
+    const limited = await fetch(`${base}/health`);
+    expect(limited.status).toBe(429);
+  });
+
+  it('charges a request whose URL is too long', async () => {
+    // Same for the size gate: an oversized URL is refused, but not for
+    // free — unlimited 2 KB URLs are exactly the traffic the budget is
+    // there to bound.
+    server = createHttpServer(new CFRService(temp.store, 7), createTestLogger(), {
+      rateLimit: { capacity: 1, refillPerSec: 0.1 },
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const tooLong = await fetch(`${base}/api/v1/search?q=${'x'.repeat(3000)}`);
+    expect(tooLong.status).toBe(414);
+    const limited = await fetch(`${base}/health`);
+    expect(limited.status).toBe(429);
+  });
+
+  it('charges a refused request one token, not the route’s ten', async () => {
+    // The method gate refuses the POST — but the request is charged
+    // before the gate answers, and a refused request costs one token.
+    server = createHttpServer(
+      new CFRService(temp.store, 7, diffEcfr(), createTestLogger()),
+      createTestLogger(),
+      { rateLimit: { capacity: 10, refillPerSec: 0.1 } },
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const refused = await fetch(`${base}/api/v1/diff?from=2026-01-01&to=2026-02-01`, {
+      method: 'POST',
+    });
+    expect(refused.status).toBe(405);
+    // Nine tokens are left: nine cheap requests fit, the tenth is refused.
+    let served = 0;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const response = await fetch(`${base}/health`);
+      if (response.status !== 200) break;
+      served += 1;
+    }
+    expect(served).toBe(9);
+  });
+
+  it('charges an expensive route its own price for a request the router rejects', async () => {
+    // The oversized-parameter cap is one of the router's byte caps, and it
+    // fires AFTER the bucket was spent. The price still follows the path
+    // the request would have taken: a diff request costs the route's ten
+    // even though the router refused it, because the route was already
+    // identified. The token-cost table publishes this, and it is pinned
+    // here so the table cannot drift from the code.
+    server = createHttpServer(
+      new CFRService(temp.store, 7, diffEcfr(), createTestLogger()),
+      createTestLogger(),
+      { rateLimit: { capacity: 10, refillPerSec: 0.1 } },
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const refused = await fetch(`${base}/api/v1/diff?q=${'x'.repeat(801)}`);
+    expect(refused.status).toBe(400);
+    // The whole budget is gone: the request cost the route's price.
+    let served = 0;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const response = await fetch(`${base}/health`);
+      if (response.status !== 200) break;
+      served += 1;
+    }
+    expect(served).toBe(0);
+  });
+
+  it('charges a cheap route one token for the same rejection', async () => {
+    // The same rejection on a route that reads the index: the cap is the
+    // router's, but the price is the route's — and that route costs one.
+    server = createHttpServer(
+      new CFRService(temp.store, 7, diffEcfr(), createTestLogger()),
+      createTestLogger(),
+      { rateLimit: { capacity: 10, refillPerSec: 0.1 } },
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const refused = await fetch(`${base}/api/v1/search?q=${'x'.repeat(801)}`);
+    expect(refused.status).toBe(400);
+    // Nine tokens are left: the request cost one.
+    let served = 0;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const response = await fetch(`${base}/health`);
+      if (response.status !== 200) break;
+      served += 1;
+    }
+    expect(served).toBe(9);
+  });
+
+  it('answers 503 when the upstream queue is full', async () => {
+    // The fetch queue was full: the request is refused at once instead of
+    // being parked behind the fetches already in flight.
+    const busyEcfr = {
+      getFullTitleXml: async () => {
+        throw new SemaphoreOverflowError(16);
+      },
+    } as unknown as EcfrApi;
+    server = createHttpServer(
+      new CFRService(temp.store, 7, busyEcfr, createTestLogger()),
+      createTestLogger(),
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const response = await fetch(`${base}/api/v1/diff?from=2026-01-01&to=2026-02-01`);
+    expect(response.status).toBe(503);
+    const body = (await response.json()) as Json;
+    expect(body['error']).toBe('upstream_busy');
   });
 });
 
