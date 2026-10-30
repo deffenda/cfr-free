@@ -42,6 +42,7 @@ src/
     historical.ts     point-in-time read: a provision as it stood at a requested date
     http-client.ts    fetch wrapper: timeout, size cap, gzip, friendly errors
     point-in-time.ts  the "a date is a selector, not a stamp" notice, shared by the change views
+    query.ts          the query language: tokenizer, synonyms, FTS5 fragments, stopwords
     redline.ts        per-provision line redline between two issue dates
     references.ts     cross-reference extraction for search results
     service.ts        facade shared by MCP + HTTP: search/getSection/browse/status

@@ -13,16 +13,15 @@ import {
   type StructureNode,
 } from './structure.js';
 import {
-  Store,
   contentTerms,
   hitWords,
   queryTerms,
   termResponded,
   type MatchMode,
   type QueryTerm,
-  type SearchHit,
   visibleMatches,
-} from './store.js';
+} from './query.js';
+import { Store, type SearchHit } from './store.js';
 
 /**
  * Application facade shared by the MCP server and the HTTP API. All input
