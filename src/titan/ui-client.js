@@ -528,6 +528,128 @@
       });
   }
 
+  /** The cells of one pipe row, with the escaped pipes unescaped. */
+  function tableCells(line) {
+    const trimmed = line.trim();
+    if (trimmed.indexOf('|') === -1) return [];
+    const inner = trimmed.replace(/^\|/, '').replace(/\|$/, '');
+    const cells = [];
+    let current = '';
+    for (let index = 0; index < inner.length; index += 1) {
+      const char = inner.charAt(index);
+      // A cell's own pipe is escaped by the parser; the separator row and
+      // the cell boundary are not.
+      if (char === '\\' && inner.charAt(index + 1) === '|') {
+        current += '|';
+        index += 1;
+        continue;
+      }
+      if (char === '|') {
+        cells.push(current.trim());
+        current = '';
+        continue;
+      }
+      current += char;
+    }
+    cells.push(current.trim());
+    return cells;
+  }
+
+  /** True when the line is a markdown table row. */
+  function isPipeRow(line) {
+    return line.trim().indexOf('|') === 0;
+  }
+
+  /** True when the row is the table's separator (a row of dashes). */
+  function isSeparatorRow(line) {
+    const cells = tableCells(line);
+    return cells.length > 0 && cells.every((cell) => /^-+$/.test(cell));
+  }
+
+  /** One markdown table, as a real table. */
+  function renderTable(rows) {
+    const table = el('table', 'rating-table');
+    const head = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    for (const cell of tableCells(rows[0] ?? '')) headRow.appendChild(el('th', '', cell));
+    head.appendChild(headRow);
+    table.appendChild(head);
+    const body = document.createElement('tbody');
+    // The parser emits a separator row under the header; a table without one
+    // has no row to skip.
+    const bodyRows =
+      rows.length > 1 && isSeparatorRow(rows[1] ?? '') ? rows.slice(2) : rows.slice(1);
+    for (const line of bodyRows) {
+      const row = document.createElement('tr');
+      for (const cell of tableCells(line)) row.appendChild(el('td', '', cell));
+      body.appendChild(row);
+    }
+    table.appendChild(body);
+    return table;
+  }
+
+  /**
+   * Render a provision's markdown into the DOM.
+   *
+   * A provision arrives in TWO renderings: `text` (pipe-joined rows with no
+   * separator) and `markdown` (a real markdown table). The UI used the
+   * first, so § 4.130's rating tables — the most-read provision for this
+   * audience — came out as an unaligned run-on block that wrapped
+   * unpredictably on a narrow screen. The structured rendering was already
+   * in the payload; the UI just did not use it.
+   *
+   * This renders the three shapes the parser emits — headings, paragraphs
+   * and tables — with `createElement` and `textContent`, like everything
+   * else here, so the no-HTML-sink posture holds: regulatory text never
+   * reaches one.
+   */
+  function renderMarkdown(container, markdown) {
+    clear(container);
+    const lines = String(markdown === undefined || markdown === null ? '' : markdown).split('\n');
+    let index = 0;
+    while (index < lines.length) {
+      const line = lines[index] ?? '';
+      if (line.trim() === '') {
+        index += 1;
+        continue;
+      }
+      if (isPipeRow(line)) {
+        index = renderTableBlock(container, lines, index);
+        continue;
+      }
+      if (/^###\s/.test(line)) {
+        container.appendChild(el('h3', '', line.replace(/^###\s+/, '')));
+        index += 1;
+        continue;
+      }
+      index = renderParagraphBlock(container, lines, index);
+    }
+  }
+
+  /** The table at `index`, and the index of the first line after it. */
+  function renderTableBlock(container, lines, index) {
+    const rows = [];
+    while (index < lines.length && isPipeRow(lines[index] ?? '')) {
+      rows.push(lines[index] ?? '');
+      index += 1;
+    }
+    container.appendChild(renderTable(rows));
+    return index;
+  }
+
+  /** The paragraph at `index`, and the index of the first line after it. */
+  function renderParagraphBlock(container, lines, index) {
+    const paragraph = [];
+    while (index < lines.length) {
+      const next = lines[index] ?? '';
+      if (next.trim() === '' || isPipeRow(next) || /^###\s/.test(next)) break;
+      paragraph.push(next);
+      index += 1;
+    }
+    if (paragraph.length > 0) container.appendChild(el('p', '', paragraph.join('\n')));
+    return index;
+  }
+
   function fillSection(section) {
     sectionHeading.textContent = String(section.heading);
     const crumbs = [];
@@ -548,7 +670,11 @@
     if (typeof section.notice === 'string' && section.notice !== '') {
       sectionMeta.appendChild(document.createTextNode(' — ' + section.notice));
     }
-    sectionText.textContent = String(section.text);
+    // The markdown is the structured rendering — the one with the rating
+    // tables intact. The text is the fallback, for a payload that does not
+    // carry it.
+    const markdown = typeof section.markdown === 'string' ? section.markdown : '';
+    renderMarkdown(sectionText, markdown === '' ? String(section.text) : markdown);
     fillCitationBlock(section);
     fillReferences(section);
     fillCitedBy(section);

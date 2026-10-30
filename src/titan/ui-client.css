@@ -194,3 +194,41 @@ h2[tabindex='-1']:focus {
   outline: 2px solid #0b57d0;
   outline-offset: 2px;
 }
+
+/*
+ * A rating table, rendered from the provision's markdown.
+ *
+ * The provision arrives in two renderings; the plain one lost the table's
+ * structure, so § 4.130's rating schedule came out as an unaligned run-on
+ * block. This is the shape the data always had.
+ */
+.rating-table {
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  width: 100%;
+  font-size: 0.9rem;
+}
+
+.rating-table th,
+.rating-table td {
+  border: 1px solid #b9b9b9;
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.rating-table th {
+  background: #f2f2f2;
+  font-weight: 600;
+}
+
+@media (prefers-color-scheme: dark) {
+  .rating-table th,
+  .rating-table td {
+    border-color: #4a4a4a;
+  }
+
+  .rating-table th {
+    background: #242424;
+  }
+}
