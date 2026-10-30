@@ -37,12 +37,15 @@ Design choices that keep the attack surface small:
   exposing it.
 - **Deliberate container exposure.** The published Docker image sets
   `CFR_HOST=0.0.0.0` and `CFR_ALLOW_REMOTE=1` intentionally: the published
-  port (`-p 8787:8787`) is the explicit exposure gate — a loopback bind
-  inside the container would make that port unreachable. `/metrics` and
-  `/health` are unauthenticated by design; coarse 429 rate limiting guards
-  non-loopback binds when the remote opt-in is set. Every HTTP response
-  carries `Cross-Origin-Resource-Policy: same-origin`, so browsers refuse
-  to load these endpoints from foreign origins.
+  port is the explicit exposure gate — a loopback bind inside the container
+  would make that port unreachable. The documented default publishes on
+  loopback (`-p 127.0.0.1:8787:8787`, as in the README and in
+  `docker-compose.yml`); publishing on every interface (`-p 8787:8787`) is
+  the opt-in, and the unauthenticated API then needs your own auth in front.
+  `/metrics` and `/health` are unauthenticated by design; coarse 429 rate
+  limiting guards non-loopback binds when the remote opt-in is set. Every
+  HTTP response carries `Cross-Origin-Resource-Policy: same-origin`, so
+  browsers refuse to load these endpoints from foreign origins.
 - **Protocol hygiene.** MCP stdout carries JSON-RPC only; all logging goes to
   stderr as JSON lines. Error messages returned to HTTP clients are
   sanitized (no stack traces, no raw upstream bodies, no query strings).

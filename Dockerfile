@@ -36,9 +36,15 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD node 
 VOLUME /data
 EXPOSE 8787
 
-# Binding 0.0.0.0 with the remote opt-in is deliberate inside a container:
-# the published port (`-p 8787:8787`) is the explicit exposure gate, and
-# loopback inside the container would make the port unreachable. Outside
-# Docker the CLI still defaults to 127.0.0.1 with the opt-in required.
+# The container binds 0.0.0.0 with the remote opt-in set, and that is a
+# CONTAINER-NETWORKING requirement, not an exposure decision: a process bound
+# to the container's own 127.0.0.1 cannot be reached through a published
+# port, so the EXPOSURE GATE is the host-side published port.
+#
+# The documented default for that port is loopback — `-p 127.0.0.1:8787:8787`
+# in the README and in docker-compose.yml — and publishing on every interface
+# (`-p 8787:8787`) is the opt-in. The API has NO authentication, so an
+# exposed port needs a reverse proxy with auth in front of it. Outside Docker
+# the CLI still defaults to 127.0.0.1 with the opt-in required.
 ENTRYPOINT ["node", "dist/cli.js"]
 CMD ["serve"]

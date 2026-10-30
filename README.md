@@ -64,7 +64,7 @@ needs npm and a compiler; the fifth needs a checkout.
 ### 1. Docker (nothing to install)
 
 ```bash
-docker run -d --name cfr-free -p 8787:8787 -v cfr-data:/data \
+docker run -d --name cfr-free -p 127.0.0.1:8787:8787 -v cfr-data:/data \
   ghcr.io/deffenda/cfr-free:latest
 ```
 
@@ -75,6 +75,10 @@ CLI command works the same way, e.g. `docker run --rm -v cfr-data:/data
 ghcr.io/deffenda/cfr-free:latest sync` to refresh, or `… export
 /data/backup.sqlite` to snapshot into the volume. Details under
 [Docker](#docker) below.
+
+**The API has no authentication.** The command above publishes it on loopback
+only, so only this machine can reach it. Publishing it on every interface
+takes `-p 8787:8787` instead — and then it needs your own auth in front.
 
 ### 2. From npm (no compiler, no Docker)
 
@@ -181,9 +185,14 @@ CFR_INDEX_PATH=/tmp/cfr-smoke.sqlite node dist/cli.js sync   # ~5 s, then delete
 ### Docker
 
 ```bash
-docker run -d --name cfr-free -p 8787:8787 -v cfr-data:/data \
+docker run -d --name cfr-free -p 127.0.0.1:8787:8787 -v cfr-data:/data \
   ghcr.io/deffenda/cfr-free:latest
 ```
+
+**The API has no authentication.** The command above publishes it on loopback
+only, so only this machine can reach it. Publishing it on every interface
+takes `-p 8787:8787` instead — and then it needs a reverse proxy with auth in
+front of it.
 
 The container syncs on first start (~5 s, ~2–3 MB from eCFR), then serves
 the HTTP API; the index persists in the `cfr-data` volume mounted at `/data`.
@@ -191,16 +200,19 @@ Any CLI command works the same way, e.g.
 `docker run --rm -v cfr-data:/data ghcr.io/deffenda/cfr-free:latest sync` to
 refresh, or `… export /data/backup.sqlite` to snapshot into the volume.
 
-The image runs as a non-root user and binds `0.0.0.0` with the remote opt-in
-already set — inside a container the published port (`-p`) is the exposure
-gate, and loopback would make it unreachable. Outside Docker the CLI still
-defaults to `127.0.0.1` with `CFR_ALLOW_REMOTE=1` required. When you do
-expose it, a per-peer token-bucket rate limit (60-burst, 10 req/s) turns on
-automatically. Images are published to GHCR on `v*` tags with
-build-provenance attestations.
+The image runs as a non-root user and binds `0.0.0.0` inside the container
+with the remote opt-in already set. That part is a container-networking
+requirement, not an exposure decision: a process bound to the container's own
+`127.0.0.1` cannot be reached through a published port, so the **published
+port is the exposure gate** — and the documented default publishes on
+loopback. Outside Docker the CLI still defaults to `127.0.0.1` with
+`CFR_ALLOW_REMOTE=1` required. When you do expose it, a per-peer token-bucket
+rate limit (60-burst, 10 req/s) turns on automatically. Images are published
+to GHCR on `v*` tags with build-provenance attestations.
 
-Prefer Compose? `docker compose up -d --build` serves the API on
-`127.0.0.1:8787` with a named volume, healthcheck, and sync left explicit
+Compose is the one-command deployment, and it binds loopback too:
+`docker compose up -d --build` serves the API on `127.0.0.1:8787` with a
+named volume, healthcheck, and sync left explicit
 (`docker compose run --rm cfr-free sync`) so starts never trigger a surprise
 download.
 
