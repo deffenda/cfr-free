@@ -140,7 +140,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /openapi.yaml:
-    # source: src/titan/http-server.ts#handleDiscovery
+    # source: src/titan/http-server.ts#dispatch
     get:
       summary: The OpenAPI description of this API
       responses:
@@ -215,7 +215,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1:
-    # source: src/titan/http-server.ts#handleDiscovery
+    # source: src/titan/http-server.ts#dispatch
     get:
       summary: API index — the routes this instance serves
       responses:
