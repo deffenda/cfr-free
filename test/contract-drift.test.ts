@@ -369,3 +369,30 @@ describe('published contract: the upstream fetch path is not "stateless"', () =>
     }
   });
 });
+
+describe('the contract tripwire itself', () => {
+  it('reports a false claim planted on purpose', () => {
+    // A guard nothing pins is a comment, not a check. The review found
+    // that `findFalseClaims` could be broken — made to report nothing
+    // — and every other test in this file would still have passed while
+    // the tripwire was dead. So the tripwire is checked against a claim
+    // that MUST be reported: the planted text says the upstream path
+    // keeps no cache and is stateless, and it sits in a passage about
+    // the upstream path, so both patterns must fire.
+    const planted = 'The upstream diff is stateless: no cache is kept.';
+    const violations = findFalseClaims('planted', planted);
+    expect(violations.length, 'the tripwire must report a planted false claim').toBeGreaterThan(0);
+    expect(violations.map((violation) => violation.claim)).toContain('stateless');
+    expect(violations.map((violation) => violation.claim)).toContain('no cache');
+  });
+
+  it('spells a number that has no word by its digits alone', () => {
+    // An empty alternative would leave the pattern matching the bare
+    // words around it ("waiting", "run at a time"), so the pin would
+    // pass for ANY value at all — which is how a queue bound of a
+    // hundred thousand went unnoticed.
+    expect(spellings(100, {})).toBe('100');
+    expect(spellings(100, {}).split('|')).not.toContain('');
+    expect(spellings(16, { 16: 'sixteen' })).toBe('16|sixteen');
+  });
+});
