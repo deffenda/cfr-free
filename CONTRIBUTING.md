@@ -11,7 +11,11 @@ npm ci          # installs pinned deps (allowlist-managed install scripts)
 npm run ci      # the same gate CI runs
 ```
 
-Requires Node ≥ 22.5.
+Requires Node ≥ 22.5 and `git` on PATH. The release guard
+(`test/install-paths.test.ts`) reads the repository's tags with `git`, and a
+checkout without them makes that guard fail rather than pass silently: a
+shallow clone (`git clone --depth 1`) carries no tags, so fetch them with
+`git fetch --tags`.
 
 The local gate also needs `actionlint` on PATH — `npm run ci` runs
 `npm run lint:actions`. Install it with `brew install actionlint` or
