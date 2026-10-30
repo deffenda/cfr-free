@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { HttpClient } from './http-client.js';
+import { Semaphore } from './semaphore.js';
 
 /** Title handled by this service (v1 scope). */
 export const TITLE_38 = 38;
@@ -43,13 +44,34 @@ export function isIssueDateString(value: string): boolean {
  * The base URL is fixed by construction — callers only ever pass validated
  * date segments, so no user input reaches the URL (no SSRF surface).
  */
+/**
+ * How many upstream document fetches may be in flight at once, and how long
+ * a fetched document is reused.
+ *
+ * The upstream fetches are the expensive ones: the complete Title 38
+ * document is ~2 MB on the wire and ~16 MB parsed, and a peer with the
+ * published image's budget could otherwise have hundreds of them in
+ * flight at once.
+ */
+const DEFAULT_MAX_CONCURRENT_FETCHES = 4;
+const DEFAULT_FULL_TITLE_XML_TTL_MS = 5 * 60_000;
+/** How many fetched documents are kept: ~2-3 MB each. */
+const FULL_TITLE_XML_MEMO_CAP = 4;
+
 export class EcfrApi {
   private readonly http: HttpClient;
   private readonly baseUrl: string;
+  /** Bounds the document fetches in flight at once. */
+  private readonly fetches: Semaphore;
+  private readonly fullTitleXmlTtlMs: number;
+  /** Fetched documents by issue date: the same date is the same document. */
+  private readonly fullTitleXmlMemo = new Map<string, { xml: string; expiresAtMs: number }>();
 
   constructor(http: HttpClient, baseUrl: string = DEFAULT_BASE_URL) {
     this.http = http;
     this.baseUrl = baseUrl;
+    this.fetches = new Semaphore(DEFAULT_MAX_CONCURRENT_FETCHES);
+    this.fullTitleXmlTtlMs = DEFAULT_FULL_TITLE_XML_TTL_MS;
   }
 
   /** Resolve Title 38's current issue date (eCFR rejects dates past it). */
@@ -70,12 +92,35 @@ export class EcfrApi {
     return this.http.getJson(url, (raw) => raw);
   }
 
-  /** Fetch the complete Title 38 XML document (~2 MB, gzip on the wire). */
+  /**
+   * Fetch the complete Title 38 XML document (~2 MB, gzip on the wire).
+   *
+   * Two bounds apply, and they are different bounds. The semaphore caps
+   * how many document fetches are in flight at once — the request budget
+   * caps how fast they start, and nothing capped the concurrency, which
+   * is what turns a burst into gigabytes of heap. The memo stops the same
+   * document being fetched again: a point-in-time document does not
+   * change, so a second read of the same date is the same bytes.
+   */
   async getFullTitleXml(issueDate: string): Promise<string> {
     const date = assertDate(issueDate);
+    const memoised = this.fullTitleXmlMemo.get(date);
+    if (memoised !== undefined && memoised.expiresAtMs > Date.now()) return memoised.xml;
+
     const url = new URL(`/api/versioner/v1/full/${date}/title-${TITLE_38}.xml`, this.baseUrl);
-    return this.http.getText(url, {
-      headers: { accept: 'application/xml, text/xml;q=0.9, */*;q=0.1' },
-    });
+    const xml = await this.fetches.run(() =>
+      this.http.getText(url, {
+        headers: { accept: 'application/xml, text/xml;q=0.9, */*;q=0.1' },
+      }),
+    );
+
+    this.fullTitleXmlMemo.set(date, { xml, expiresAtMs: Date.now() + this.fullTitleXmlTtlMs });
+    // The memo is a cache, not a store: the oldest entry goes when the
+    // cap is reached, so the memory it holds is bounded.
+    for (const key of this.fullTitleXmlMemo.keys()) {
+      if (this.fullTitleXmlMemo.size <= FULL_TITLE_XML_MEMO_CAP) break;
+      this.fullTitleXmlMemo.delete(key);
+    }
+    return xml;
   }
 }

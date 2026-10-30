@@ -546,6 +546,25 @@ describe('Titan HTTP rate limiting', () => {
       expect(response.status).toBe(200);
     }
   });
+
+  it('charges the routes that pull the whole upstream document', async () => {
+    // The cost of a request is what it COSTS. The diff route fetches the
+    // complete Title 38 document from eCFR — ~2 MB on the wire, ~16 MB
+    // parsed — so it must not be buyable with one token: a budget of one
+    // token per request bought ten whole documents a second.
+    server = createHttpServer(new CFRService(temp.store, 7), createTestLogger(), {
+      rateLimit: { capacity: 5, refillPerSec: 0.1 },
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    // A cheap route fits the budget.
+    expect((await fetch(`${base}/health`)).status).toBe(200);
+    // The expensive route costs ten tokens, and only five are there.
+    const expensive = await fetch(`${base}/api/v1/diff?from=2026-01-01&to=2026-02-01`);
+    expect(expensive.status).toBe(429);
+    expect(((await expensive.json()) as Json)['error']).toBe('rate_limited');
+  });
 });
 
 describe('Cross-Origin-Resource-Policy', () => {

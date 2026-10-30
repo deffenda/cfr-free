@@ -44,8 +44,15 @@ export class RateLimiter {
     this.maxPeers = Math.max(1, options.maxPeers ?? DEFAULT_MAX_PEERS);
   }
 
-  /** Take one token for `peer`; allowed while the bucket has capacity. */
-  consume(peer: string): RateVerdict {
+  /**
+   * Take `cost` tokens for `peer`; allowed while the bucket can pay.
+   *
+   * The cost is what the request will COST, not how many requests it is:
+   * a route that pulls the complete upstream document charges more than
+   * one that reads the local index. Charging one token per request let a
+   * peer buy the whole upstream document with every token.
+   */
+  consume(peer: string, cost = 1): RateVerdict {
     const nowMs = this.now();
     const bucket = this.buckets.get(peer) ?? { tokens: this.capacity, lastMs: nowMs };
     // Refill proportionally to elapsed time, capped at capacity.
@@ -55,11 +62,12 @@ export class RateLimiter {
     this.buckets.set(peer, bucket);
     if (this.buckets.size > this.maxPeers) this.prune();
 
-    if (bucket.tokens >= 1) {
-      bucket.tokens -= 1;
+    const wanted = Math.max(1, cost);
+    if (bucket.tokens >= wanted) {
+      bucket.tokens -= wanted;
       return { allowed: true, retryAfterSec: 0 };
     }
-    const deficit = 1 - bucket.tokens;
+    const deficit = wanted - bucket.tokens;
     return { allowed: false, retryAfterSec: deficit / this.refillPerSec };
   }
 

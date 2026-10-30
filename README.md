@@ -195,8 +195,10 @@ The image runs as a non-root user and binds `0.0.0.0` with the remote opt-in
 already set — inside a container the published port (`-p`) is the exposure
 gate, and loopback would make it unreachable. Outside Docker the CLI still
 defaults to `127.0.0.1` with `CFR_ALLOW_REMOTE=1` required. When you do
-expose it, a per-peer token-bucket rate limit (60-burst, 10 req/s) turns on
-automatically. Images are published to GHCR on `v*` tags with
+expose it, a per-peer token-bucket rate limit (60-burst, 10 tokens/s) turns on
+automatically. The budget is spent by cost, not by request: a read of the
+local index costs one token, and a route that pulls the whole upstream
+document from eCFR costs ten. Images are published to GHCR on `v*` tags with
 build-provenance attestations.
 
 Prefer Compose? `docker compose up -d --build` serves the API on

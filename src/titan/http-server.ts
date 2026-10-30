@@ -586,6 +586,32 @@ export interface DiskSnapshot {
  * Method, rate, and size gates that run before routing. Returns the parsed
  * URL, or null when the request was already answered with an error.
  */
+/** The request's URL, or null when it does not parse. */
+function parseRequestUrl(raw: string | undefined): URL | null {
+  try {
+    return new URL(raw ?? '/', 'http://localhost');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What a request costs the server, in rate-limit tokens.
+ *
+ * The index routes read the LOCAL index: one token each. The diff and
+ * redline routes fetch the complete Title 38 document from eCFR — ~2 MB on
+ * the wire, ~16 MB parsed — so they charge a route a peer cannot buy with
+ * a single token. One token per request meant the published image's budget
+ * (60 burst, 10 a second) bought ten whole upstream documents a second.
+ */
+function requestCost(pathname: string): number {
+  if (pathname === DIFF_PATH || pathname === REDLINE_PATH) return EXPENSIVE_ROUTE_COST;
+  return 1;
+}
+
+/** The token cost of a route that pulls the whole upstream document. */
+const EXPENSIVE_ROUTE_COST = 10;
+
 function precheck(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -596,14 +622,6 @@ function precheck(
     sendJson(req, res, 405, errorBody('method_not_allowed', 'only GET and HEAD are supported'));
     return null;
   }
-  if (limiter !== null) {
-    const verdict = limiter.consume(req.socket.remoteAddress ?? 'unknown');
-    if (!verdict.allowed) {
-      res.setHeader('retry-after', String(Math.max(1, Math.ceil(verdict.retryAfterSec))));
-      sendJson(req, res, 429, errorBody('rate_limited', 'too many requests — retry shortly'));
-      return null;
-    }
-  }
   if (Buffer.byteLength(req.url ?? '/', 'utf8') > MAX_URL_BYTES) {
     sendJson(
       req,
@@ -613,10 +631,21 @@ function precheck(
     );
     return null;
   }
-  let url: URL;
-  try {
-    url = new URL(req.url ?? '/', 'http://localhost');
-  } catch {
+  // The URL is parsed before the limiter, because the cost of a request
+  // depends on the route it will take.
+  const url = parseRequestUrl(req.url);
+  if (limiter !== null) {
+    // A malformed URL still costs a token: it is a request, and refusing
+    // to charge for it would make the malformed shape free.
+    const cost = url === null ? 1 : requestCost(url.pathname);
+    const verdict = limiter.consume(req.socket.remoteAddress ?? 'unknown', cost);
+    if (!verdict.allowed) {
+      res.setHeader('retry-after', String(Math.max(1, Math.ceil(verdict.retryAfterSec))));
+      sendJson(req, res, 429, errorBody('rate_limited', 'too many requests — retry shortly'));
+      return null;
+    }
+  }
+  if (url === null) {
     sendJson(req, res, 400, errorBody('invalid_input', 'malformed request URL'));
     return null;
   }

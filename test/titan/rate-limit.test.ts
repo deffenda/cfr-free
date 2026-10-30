@@ -24,6 +24,28 @@ describe('RateLimiter', () => {
     expect(denied.retryAfterSec).toBeCloseTo(1, 5);
   });
 
+  it('charges an expensive request what it costs, not one token', () => {
+    // The cost is what the request will COST: a route that pulls the
+    // complete upstream document must not be buyable with one token, or
+    // the budget of ten requests a second buys ten whole documents.
+    const nowMs = 1_000_000;
+    const limiter = new RateLimiter({ capacity: 25, refillPerSec: 1, now: () => nowMs });
+    expect(limiter.consume('peer', 10).allowed).toBe(true);
+    expect(limiter.consume('peer', 10).allowed).toBe(true);
+    // 25 tokens, 20 spent: five left, and the request costs ten.
+    const denied = limiter.consume('peer', 10);
+    expect(denied.allowed).toBe(false);
+    expect(denied.retryAfterSec).toBeCloseTo(5, 5);
+    // A cheap request still fits in what is left: five tokens, five
+    // requests.
+    expect(limiter.consume('peer').allowed).toBe(true);
+    expect(limiter.consume('peer').allowed).toBe(true);
+    expect(limiter.consume('peer').allowed).toBe(true);
+    expect(limiter.consume('peer').allowed).toBe(true);
+    expect(limiter.consume('peer').allowed).toBe(true);
+    expect(limiter.consume('peer').allowed).toBe(false);
+  });
+
   it('refills over time, capped at capacity', () => {
     let nowMs = 0;
     const limiter = new RateLimiter({ capacity: 2, refillPerSec: 2, now: () => nowMs });
