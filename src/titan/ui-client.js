@@ -563,7 +563,22 @@
   /** True when the row is the table's separator (a row of dashes). */
   function isSeparatorRow(line) {
     const cells = tableCells(line);
-    return cells.length > 0 && cells.every((cell) => /^-+$/.test(cell));
+    // The alignment colons are part of the dialect: the repository's own
+    // table parser accepts `| :--- | ---: |`, so the renderer does too.
+    return cells.length > 0 && cells.every((cell) => /^:?-+:?$/.test(cell));
+  }
+
+  /**
+   * True when the line at `index` starts a markdown table.
+   *
+   * A table is a header row and a separator row. A line that merely
+   * begins with a pipe is a paragraph that happens to start with one, and
+   * rendering it as a table would show a table with no body — and no way
+   * to read what the line said.
+   */
+  function isTableStart(lines, index) {
+    if (!isPipeRow(lines[index] ?? '')) return false;
+    return isSeparatorRow(lines[index + 1] ?? '');
   }
 
   /** One markdown table, as a real table. */
@@ -605,7 +620,11 @@
    */
   function renderMarkdown(container, markdown) {
     clear(container);
-    const lines = String(markdown === undefined || markdown === null ? '' : markdown).split('\n');
+    // CRLF is one line break, not two: a carriage left at the end of a
+    // heading is a character the reader sees.
+    const lines = String(markdown === undefined || markdown === null ? '' : markdown).split(
+      /\r?\n/,
+    );
     let index = 0;
     while (index < lines.length) {
       const line = lines[index] ?? '';
@@ -613,7 +632,7 @@
         index += 1;
         continue;
       }
-      if (isPipeRow(line)) {
+      if (isTableStart(lines, index)) {
         index = renderTableBlock(container, lines, index);
         continue;
       }
@@ -642,7 +661,7 @@
     const paragraph = [];
     while (index < lines.length) {
       const next = lines[index] ?? '';
-      if (next.trim() === '' || isPipeRow(next) || /^###\s/.test(next)) break;
+      if (next.trim() === '' || isTableStart(lines, index) || /^###\s/.test(next)) break;
       paragraph.push(next);
       index += 1;
     }
@@ -672,9 +691,10 @@
     }
     // The markdown is the structured rendering — the one with the rating
     // tables intact. The text is the fallback, for a payload that does not
-    // carry it.
+    // carry it. A markdown body that is only whitespace carries nothing
+    // either, and the text is what the reader should see.
     const markdown = typeof section.markdown === 'string' ? section.markdown : '';
-    renderMarkdown(sectionText, markdown === '' ? String(section.text) : markdown);
+    renderMarkdown(sectionText, markdown.trim() === '' ? String(section.text) : markdown);
     fillCitationBlock(section);
     fillReferences(section);
     fillCitedBy(section);
