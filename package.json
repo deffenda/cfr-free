@@ -1,6 +1,6 @@
 {
   "name": "cfr-free",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Self-hosted Title 38 CFR data service: SQLite FTS5 index built from the eCFR API, with an MCP server and HTTP API",
   "keywords": [
     "cfr",
@@ -25,11 +25,12 @@
   "files": [
     "dist",
     "scripts/prepare.mjs",
+    "scripts/copy-assets.mjs",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
     "prepare": "node scripts/prepare.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
@@ -54,13 +55,16 @@
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.5",
     "@vitest/coverage-v8": "^5.0.5",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "eslint": "^10.13.0",
     "eslint-plugin-security": "^4.2.0",
     "globals": "^17.13.0",
     "prettier": "^3.9.10",
     "typescript": "5.9.3",
     "typescript-eslint": "^8.72.0",
-    "vitest": "^5.0.4"
+    "vitest": "^5.0.4",
+    "yaml": "^2.9.1"
   },
   "allowScripts": {
     "fsevents@2.3.3": true

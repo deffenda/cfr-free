@@ -5,14 +5,12 @@
  * contract — the document's own structure and provenance comments, and the
  * live server's responses against the document:
  *
- * 1. Spec well-formedness — parses the real YAML through a python3 bridge
- *    (no YAML parser exists in node_modules; the lockfile's only `yaml` entry
- *    is an uninstalled vitest optional peer) and checks the structural rules
- *    an outside scan tripped on: path templates declared, HEAD twins
- *    mirroring GET parameters, every `$ref` resolvable under
- *    `#/components/`, response statuses bound to Response Objects,
- *    `required ⊆ properties`, and only documented conditionals left
- *    optional.
+ * 1. Spec well-formedness — parses the real YAML with the `yaml` package
+ *    (a declared devDependency) and checks the structural rules an outside
+ *    scan tripped on: path templates declared, HEAD twins mirroring GET
+ *    parameters, every `$ref` resolvable under `#/components/`, response
+ *    statuses bound to Response Objects, `required ⊆ properties`, and only
+ *    documented conditionals left optional.
  *
  * 2. Response conformance — boots the real HTTP server in-process over a
  *    seeded temp store (test/http-server.test.ts bootstrap) and, for EVERY
@@ -30,11 +28,10 @@
  *    invalidating the doc's provenance claims.
  *
  * Deterministic by construction: in-process server, injected fetch, no
- * sleeps. The only external process is the python3 YAML bridge reading
- * docs/openapi.yaml — if it cannot run, these tests fail loudly (a silent
- * skip would disable the contract).
+ * sleeps, and no external process — the spec is parsed in-process by the
+ * `yaml` package, so the contract needs nothing installed beyond this
+ * repository's own devDependencies.
  */
-import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
@@ -43,6 +40,7 @@ import type http from 'node:http';
 import addFormats from 'ajv-formats';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import type { AnySchema } from 'ajv';
+import { parse as parseYaml } from 'yaml';
 import { EcfrApi } from '../src/core/ecfr.js';
 import { HttpClient } from '../src/core/http-client.js';
 import type { FetchLike } from '../src/core/http-client.js';
@@ -52,19 +50,12 @@ import { createHttpServer } from '../src/titan/http-server.js';
 import { FIXTURE_STRUCTURE, createTestLogger, openTempStore, type TempStore } from './helpers.js';
 
 // ---------------------------------------------------------------------------
-// Spec loading: python3 + PyYAML → JSON (preinstalled on macOS and on
-// GitHub-hosted runners). Failure to spawn or to import yaml must fail the
-// suite with an actionable message — never skip: a silently missing spec
-// would disable every contract check below.
+// Spec loading: the real YAML, parsed in-process by the `yaml` package.
+// A parse failure must fail the suite loudly — never skip: a silently
+// missing spec would disable every contract check below.
 // ---------------------------------------------------------------------------
 
 const SPEC_PATH = fileURLToPath(new URL('../docs/openapi.yaml', import.meta.url));
-
-const YAML_TO_JSON_BRIDGE = [
-  'import json, sys, yaml',
-  'doc = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))',
-  'json.dump(doc, sys.stdout)',
-].join('\n');
 
 interface SpecParameter {
   readonly name: string;
@@ -93,26 +84,14 @@ interface SpecDocument {
 }
 
 function loadSpec(): SpecDocument {
-  const result = spawnSync('python3', ['-c', YAML_TO_JSON_BRIDGE, SPEC_PATH], {
-    encoding: 'utf8',
-  });
-  const bridge = (detail: string): never => {
-    throw new Error(
-      `openapi YAML bridge failed: ${detail} — this suite requires python3 with PyYAML ` +
-        'preinstalled (e.g. `pip install pyyaml`; macOS python3 and GitHub ubuntu runners ' +
-        'ship it). The OpenAPI contract cannot be checked without it, so the test fails ' +
-        'instead of skipping.',
-    );
-  };
-  if (result.error !== undefined) bridge(`cannot spawn python3 (${result.error.message})`);
-  if (result.status !== 0) {
-    bridge(`python3 exited ${String(result.status)} (${result.stderr.trim() || 'no stderr'})`);
-  }
+  const source = readFileSync(SPEC_PATH, 'utf8');
   try {
-    return JSON.parse(result.stdout) as SpecDocument;
+    return parseYaml(source) as SpecDocument;
   } catch (error) {
-    return bridge(
-      `bridge emitted invalid JSON (${error instanceof Error ? error.message : String(error)})`,
+    throw new Error(
+      `docs/openapi.yaml could not be parsed as YAML (${error instanceof Error ? error.message : String(error)}) — ` +
+        'the OpenAPI contract cannot be checked without it, so the test fails instead of skipping.',
+      { cause: error },
     );
   }
 }

@@ -1,4 +1,15 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -50,6 +61,36 @@ import { describe, expect, it } from 'vitest';
 const WORKFLOW_PATH = fileURLToPath(new URL('../.github/workflows/ci.yml', import.meta.url));
 const WORKFLOWS_DIR = fileURLToPath(new URL('../.github/workflows/', import.meta.url));
 const PACKAGE_PATH = fileURLToPath(new URL('../package.json', import.meta.url));
+const ROOT = fileURLToPath(new URL('../', import.meta.url));
+/** The release-time guard: the packed tarball must carry what the program reads. */
+const VERIFIER_PATH = fileURLToPath(new URL('../scripts/verify-packed.mjs', import.meta.url));
+/** The reader that turns `npm pack --json` into a list of paths. */
+const PACK_LIST_PATH = fileURLToPath(new URL('../scripts/pack-list.mjs', import.meta.url));
+
+/**
+ * The paths the pack list reports, for a given `npm pack --json` payload.
+ *
+ * A FAKE npm is put in front of the real one on PATH, so the reader is
+ * exercised against a payload this test chooses — including the shapes
+ * the npm in use does not produce.
+ */
+function readPackedPaths(payload: string): string[] {
+  const dir = mkdtempSync(join(tmpdir(), 'cfr-pack-list-'));
+  try {
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    const payloadFile = join(dir, 'payload.json');
+    writeFileSync(payloadFile, payload);
+    writeFileSync(join(bin, 'npm'), `#!/bin/sh\ncat "${payloadFile}"\n`, { mode: 0o755 });
+    const out = execFileSync(process.execPath, [PACK_LIST_PATH], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}:${process.env['PATH'] ?? ''}` },
+    });
+    return JSON.parse(out) as string[];
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 /** The checks branch protection on `main` requires. Keep in step with it. */
 const REQUIRED_CHECKS = ['quality (22)', 'quality (24)', 'security'] as const;
@@ -378,6 +419,41 @@ function jobBlock(text: string, jobName: string): string {
   // `#` (a comment, which is not a key and therefore ends nothing).
   const end = rest.findIndex((line) => /^ {2}[^\s#]/.test(line));
   return (end === -1 ? rest : rest.slice(0, end)).join('\n');
+}
+
+/**
+ * The `fetch-depth` a job's checkout step asks for, or undefined when the
+ * step does not ask for one — `actions/checkout`'s default is a depth-1
+ * clone, which carries no tags.
+ */
+function checkoutFetchDepth(jobText: string): string | undefined {
+  const lines = jobText.split('\n');
+  const checkout = lines.findIndex((line) => /uses:\s*actions\/checkout@/.test(line));
+  if (checkout === -1) return undefined;
+  // The step that owns the `uses:` line. The `uses:` line is not always the
+  // step's first line — the `- name:` form puts it one line deeper — so the
+  // step's own indent comes from the nearest PRECEDING step marker, and the
+  // scan ends at the next marker at that indent or shallower. Deriving the
+  // boundary from the `uses:` line's indent instead would let the scan run
+  // past the checkout and read a LATER step's `fetch-depth`, which is how
+  // this guard could pass while the checkout stayed shallow.
+  let stepIndent = 0;
+  for (let index = checkout; index >= 0; index -= 1) {
+    const marker = /^(\s*)-\s/.exec(lines[index] ?? '');
+    if (marker !== null) {
+      stepIndent = (marker[1] ?? '').length;
+      break;
+    }
+  }
+  for (const line of lines.slice(checkout + 1)) {
+    const marker = /^(\s*)-\s/.exec(line);
+    if (marker !== null && (marker[1] ?? '').length <= stepIndent) return undefined;
+    const found = /^\s*fetch-depth:\s*(.+?)\s*$/.exec(line);
+    // The value may be quoted (`fetch-depth: "0"`); the quotes are YAML
+    // syntax, not part of the value.
+    if (found !== null) return (found[1] ?? '').replace(/^["']|["']$/g, '');
+  }
+  return undefined;
 }
 
 /**
@@ -1233,6 +1309,81 @@ describe('the workflow files — what the merge gate runs', () => {
     expect(steps.join('\n'), 'the security job no longer runs osv-scanner').toContain(osv);
   });
 
+  it('checks out the tags the release guard reads', () => {
+    // Silent failure this prevents: `actions/checkout` clones with
+    // `--depth 1` and fetches NO tags by default, so `git tag` returns
+    // nothing and the release guard (test/install-paths.test.ts) asserts
+    // nothing at all. It stayed green in CI for exactly that reason
+    // (measured 2026-10-29: a depth-1 clone of the public repository
+    // reports zero tags, so the guard's loop never ran). The jobs that
+    // run the gate must therefore check out the full history and its tags.
+    const gateJobs = [
+      { file: 'ci.yml', job: 'quality' },
+      { file: 'release.yml', job: 'ci' },
+    ];
+    for (const target of gateJobs) {
+      const file = workflowFiles.find((entry) => entry.name === target.file);
+      expect(file, `no workflow file named ${target.file}`).toBeDefined();
+      if (file === undefined) continue;
+      const job = workflowJobs(readFileSync(file.path, 'utf8')).find(
+        (entry) => entry.name === target.job,
+      );
+      expect(job, `${target.file} has no ${target.job} job`).toBeDefined();
+      const depth = job === undefined ? undefined : checkoutFetchDepth(job.lines.join('\n'));
+      expect(
+        depth,
+        `${target.file}: the ${target.job} job must check out with fetch-depth: 0 — a shallow ` +
+          'checkout carries no tags, which leaves the release guard asserting nothing',
+      ).toBe('0');
+    }
+  });
+
+  it('reads the checkout depth from the checkout step, not a later step', () => {
+    // The hole this closes: a job whose checkout is shallow, followed by a
+    // later step that asks for `fetch-depth: 0`, must NOT read as a
+    // checkout with full history. The step's own indent comes from the
+    // nearest preceding step marker, so the `- name:` form of a step (where
+    // `uses:` sits one line deeper) is handled too.
+    const shallowCheckout = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - uses: actions/checkout@abc123',
+      '      - uses: actions/setup-node@def456',
+      '        with:',
+      '          fetch-depth: 0',
+    ].join('\n');
+    expect(checkoutFetchDepth(shallowCheckout)).toBeUndefined();
+
+    const namedCheckout = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - name: Check out',
+      '        uses: actions/checkout@abc123',
+      '      - uses: actions/setup-node@def456',
+      '        with:',
+      '          fetch-depth: 0',
+    ].join('\n');
+    expect(checkoutFetchDepth(namedCheckout)).toBeUndefined();
+
+    const fullHistory = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - name: Check out',
+      '        uses: actions/checkout@abc123',
+      '        with:',
+      '          fetch-depth: 0',
+      '      - uses: actions/setup-node@def456',
+    ].join('\n');
+    expect(checkoutFetchDepth(fullHistory)).toBe('0');
+
+    // A quoted value is the same value: the quotes are YAML syntax.
+    const quoted = fullHistory.replace('fetch-depth: 0', 'fetch-depth: "0"');
+    expect(checkoutFetchDepth(quoted)).toBe('0');
+  });
+
   it('keeps a comment inside the security job from ending the block', () => {
     // A comment at the same indent as the job key is not a key: it ends
     // nothing. Ending the block there would drop the scanners below it
@@ -1624,4 +1775,118 @@ describe('the per-job gate guard — synthetic job snippets', () => {
     ]);
     expect(workflowGateConsumers(text)).toEqual([]);
   });
+});
+
+describe('the release guard — the packed package must carry what the program reads', () => {
+  it('runs in EVERY job that publishes a tarball', () => {
+    // The npm job is disabled today — its trusted-publishing variable does
+    // not exist — so the tarball people actually download is made by the
+    // GitHub release job. A guard in the disabled job guards nothing.
+    const release = readFileSync(join(WORKFLOWS_DIR, 'release.yml'), 'utf8');
+    const jobs = workflowJobs(release);
+    const githubRelease = jobs.find((job) => job.name === 'github-release');
+    expect(githubRelease?.lines.join('\n')).toContain('verify-packed.mjs');
+    const npmJob = jobs.find((job) => job.name === 'publish-npm');
+    expect(npmJob?.lines.join('\n')).toContain('verify-packed.mjs');
+  });
+
+  it('fails closed when the copy list changes shape', () => {
+    // The asset list is read from the copy script's own text. A change of
+    // shape — a re-quoted entry, a template literal — must STOP the check
+    // rather than quietly shrink it: a list whose targets and sources
+    // disagree has lost an entry, and a check that has lost an entry would
+    // pass a tarball that does not have it.
+    const guard = readFileSync(VERIFIER_PATH, 'utf8');
+    expect(guard).toMatch(/targets\.length !== sources/);
+    expect(guard).toMatch(/process\.exit\(1\)/);
+  });
+
+  it('measures a built package, not an unbuilt checkout', () => {
+    // The test suite runs before the build step in `npm run ci`, so the
+    // checkout has no `dist/` when the guard runs here. A guard that
+    // packed an unbuilt checkout would measure the working tree rather
+    // than the package, and would report every runtime file as missing.
+    const guard = readFileSync(VERIFIER_PATH, 'utf8');
+    expect(guard).toMatch(/'run', 'build'/);
+  });
+
+  it('the pack list still answers when it is reached through a symlink', () => {
+    // `import.meta.url` is the REAL path of the module and `argv[1]` is
+    // whatever the caller typed. Comparing the two without resolving them
+    // meant the script printed NOTHING through a symlink — and a caller
+    // read that as an empty package list.
+    const dir = mkdtempSync(join(tmpdir(), 'cfr-pack-link-'));
+    try {
+      const link = join(dir, 'pack-list.mjs');
+      symlinkSync(join(ROOT, 'scripts', 'pack-list.mjs'), link);
+      const out = execFileSync(process.execPath, [link, ROOT], { encoding: 'utf8' });
+      const paths = JSON.parse(out) as string[];
+      // The assertion is on paths the tarball carries WHETHER OR NOT the
+      // program has been built. `npm pack --dry-run --ignore-scripts` runs
+      // the `prepare` lifecycle script on npm 10 (which builds `dist/`) and
+      // skips it on npm 11 and 12 (which does not) — so asserting a `dist/`
+      // path here made this test answer differently on Node 22 and Node 24,
+      // and it failed on the Node 24 runner in CI. The BUILT package's
+      // contents are asserted by the guard test below, which builds before
+      // it packs.
+      //
+      // The regression this guards is an EMPTY list: the script printing
+      // nothing at all through a symlink.
+      expect(paths.length).toBeGreaterThan(0);
+      expect(paths).toContain('package.json');
+      expect(paths).toContain('README.md');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('reads the package list whichever shape npm printed it in', () => {
+    // `npm pack --json` is not one shape: npm 10 and 11 print an array of
+    // package records, npm 12 prints an object keyed by the package name
+    // (both measured). The payload also arrives with whatever a lifecycle
+    // script printed in front of it, because npm shares stdout with the
+    // scripts it runs — npm runs `prepare` during a pack (npm 10.9.9 does
+    // so even with --ignore-scripts; measured — npm 11 and 12 honour the
+    // flag). The reader must
+    // not depend on any of that.
+    const files = [{ path: 'dist/cli.js' }, { path: 'dist/titan/ui-client.js' }];
+    const expected = ['dist/cli.js', 'dist/titan/ui-client.js'];
+    const payloads = [
+      // npm 10 and 11: an array of package records.
+      JSON.stringify([{ name: 'cfr-free', files }]),
+      // npm 12: an object keyed by the package name.
+      JSON.stringify({ 'cfr-free': { name: 'cfr-free', files } }),
+      // The payload behind what a lifecycle script printed.
+      'copy-assets: src/titan/ui-client.js -> dist/titan/ui-client.js\n' +
+        JSON.stringify([{ name: 'cfr-free', files }]),
+    ];
+    for (const payload of payloads) {
+      expect(readPackedPaths(payload)).toEqual(expected);
+    }
+  });
+
+  it('passes on this repository, names the runtime assets, and measures a clean build', () => {
+    // The guard is run, not only read: a guard that always failed would
+    // satisfy every assertion above.
+    //
+    // The timeout is raised because the guard builds before it packs: the
+    // build is a compiler run, not an instant.
+    const stale = join(ROOT, 'dist', 'stale-artifact.js');
+    mkdirSync(join(ROOT, 'dist'), { recursive: true });
+    writeFileSync(stale, '// left over from a build that no longer makes it\n');
+    try {
+      const out = execFileSync(process.execPath, [VERIFIER_PATH], { encoding: 'utf8' });
+      expect(out).toContain('dist/titan/ui-client.js');
+      expect(out).toContain('dist/titan/ui-client.css');
+      // The whole import CLOSURE, not only the entry point's own imports:
+      // a tarball with the entry point but not the module two levels down
+      // would fail at runtime, in a stranger's terminal.
+      expect(out).toContain('dist/core/store.js');
+      // And a clean build: the build does not clean `dist/`, so a file it
+      // no longer produces would survive it — and be packed.
+      expect(existsSync(stale), 'the guard must not measure a stale build').toBe(false);
+    } finally {
+      rmSync(stale, { force: true });
+    }
+  }, 120_000);
 });
