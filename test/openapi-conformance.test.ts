@@ -2079,29 +2079,38 @@ describe('OpenAPI source citations (docs/openapi.yaml # source: lines)', () => {
 // guard that nothing pins is a comment, not a check, and a comment does
 // not stop a citation from drifting.
 //
-// Three kinds of guard decide NO verdict, and all three are named here
-// rather than left implied — a claim that cannot be shown is not a claim:
+// The claim was checked by MUTATION, not by reading: the resolver's guards
+// were broken on purpose, one at a time — a hundred and two mutations —
+// and the suite was seen to go red, with four exceptions.
+//
+// Those four are named here rather than left implied — a claim that cannot
+// be shown is not a claim:
 //
 //   1. `citedSymbols` skips an empty segment that `readSegment` skips
-//      anyway;
-//   2. `blockScalarRanges` guards a range the YAML parser always sets;
-//   3. the defaults the parsers never produce — an operator token, a
+//      anyway, and trims the segment it reads (two of the four);
+//   2. the defaults the parsers never produce — an operator token, a
 //      match group, a line offset, a pending segment — cannot fire, so
-//      the `??` around them decides nothing.
+//      the `??` around them, and the guard on the operator token, decide
+//      nothing;
+//   3. `citedFilePath` resolves a cited path against the REPOSITORY ROOT,
+//      and the suite always runs from the repository root, so resolving
+//      it against the working directory instead would decide nothing here
+//      either.
 //
-// The claim was checked by MUTATION, not by reading: every guard of the
-// resolver was broken on purpose, one at a time, and the suite was seen
-// to go red — the three kinds above are the only ones that stayed green.
+// A fifth guard decides no verdict and was not among the mutations:
+// `blockScalarRanges` guards a range the YAML parser always sets.
+//
 // The sweep also broke each entry of the general construct list, each
 // extension of the anchor pattern, and the values the rules compare (the
 // tie-break of the serving constant, the indent of the path level, the
 // bounds of a block scalar).
 //
-// Each pin below is written against a FIXTURE, not against the repository's
-// own files: the pin then says something about the GUARD rather than about
-// the repository's current contents, and it can fail on purpose. Each pin
-// was mutation-checked — the guard was broken on purpose, the pin was seen
-// to fail, and the guard was put back.
+// Each pin below is driven by a FIXTURE, so it says something about the
+// GUARD rather than about the repository's current contents. Four pins
+// read the repository's own files on purpose — the boundary, the missing
+// file, the anchor's file part and the read cache — and each names the
+// files it reads. Every pin was mutation-checked — the guard was broken
+// on purpose, the pin was seen to fail, and the guard was put back.
 // ---------------------------------------------------------------------------
 
 /**
@@ -2521,6 +2530,20 @@ const COMPARISON_FIXTURE = [
 ].join('\n');
 
 /**
+ * A source fixture whose comparison's left side is an identifier written
+ * with an ESCAPE: the name is what the code means, and the spelling is
+ * only how it is written down.
+ */
+const ESCAPED_COMPARISON_FIXTURE = [
+  'function handleOther(\\u0070athname: string): void {',
+  '  if (\\u0070athname === "/api/v1/other") {',
+  '    void 0;',
+  '  }',
+  '}',
+  '',
+].join('\n');
+
+/**
  * A source fixture with a declaration that has NO NAME: a default export.
  */
 const UNNAMED_FIXTURE = ['export default function () {}', ''].join('\n');
@@ -2530,6 +2553,12 @@ const UNNAMED_FIXTURE = ['export default function () {}', ''].join('\n');
  * to be named by.
  */
 const DESTRUCTURED_FIXTURE = ["const { a } = '/api/v1/x';", ''].join('\n');
+
+/**
+ * A source fixture whose named declaration holds a NUMBER: a path constant
+ * holds a STRING, so a number is not a path.
+ */
+const NON_STRING_FIXTURE = ['const SEARCH_PATH = 42;', ''].join('\n');
 
 /**
  * A router fixture that tests the SAME constant twice: an exact route and
@@ -2584,6 +2613,13 @@ describe('OpenAPI citation resolver: guards pinned against fixtures', () => {
     // `dispatch` IS the router: every route is served by it, so the binding
     // is not asked of it.
     expect(checkRouteBinding('w', ROUTER_FIXTURE, '/api/v1/search', 'dispatch')).toBeNull();
+    // The branch's CALLS are the identifiers of its BODY, not of its
+    // condition: a symbol the condition merely names is not the handler
+    // the route calls. The dispatch compares the path against a constant,
+    // so its condition names `pathname` and `SEARCH_PATH` — and neither
+    // of them is the handler that serves the route.
+    expect(checkRouteBinding('w', ROUTER_FIXTURE, '/api/v1/search', 'pathname')).not.toBeNull();
+    expect(checkRouteBinding('w', ROUTER_FIXTURE, '/api/v1/search', 'SEARCH_PATH')).not.toBeNull();
   });
 
   it('pins the route binding through the citation check: the document reaches it', () => {
@@ -2651,6 +2687,10 @@ describe('OpenAPI citation resolver: guards pinned against fixtures', () => {
     expect(scan.citations).toBe(1);
     expect(scan.violations).toHaveLength(1);
     expect(scan.violations[0]).toContain('is served by the router, not by handleSearch');
+    // The violation names the line the citation is ON: the citation sits
+    // on the third line of the fixture, and a line number off by one
+    // would point the reader at the wrong line.
+    expect(scan.violations[0]).toContain('fixture.yaml:3');
     // The citation that DOES name the route's handler passes.
     const bound = [
       'paths:',
@@ -2965,6 +3005,17 @@ describe('OpenAPI citation resolver: guards pinned against fixtures', () => {
     // And with no file to INHERIT, it is prose too: a word with no file
     // must never become a citation against the empty path.
     expect(citedSymbols('(handleSearch)', () => true)).toEqual([]);
+    // And a wrapped word that is not a symbol NAME is prose, whatever
+    // the file says: only an identifier can be a symbol.
+    expect(citedSymbols('src/titan/http-server.ts#dispatch (the router)', () => true)).toEqual([
+      pair,
+    ]);
+    // And a parenthesis that is never closed is an unparsable token, and
+    // an unparsable token is reported rather than dropped: a citation
+    // that names nothing checks out nothing.
+    expect(citedSymbols('(unclosed', () => true)).toEqual([
+      { file: '', symbol: '(unclosed', wellFormed: false },
+    ]);
   });
 
   it('pins the unchecked citation: a route with no path constant is reported, not skipped', () => {
@@ -3059,6 +3110,10 @@ describe('OpenAPI citation resolver: guards pinned against fixtures', () => {
     const ranges = blockScalarRanges(spec);
     const offsets = lineOffsets(spec);
     const range = ranges[0] ?? [-1, -1];
+    // The range's START is the scalar's own token: the block opens with
+    // `|`, and the string covers it. A range that started one character
+    // later would leave the character before the content outside it.
+    expect(range[0]).toBe(spec.indexOf('|'));
     // The citation's line starts exactly where the range ends.
     expect(offsets[3], 'the citation line starts where the block scalar ends').toBe(range[1]);
     expect(insideRanges(ranges, range[1])).toBe(true);
@@ -3106,6 +3161,17 @@ describe('OpenAPI citation resolver: guards pinned against fixtures', () => {
       '',
     ].join('\n');
     expect(citationsIn(underValue)[0]?.path).toBe('/x');
+    // A key that carries a VALUE is not a path key, and the walk steps
+    // over it to the path key above: the path is the nearest path key
+    // ABOVE the citation, not the nearest line that reads like a key.
+    const besideValue = [
+      'paths:',
+      '  /x:',
+      '  summary: A summary',
+      '    # source: src/titan/http-server.ts#dispatch',
+      '',
+    ].join('\n');
+    expect(citationsIn(besideValue)[0]?.path).toBe('/x');
   });
 
   it('pins the path constants: a route binds to the constant that serves it', () => {
@@ -3198,6 +3264,10 @@ describe('OpenAPI citation resolver: guards pinned against fixtures', () => {
     // destructuring declaration has no name to be named by, so it holds no
     // path.
     expect(citedFile(DESTRUCTURED_FIXTURE).paths).toEqual([]);
+    // And it holds a STRING: a named declaration whose value is not a
+    // string literal holds no path either, or the router would bind a
+    // route to a number.
+    expect(citedFile(NON_STRING_FIXTURE).paths).toEqual([]);
   });
 
   it('pins the second branch: every branch of a constant is read', () => {
@@ -3222,6 +3292,12 @@ describe('OpenAPI citation resolver: guards pinned against fixtures', () => {
     ).toBe(true);
     // And a comparison whose left is an identifier is named the same way.
     expect(carriesConstruct(factsOfSymbol(ROUTER_FIXTURE, 'dispatch'), 'pathname ===')).toBe(true);
+    // And it is named by the NAME of that identifier, not by the text it
+    // happens to be spelled with: an identifier written with an escape
+    // is still `pathname`.
+    expect(
+      carriesConstruct(factsOfSymbol(ESCAPED_COMPARISON_FIXTURE, 'handleOther'), 'pathname ==='),
+    ).toBe(true);
   });
 
   it('pins the caches: a cited file is parsed once and read once', () => {
