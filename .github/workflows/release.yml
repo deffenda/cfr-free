@@ -259,6 +259,18 @@ jobs:
           const imports = [...src.matchAll(/from\s+['"](\.\/[^'"]+\.js)['"]/g)].map(m => m[1]);
           const expected = new Set(['dist/cli.js']);
           for (const imp of imports) expected.add('dist/' + imp.replace(/^\.\//, ''));
+          // The UI assets are read at RUNTIME (readFileSync beside the
+          // module), not imported, so the import scan cannot find them. The
+          // build copies them into dist/; without them the tarball would
+          // ship a package whose /ui.js route answers 404. They are read
+          // from the copy script's own list, so the two cannot drift.
+          const copyScript = fs.readFileSync('scripts/copy-assets.mjs', 'utf8');
+          const assets = [...copyScript.matchAll(/to: '([^']+)'/g)].map(m => m[1]);
+          if (assets.length === 0) {
+            console.error('No assets found in scripts/copy-assets.mjs — the copy list changed shape.');
+            process.exit(1);
+          }
+          for (const asset of assets) expected.add(asset);
           const out = execSync('npm pack --dry-run --ignore-scripts --json', { encoding: 'utf8' });
           const parsed = JSON.parse(out);
           const files = new Set((parsed[0]?.files || []).map(f => f.path));
@@ -268,7 +280,7 @@ jobs:
             for (const f of missing) console.error('  ' + f);
             process.exit(1);
           }
-          console.log('Packed package contains executable and all imports:');
+          console.log('Packed package contains executable, all imports and every runtime asset:');
           for (const f of expected) console.log('  ' + f);
           NODE
       - name: executable smoke
