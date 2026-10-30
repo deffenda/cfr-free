@@ -39,3 +39,26 @@ export class StructureError extends Error {
     this.available = available;
   }
 }
+
+/**
+ * Raised when the upstream's DATA is not what this service expects.
+ *
+ * WHY THIS CLASS EXISTS. CR-21 found three upstream-data faults raised as a
+ * bare `Error` (`src/core/ecfr.ts`): eCFR returned a date that is not a date,
+ * `titles.json` did not include Title 38, and `titles.json` reported no issue
+ * date for it. A bare `Error` is indistinguishable from an internal fault,
+ * so the HTTP layer classified them as "anything else" → logged and
+ * collapsed into a generic `500 internal server error`. The most actionable
+ * messages in the codebase were the ones being swallowed.
+ *
+ * These are not the reader's fault and not ours either: the upstream sent
+ * something the contract does not allow. The HTTP surface answers 502 (Bad
+ * Gateway) and the server keeps the detail in the log.
+ */
+export class UpstreamFormatError extends Error {
+  override readonly name = 'UpstreamFormatError';
+
+  constructor(message: string) {
+    super(message);
+  }
+}

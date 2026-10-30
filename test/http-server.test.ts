@@ -3,6 +3,8 @@ import net from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type http from 'node:http';
 import type { EcfrApi } from '../src/core/ecfr.js';
+import { HttpError } from '../src/core/http-client.js';
+import { UpstreamFormatError } from '../src/core/errors.js';
 import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
 import { CFRService } from '../src/core/service.js';
 import { createHttpServer, type HttpServerOptions } from '../src/titan/http-server.js';
@@ -841,11 +843,11 @@ describe('Titan HTTP /api/v1/diff', () => {
       getFullTitleXml: async (issueDate: string) => {
         const xml = xmlByDate[issueDate];
         if (xml === undefined) {
-          const error = new Error(`HTTP ${failureStatus} for ${issueDate}`) as Error & {
-            status?: number;
-          };
-          error.status = failureStatus;
-          throw error;
+          // The real client throws an `HttpError`; the archive guard
+          // recognises it by `instanceof` (CR-22). A loose object with a
+          // `status` property is a DIFFERENT thing, and pretending the two
+          // are the same would hide what this test pins.
+          throw new HttpError(`HTTP ${failureStatus} for ${issueDate}`, issueDate, failureStatus);
         }
         return xml;
       },
@@ -967,6 +969,25 @@ describe('Titan HTTP /api/v1/diff', () => {
     expect(body).toEqual({ error: 'internal_error', message: 'internal server error' });
   });
 
+  it('answers a 502 when eCFR sends data the contract does not allow', async () => {
+    // An upstream-DATA fault is neither the reader's fault nor ours: eCFR
+    // answered, and what it sent is not usable. That is a bad gateway, and
+    // it must not be collapsed into a generic 500 — the most actionable
+    // messages in the codebase were the ones being swallowed (CR-21).
+    const faulting = {
+      getFullTitleXml: async () => {
+        throw new UpstreamFormatError('eCFR returned an invalid date: not-a-date');
+      },
+    } as unknown as EcfrApi;
+    const service = new CFRService(temp.store, 7, faulting, createTestLogger());
+    const { status, body } = await withService(service, `/api/v1/diff?${DIFF_QUERY}`);
+    expect(status).toBe(502);
+    expect(body['error']).toBe('upstream_error');
+    // The detail stays server-side: the client learns the upstream was
+    // unusable, not what it said.
+    expect(String(body['message'])).not.toContain('not-a-date');
+  });
+
   it("answers a 400 for a date before eCFR's archive, not a generic 500", async () => {
     // eCFR answers 404 for a date outside its point-in-time archive. That is
     // the reader's argument, not a service failure: it must be the same usage
@@ -1046,11 +1067,11 @@ describe('Titan HTTP /api/v1/redline', () => {
       getFullTitleXml: async (issueDate: string) => {
         const xml = xmlByDate[issueDate];
         if (xml === undefined) {
-          const error = new Error(`HTTP ${failureStatus} for ${issueDate}`) as Error & {
-            status?: number;
-          };
-          error.status = failureStatus;
-          throw error;
+          // The real client throws an `HttpError`; the archive guard
+          // recognises it by `instanceof` (CR-22). A loose object with a
+          // `status` property is a DIFFERENT thing, and pretending the two
+          // are the same would hide what this test pins.
+          throw new HttpError(`HTTP ${failureStatus} for ${issueDate}`, issueDate, failureStatus);
         }
         return xml;
       },

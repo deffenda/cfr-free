@@ -449,6 +449,7 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+        '502': { $ref: '#/components/responses/UpstreamError' }
       parameters:
         - name: from
           in: query
@@ -470,6 +471,7 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+        '502': { $ref: '#/components/responses/UpstreamError' }
       parameters:
         - name: from
           in: query
@@ -497,6 +499,7 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+        '502': { $ref: '#/components/responses/UpstreamError' }
       parameters:
         - name: from
           in: query
@@ -524,6 +527,7 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+        '502': { $ref: '#/components/responses/UpstreamError' }
       parameters:
         - name: from
           in: query
@@ -579,6 +583,12 @@ components:
     InternalError:
       # source: src/titan/http-server.ts#createHttpServer
       description: '{ error: "internal_error", message } — unexpected failure; details are logged server-side only.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    UpstreamError:
+      # source: src/titan/http-server.ts#createHttpServer
+      description: '{ error: "upstream_error", message } — eCFR answered, but the data it sent was not usable (an unparseable date, a missing title, or a missing issue date). The detail is logged server-side only.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

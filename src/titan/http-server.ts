@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import { CHANGE_LIST_CAP } from '../core/changes.js';
 import type { CFRService } from '../core/service.js';
-import { ServiceError, StructureError } from '../core/errors.js';
+import { ServiceError, StructureError, UpstreamFormatError } from '../core/errors.js';
 import type { Logger } from '../logger.js';
 import { RateLimiter } from './rate-limit.js';
 import { UI_CSP, UI_CSS, UI_HTML, UI_JS } from './ui.js';
@@ -814,6 +814,22 @@ export function createHttpServer(
             status,
             errorBody(code, error.message, available ? { available } : undefined),
           );
+          return;
+        }
+        // An upstream-DATA fault: eCFR answered, and what it sent is not what
+        // the contract allows. That is a bad gateway, not an internal error —
+        // and it must not be collapsed into a generic 500, or the most
+        // actionable messages in the codebase are swallowed (CR-21).
+        if (error instanceof UpstreamFormatError) {
+          logger.error('upstream data fault', {
+            path: url.pathname,
+            message: error.message,
+          });
+          if (!res.headersSent) {
+            sendJson(req, res, 502, errorBody('upstream_error', 'upstream data was not usable'));
+          } else {
+            res.end();
+          }
           return;
         }
         logger.error('http request failed', {

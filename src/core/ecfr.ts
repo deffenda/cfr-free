@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { HttpClient } from './http-client.js';
 import { Semaphore } from './semaphore.js';
+import { UpstreamFormatError } from './errors.js';
 
 /** Title handled by this service (v1 scope). */
 export const TITLE_38 = 38;
@@ -29,7 +30,12 @@ export interface TitleSchedule {
 }
 
 function assertDate(value: string): string {
-  if (!DATE_RE.test(value)) throw new Error(`eCFR returned an invalid date: ${value}`);
+  // An upstream-DATA fault, not an internal one: eCFR answered, and what it
+  // answered is not a date this service can use (CR-21). A bare `Error` here
+  // would be collapsed into a generic 500 by the HTTP layer.
+  if (!DATE_RE.test(value)) {
+    throw new UpstreamFormatError(`eCFR returned an invalid date: ${value}`);
+  }
   return value;
 }
 
@@ -79,9 +85,13 @@ export class EcfrApi {
     const url = new URL('/api/versioner/v1/titles.json', this.baseUrl);
     const data = await this.http.getJson(url, (raw) => titlesSchema.parse(raw));
     const title = data.titles.find((entry) => entry.number === TITLE_38);
-    if (!title) throw new Error(`eCFR titles.json does not include title ${TITLE_38}`);
+    if (!title) {
+      throw new UpstreamFormatError(`eCFR titles.json does not include title ${TITLE_38}`);
+    }
     const upToDateAsOf = title.up_to_date_as_of ?? title.latest_issue_date;
-    if (upToDateAsOf === null) throw new Error(`eCFR reports no issue date for title ${TITLE_38}`);
+    if (upToDateAsOf === null) {
+      throw new UpstreamFormatError(`eCFR reports no issue date for title ${TITLE_38}`);
+    }
     return { upToDateAsOf: assertDate(upToDateAsOf) };
   }
 

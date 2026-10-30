@@ -3,6 +3,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { corpusHash, hashContent } from '../src/core/changes.js';
 import type { EcfrApi } from '../src/core/ecfr.js';
+import { HttpError } from '../src/core/http-client.js';
 import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
 import { CFRService } from '../src/core/service.js';
 import { buildMcpServer } from '../src/mcp/server.js';
@@ -688,14 +689,12 @@ describe('MCP diff_issues tool (ecfr injected)', () => {
       getFullTitleXml: async (issueDate: string) => {
         const xml = xmlByDate[issueDate];
         if (xml === undefined) {
-          // The real client throws an HttpError carrying the status; a 404
+          // The real client throws an `HttpError` carrying the status; a 404
           // means "no revision for this date" and is translated into a
-          // usage error, so the stub must be faithful about the status.
-          const error = new Error(`HTTP ${failureStatus} for ${issueDate}`) as Error & {
-            status?: number;
-          };
-          error.status = failureStatus;
-          throw error;
+          // usage error, so the stub must be faithful about the type — the
+          // archive guard recognises it by `instanceof` (CR-22), not by a
+          // loose object that merely happens to have a `status` property.
+          throw new HttpError(`HTTP ${failureStatus} for ${issueDate}`, issueDate, failureStatus);
         }
         return xml;
       },
@@ -988,14 +987,12 @@ describe('MCP redline tool (ecfr injected)', () => {
       getFullTitleXml: async (issueDate: string) => {
         const xml = xmlByDate[issueDate];
         if (xml === undefined) {
-          // The real client throws an HttpError carrying the status; a 404
+          // The real client throws an `HttpError` carrying the status; a 404
           // means "no revision for this date" and is translated into a
-          // usage error, so the stub must be faithful about the status.
-          const error = new Error(`HTTP ${failureStatus} for ${issueDate}`) as Error & {
-            status?: number;
-          };
-          error.status = failureStatus;
-          throw error;
+          // usage error, so the stub must be faithful about the type — the
+          // archive guard recognises it by `instanceof` (CR-22), not by a
+          // loose object that merely happens to have a `status` property.
+          throw new HttpError(`HTTP ${failureStatus} for ${issueDate}`, issueDate, failureStatus);
         }
         return xml;
       },
