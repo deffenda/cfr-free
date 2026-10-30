@@ -1,4 +1,22 @@
 /**
+ * How many waiters may park behind the permits before further requests
+ * are refused. Four permits at a time, sixteen waiting: the queue holds
+ * the equivalent of a handful of peers' bursts and no more.
+ */
+export const DEFAULT_MAX_WAITERS = 16;
+
+/**
+ * Thrown when the semaphore's wait queue is full: the request was
+ * refused rather than parked behind the in-flight fetches.
+ */
+export class SemaphoreOverflowError extends Error {
+  override readonly name = 'SemaphoreOverflowError';
+  constructor(maxWaiters: number) {
+    super(`too many requests in flight — ${maxWaiters} upstream fetches are already waiting`);
+  }
+}
+
+/**
  * A counting semaphore: at most `permits` holders at a time.
  *
  * The upstream fetches this bounds are the expensive ones — the complete
@@ -23,25 +41,6 @@
  * parking it for minutes — the request could not be served in any
  * reasonable time anyway, and a fast refusal is the honest answer.
  */
-
-/**
- * How many waiters may park behind the permits before further requests
- * are refused. Four permits at a time, sixteen waiting: the queue holds
- * the equivalent of a handful of peers' bursts and no more.
- */
-export const DEFAULT_MAX_WAITERS = 16;
-
-/**
- * Thrown when the semaphore's wait queue is full: the request was
- * refused rather than parked behind the in-flight fetches.
- */
-export class SemaphoreOverflowError extends Error {
-  override readonly name = 'SemaphoreOverflowError';
-  constructor(maxWaiters: number) {
-    super(`too many requests in flight — ${maxWaiters} upstream fetches are already waiting`);
-  }
-}
-
 export class Semaphore {
   private available: number;
   private readonly waiters: Array<() => void> = [];
