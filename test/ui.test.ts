@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { runInNewContext } from 'node:vm';
 import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
@@ -296,6 +298,20 @@ function searchBody(citation: string, heading: string): Record<string, unknown> 
 }
 
 describe('UI view state for assistive technology', () => {
+  it('names every view the shell offers, in the README', () => {
+    // The README described the UI as "search + section reader with
+    // chapter/part browse" — two views — while the shell offers three
+    // tabs, and the SPEC named the third. A user looking for the redline
+    // VIEW in the browser did not learn it exists: the endpoint was in
+    // the route table, the view was not mentioned anywhere.
+    const readme = readFileSync(fileURLToPath(new URL('../README.md', import.meta.url)), 'utf8');
+    const paragraph = readme.split('\n\n').find((block) => block.includes('read-only web UI'));
+    expect(paragraph, 'README.md must describe the web UI').toBeDefined();
+    for (const view of ['search', 'browse', 'redline']) {
+      expect(paragraph?.toLowerCase(), `README.md must name the ${view} view`).toContain(view);
+    }
+  });
+
   it('ships the tab ids the script marks, in the served HTML', () => {
     // The script finds the tabs by id. If the shell and the script ever
     // disagree about those ids the marking silently stops working — the
