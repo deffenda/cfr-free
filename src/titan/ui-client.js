@@ -21,12 +21,14 @@
   const searchForm = byId('search-form');
   const qInput = byId('q');
   const kindSelect = byId('kind');
+  const partInput = byId('part');
   const chapterInput = byId('chapter');
   const perPageSelect = byId('per-page');
   const statusLine = byId('search-status');
   const cautionLine = byId('search-caution');
   const hitsList = byId('search-hits');
   const pager = byId('search-pager');
+  const announcer = byId('view-announcer');
   const sectionError = byId('section-error');
   const sectionHeading = byId('section-heading');
   const copyButton = byId('copy-citation');
@@ -40,6 +42,9 @@
   // Incremented on every navigation; a response may only mutate the DOM
   // while the generation it captured is still current.
   let routeGeneration = 0;
+  // The view that was showing before this navigation; null until the first
+  // render has happened. The keyboard moves only when the VIEW changes.
+  let lastView = null;
   const browseView = byId('browse-view');
   const browseError = byId('browse-error');
   const browseCrumbs = byId('browse-crumbs');
@@ -75,6 +80,38 @@
     return value;
   }
 
+  /**
+   * Plain-error messages, in the reader's words.
+   *
+   * The service's message already names the rule that was broken — "the
+   * chapter must be a Roman numeral such as I, II or IV". What a claims
+   * practitioner must not be shown is the label the API puts on it, or a
+   * validation library's own phrasing. The code is for a program; the
+   * message is for the reader.
+   */
+  function plainErrorMessage(code, message) {
+    const text = String(message === undefined || message === null ? '' : message);
+    if (code !== 'invalid_input') return text;
+    const prefix = 'invalid input: ';
+    return text.indexOf(prefix) === 0 ? text.slice(prefix.length) : text;
+  }
+
+  /** The heading each view's keyboard focus moves to. */
+  const VIEW_HEADINGS = {
+    search: 'search-heading',
+    section: 'section-heading',
+    browse: 'browse-heading',
+    redline: 'redline-heading',
+  };
+
+  /** What the live region says when a view opens. */
+  const VIEW_LABELS = {
+    search: 'Search.',
+    section: 'Provision.',
+    browse: 'Browse.',
+    redline: 'Redline.',
+  };
+
   function parseHash() {
     const hash = window.location.hash;
     // Single browse route: no query params — the tree state stays in the click
@@ -103,6 +140,7 @@
       view: 'search',
       q: params.get('q') === null ? '' : params.get('q'),
       kind: params.get('kind') === null ? '' : params.get('kind'),
+      part: params.get('part') === null ? '' : params.get('part'),
       chapter: params.get('chapter') === null ? '' : params.get('chapter'),
       page: clampInt(params.get('page'), 1, 10000),
       perPage: clampInt(params.get('per_page'), 10, 20),
@@ -113,6 +151,7 @@
     const params = new URLSearchParams();
     if (state.q !== '') params.set('q', state.q);
     if (state.kind === 'section' || state.kind === 'appendix') params.set('kind', state.kind);
+    if (state.part !== '') params.set('part', state.part);
     if (state.chapter !== '') params.set('chapter', state.chapter);
     if (state.page > 1) params.set('page', String(state.page));
     if (state.perPage !== 10) params.set('per_page', String(state.perPage));
@@ -125,6 +164,7 @@
       view: 'search',
       q: state.q,
       kind: state.kind,
+      part: state.part,
       chapter: state.chapter,
       page: page,
       perPage: state.perPage,
@@ -135,6 +175,7 @@
     const params = new URLSearchParams();
     params.set('q', state.q);
     if (state.kind === 'section' || state.kind === 'appendix') params.set('kind', state.kind);
+    if (state.part !== '') params.set('part', state.part);
     if (state.chapter !== '') params.set('chapter', state.chapter);
     params.set('page', String(state.page));
     params.set('per_page', String(state.perPage));
@@ -297,8 +338,7 @@
     if (!ok || typeof body.error === 'string') {
       clear(cautionLine);
       cautionLine.hidden = true;
-      statusLine.textContent =
-        'Search failed (' + String(body.error) + '): ' + String(body.message);
+      statusLine.textContent = 'Search failed: ' + plainErrorMessage(body.error, body.message);
       return;
     }
     const total = typeof body.total === 'number' ? body.total : 0;
@@ -412,7 +452,7 @@
         if (requestId !== redlineRequestId) return;
         if (!result.ok || typeof result.body.error === 'string') {
           showRedlineError(
-            'Redline failed (' + String(result.body.error) + '): ' + String(result.body.message),
+            'Redline failed: ' + plainErrorMessage(result.body.error, result.body.message),
           );
           return;
         }
@@ -455,6 +495,7 @@
     clearRedline();
     qInput.value = state.q;
     kindSelect.value = state.kind === 'section' || state.kind === 'appendix' ? state.kind : '';
+    partInput.value = state.part;
     chapterInput.value = state.chapter;
     perPageSelect.value = String(state.perPage);
     clear(hitsList);
@@ -626,10 +667,8 @@
           sectionError.textContent =
             'Failed to load ' +
             citation +
-            ' (' +
-            String(result.body.error) +
-            '): ' +
-            String(result.body.message);
+            ': ' +
+            plainErrorMessage(result.body.error, result.body.message);
           return;
         }
         fillSection(result.body);
@@ -785,7 +824,7 @@
         if (generation !== routeGeneration) return;
         if (!result.ok || typeof result.body.error === 'string') {
           showBrowseError(
-            'Browse failed (' + String(result.body.error) + '): ' + String(result.body.message),
+            'Browse failed: ' + plainErrorMessage(result.body.error, result.body.message),
           );
           return;
         }
@@ -824,11 +863,36 @@
       view: 'search',
       q: qInput.value.trim(),
       kind: kindSelect.value,
+      part: partInput.value.trim(),
       chapter: chapterInput.value.trim(),
       page: 1,
       perPage: clampInt(perPageSelect.value, 10, 20),
     });
   });
+
+  /**
+   * Move the keyboard to the view that just opened.
+   *
+   * The heading takes the focus, and it takes it WITHOUT becoming a tab
+   * stop: `tabindex="-1"` makes an element focusable on demand without
+   * putting it in the tab order.
+   */
+  function moveFocusTo(view) {
+    const target = byId(VIEW_HEADINGS[view]);
+    if (target === null || typeof target.focus !== 'function') return;
+    target.focus();
+  }
+
+  /**
+   * Say which view opened.
+   *
+   * The live region carries the change of view, because a screen-reader
+   * user gets no other signal that the page they were on is gone.
+   */
+  function announceView(view) {
+    if (announcer === null) return;
+    announcer.textContent = VIEW_LABELS[view] || '';
+  }
 
   function renderRoute() {
     // Route ownership: every navigation (including an empty search, the
@@ -844,6 +908,19 @@
     else if (state.view === 'browse') renderBrowse(generation);
     else if (state.view === 'redline') renderRedline();
     else renderSearch(state, generation);
+    // The keyboard follows the view. The focused element was inside the
+    // view that was just hidden, so focus fell back to the body: a keyboard
+    // or screen-reader user was dumped at the top of the document with no
+    // announcement of the new view and nowhere to go next.
+    //
+    // Only when the VIEW changed: the first render is not a navigation, and
+    // a second search on the same view updates in place — moving the
+    // keyboard there would take it away from the field being typed in.
+    if (lastView !== null && lastView !== state.view) {
+      moveFocusTo(state.view);
+      announceView(state.view);
+    }
+    lastView = state.view;
   }
 
   window.addEventListener('hashchange', renderRoute);

@@ -32,10 +32,20 @@ class StubNode {
   disabled = false;
   textContent = '';
   childNodes: StubNode[] = [];
+  /** True once this node has taken the keyboard focus. */
+  tookFocus = false;
+  /** Called when the node takes the keyboard focus. */
+  onFocus: ((node: StubNode) => void) | null = null;
   private handlers = new Map<string, Array<(event: unknown) => void>>();
 
   constructor(tagName: string) {
     this.tagName = tagName.toUpperCase();
+  }
+
+  /** The keyboard moving here — what `tabindex="-1"` + `focus()` does. */
+  focus(): void {
+    this.tookFocus = true;
+    if (this.onFocus !== null) this.onFocus(this);
   }
 
   get firstChild(): StubNode | null {
@@ -96,6 +106,8 @@ interface Harness {
   /** Make the next clipboard write reject (blocked-permission path). */
   setClipboardRejects(value: boolean): void;
   readonly element: (id: string) => StubNode;
+  /** The node that currently holds the keyboard focus, if any. */
+  readonly focused: () => StubNode | null;
   readonly calls: PendingCall[];
   navigate(hash: string): Promise<void>;
   flush(): Promise<void>;
@@ -105,12 +117,16 @@ function makeHarness(): Harness {
   const elements = new Map<string, StubNode>();
   const calls: PendingCall[] = [];
   const hashListeners: Array<() => void> = [];
+  let lastFocused: StubNode | null = null;
 
   const element = (id: string): StubNode => {
     let node = elements.get(id);
     if (node === undefined) {
       node = new StubNode('div');
       node.id = id;
+      node.onFocus = (focused) => {
+        lastFocused = focused;
+      };
       elements.set(id, node);
     }
     return node;
@@ -212,6 +228,7 @@ function makeHarness(): Harness {
 
   return {
     element,
+    focused: () => lastFocused,
     calls,
     navigate,
     flush,
@@ -711,7 +728,10 @@ describe('UI redline view (M5 slice 2)', () => {
     await submitRedline(harness);
     harness.calls[0]?.respond(false, { error: 'not_found', message: '4.999 is not in Title 38' });
     await harness.flush();
-    expect(harness.element('redline-error').textContent).toContain('not_found');
+    // The message names what is true; the API's label for it is for a
+    // program, not for a reader.
+    expect(harness.element('redline-error').textContent).toContain('4.999 is not in Title 38');
+    expect(harness.element('redline-error').textContent).not.toContain('not_found');
     expect(harness.element('redline-output').textContent).toBe('');
   });
 
@@ -1008,5 +1028,68 @@ describe('browse race reachability (P1-20261021-07 — the race is NOT reachable
     // section painted. If this assertion FAILS, the late response DID land.
     expect(harness.element('browse-list').allText).not.toContain('3.1');
     expect(harness.element('browse-crumbs').allText).not.toContain('Part 3');
+  });
+});
+
+describe('UI usability (CR-08, CR-09, CR-24)', () => {
+  it('shows the reader the rule that was broken, not the machine code', async () => {
+    // The service's message already names the rule ("the chapter must be a
+    // Roman numeral such as I, II or IV"). What a claims practitioner must
+    // not be shown is the API's label for it.
+    const harness = makeHarness();
+    harness.element('q').value = 'disorders';
+    harness.element('chapter').value = 'iv';
+    harness.element('search-form').dispatch('submit');
+    await harness.flush();
+    harness.calls[0]?.respond(false, {
+      error: 'invalid_input',
+      message: 'invalid input: the chapter must be a Roman numeral such as I, II or IV',
+    });
+    await harness.flush();
+    const status = harness.element('search-status').textContent;
+    expect(status).toContain('the chapter must be a Roman numeral');
+    expect(status).not.toContain('invalid_input');
+    expect(status).not.toContain('invalid input:');
+  });
+
+  it('moves the keyboard to the view that opened, and says so', async () => {
+    // After clicking a search hit, the focused element was inside the view
+    // that was just hidden, so focus fell back to the body: a keyboard or
+    // screen-reader user was dumped at the top of the document with no
+    // announcement of the new view.
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.125');
+    harness.calls[0]?.respond(true, sectionBody('4.125', 'Diagnosis of mental disorders.'));
+    await harness.flush();
+    expect(harness.focused()?.id).toBe('section-heading');
+    expect(harness.element('view-announcer').textContent).toBe('Provision.');
+  });
+
+  it('does not steal the keyboard on the first render', () => {
+    // The first render is not a navigation. Taking the focus there would
+    // take it from the browser's own chrome for no reason.
+    const harness = makeHarness();
+    expect(harness.focused()).toBeNull();
+  });
+
+  it('does not move the keyboard when the view has not changed', async () => {
+    // A second search on the same view updates in place; moving the
+    // keyboard would take it away from the field being typed in.
+    const harness = makeHarness();
+    await harness.navigate('#/search?q=one');
+    expect(harness.focused()).toBeNull();
+  });
+
+  it('sends the part the form carries, and keeps it in the route', async () => {
+    // The form omitted `part` although the API has always accepted it.
+    const harness = makeHarness();
+    harness.element('q').value = 'disorders';
+    harness.element('part').value = '4';
+    harness.element('chapter').value = 'IV';
+    harness.element('search-form').dispatch('submit');
+    await harness.flush();
+    const url = harness.calls[0]?.url ?? '';
+    expect(url).toContain('part=4');
+    expect(url).toContain('chapter=IV');
   });
 });
