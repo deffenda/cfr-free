@@ -331,9 +331,44 @@ All return MCP `structuredContent` + text content. The six index-backed tools ar
 ## 7. Security plan
 
 - **Deps:** runtime deps limited to `@modelcontextprotocol/sdk`, `zod`, `fast-xml-parser`; lockfile committed; `npm audit --audit-level=high` runs in the quality job, and `npm run scan` adds osv-scanner, gitleaks, trivy, semgrep locally. No hosted scanner service: the operator withdrew hosted code-scanning gates permanently (2026-10-18), so these local gates are the security floor.
-- **Code (quality):** `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`; ESLint (recommended, `no-explicit-any=error`, `no-console` allow-only-`error`, `complexity ≤ 10`, `eqeqeq`); no regex without linear guarantees; no `eval`/`Function`/`child_process`; no secrets (none needed); all error paths return sanitized messages (no stack traces to clients).
+- **Code (quality):** `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`; ESLint (`eslint.config.mjs`) — the rules this repo sets, and the scope each one applies to, are listed in §7.1 below; no regex without linear guarantees (`security/detect-unsafe-regex`); no `eval`/`Function` (`no-eval`, `no-implied-eval`, `no-new-func`); `src/` is `child_process`-free — `security/detect-child-process` is set for `**/*.ts`, but the rule reports the CommonJS `require('child_process')` form and `child_process.exec()` with a non-literal argument, not the ESM `import` form `test/` uses on purpose, so the invariant is `src/`'s; no secrets (none needed); all error paths return sanitized messages (no stack traces to clients).
 - **Coverage:** vitest + v8 ≥ 90 % branches/lines/functions/statements (fail-under thresholds in `vitest.config.ts`); mocked-fetch tests (no live network in PR CI).
 - **CI:** GitHub Actions — quality job (format, lint, workflow lint, typecheck, test, build, audit) + security job (gitleaks, osv-scanner) + docker job + actionlint job (workflow lint); no hosted-scanner job exists.
+
+### 7.1 The lint rules `eslint.config.mjs` sets
+
+`eslint:recommended` and `typescript-eslint`'s `recommended` supply the rest of the rule set. Each line below is `scope | rule | severity | options`; the options column is the config's own option list, in the config's order. `test/lint-contract.test.ts` reads this table and `eslint.config.mjs` and fails when they disagree, so this list and the config cannot drift apart.
+
+<!-- lint-rules:begin -->
+
+```text
+**/*.ts | @typescript-eslint/no-explicit-any | error |
+**/*.ts | @typescript-eslint/no-non-null-assertion | error |
+**/*.ts | @typescript-eslint/no-unused-vars | error | argsIgnorePattern=^_, varsIgnorePattern=^_
+**/*.ts | no-console | error | allow=error,warn
+**/*.ts | eqeqeq | error | always
+**/*.ts | complexity | error | 15
+**/*.ts | no-eval | error |
+**/*.ts | no-implied-eval | error |
+**/*.ts | no-new-func | error |
+**/*.ts | no-var | error |
+**/*.ts | prefer-const | error |
+**/*.ts | no-implicit-coercion | error | boolean=false
+**/*.ts | security/detect-unsafe-regex | error |
+**/*.ts | security/detect-child-process | error |
+**/*.ts | security/detect-eval-with-expression | error |
+**/*.ts | security/detect-non-literal-fs-filename | warn |
+**/*.ts | security/detect-non-literal-require | error |
+**/*.ts | security/detect-object-injection | off |
+**/*.ts | security/detect-possible-timing-attacks | off |
+**/*.mjs, **/*.js | no-console | off |
+test/**/*.ts | security/detect-non-literal-fs-filename | off |
+test/**/*.ts | @typescript-eslint/no-explicit-any | off |
+```
+
+<!-- lint-rules:end -->
+
+The complexity ceiling is therefore **15**, not 10, and `no-console` allows `error` and `warn` — not `error` alone.
 
 ## 8. Test plan
 
