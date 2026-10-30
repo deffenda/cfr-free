@@ -61,7 +61,16 @@ function formatHit(hit: PresentedHit, rank: number): string {
 /** Render search results for stdout: the hits, then the grounding summary. */
 export function formatSearchResults(result: SearchResponse): string {
   const lines: string[] = [];
-  if (result.hits.length === 0) {
+  const pages = pageCount(result);
+  // A page past the last one has no hits — but the corpus DOES have
+  // candidates, and "no provisions match" would tell the reader the corpus
+  // does not cover their question. That is the opposite of the truth.
+  const pastTheEnd = result.total > 0 && result.hits.length === 0;
+  if (pastTheEnd) {
+    lines.push(
+      `No provisions on page ${result.page} — the ${result.total} candidate(s) span ${pages} page(s).`,
+    );
+  } else if (result.hits.length === 0) {
     lines.push(`No provisions match "${result.query}".`);
   } else {
     result.hits.forEach((hit, index) => lines.push(formatHit(hit, index + 1)));
@@ -69,16 +78,31 @@ export function formatSearchResults(result: SearchResponse): string {
   lines.push('');
   lines.push(
     `${result.total} candidate provision(s); index issue date ${result.indexIssueDate ?? 'unknown'}` +
-      // Say so when there is more than one page: the ten results the command
-      // used to print were a dead end, and the reader cannot see the rest
-      // unless they know the rest exists.
-      (pageCount(result) > 1 ? `; page ${result.page} of ${pageCount(result)}` : '') +
-      (result.unmatchedTerms.length > 0
+      pageSummary(result, pages) +
+      // The unmatched terms describe the hits on THIS page. On a page past
+      // the last one there are none, and the terms would be reported as
+      // unanswered by a corpus that answers them on another page.
+      (!pastTheEnd && result.unmatchedTerms.length > 0
         ? `; terms not answered by these hits: ${result.unmatchedTerms.join(', ')}`
         : ''),
   );
   if (result.notice !== null) lines.push(`warning: ${result.notice}`);
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Where the reader is, when the results span more than one page.
+ *
+ * The page count is said even for a page that does not exist, because
+ * "page 99 of 8" is not a position — it tells the reader nothing about
+ * where the results end.
+ */
+function pageSummary(result: SearchResponse, pages: number): string {
+  if (pages <= 1) return '';
+  if (result.page > pages) {
+    return `; ${pages} page(s) in all, and page ${result.page} is past the last one`;
+  }
+  return `; page ${result.page} of ${pages}`;
 }
 
 /** How many pages the results span. */

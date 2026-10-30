@@ -179,9 +179,9 @@ parameters (`--per-page` is `per_page`, `--kind` is `kind`):
 ```bash
 cfr-free search PTSD                        # the hits, then the grounding summary
 cfr-free search --json PTSD                 # the search response verbatim, for a script
-cfr-free search --per-page 50 PTSD          # 50 hits per page (1-20; the default is 10)
+cfr-free search --per-page 20 PTSD          # 20 hits per page (1-20; the default is 10)
 cfr-free search --page 2 --per-page 20 PTSD # the second page
-cfr-free search --part 4 --chapter IV PTSD  # narrowed to one part and chapter
+cfr-free search --part 4 --chapter I PTSD   # narrowed to one part and chapter
 cfr-free search --kind appendix PTSD        # sections (the default) or appendices
 ```
 

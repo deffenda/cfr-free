@@ -723,12 +723,24 @@ describe('cfr-free search', () => {
     expect(() => parseArgs(['search', '--limit', '5'])).toThrow(/unknown option for search/);
   });
 
+  it('says which flag took the word, when a value flag swallowed the query', () => {
+    // `--page PTSD` leaves no query behind: the flag took the word. The
+    // usual advice then reproduces the command that just failed and points
+    // the reader at the wrong thing.
+    expect(() => parseArgs(['search', '--page', 'PTSD'])).toThrow(/--page took the word/);
+    expect(() => parseArgs(['search', '--kind', 'policy'])).toThrow(/--kind took the word/);
+    // With no flag at all, the usual advice stands.
+    expect(() => parseArgs(['search'])).toThrow(/search requires a query \(e\.g\./);
+  });
+
   it('refuses a bad flag before the index is opened', async () => {
     // The same rule as the query length: a rejected flag is the reader's
     // mistake, and it must not cost a 2-3 MB sync. The flags are validated
     // where the query is — before anything is opened.
     expect(() => parseArgs(['search', '--page', 'abc', 'PTSD'])).toThrow(/must be a whole number/);
-    expect(() => parseArgs(['search', '--kind', 'policy', 'PTSD'])).toThrow(/--kind must be/);
+    // The service owns the wording of the rules it enforces, so the CLI and
+    // the API cannot drift apart about what a rejected flag says.
+    expect(() => parseArgs(['search', '--kind', 'policy', 'PTSD'])).toThrow(/the kind must be/);
     expect(() => parseArgs(['search', '--per-page', '50', 'PTSD'])).toThrow(
       /the number of results per page/,
     );
@@ -820,6 +832,40 @@ describe('cfr-free search', () => {
       expect(page1.hits.length).toBe(1);
       expect(page2.hits.length).toBe(1);
       expect(page2.hits[0]?.citation).not.toBe(page1.hits[0]?.citation);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('says which page the reader is on, and when it is past the last one', async () => {
+    // The ten results the command used to print were a dead end, and a
+    // reader who overshoots the last page was told the corpus did not
+    // cover their question — when the corpus has candidates and the page
+    // simply does not exist.
+    const temp = openTempStore();
+    try {
+      const env = {
+        CFR_INDEX_PATH: temp.indexPath,
+        CFR_AUTO_SYNC: '0',
+        CFR_MAX_AGE_DAYS: '365',
+        CFR_LOG_LEVEL: 'error',
+      };
+      const first = makeIo(env);
+      expect(await main(['search', '--per-page', '1', '--page', '1', 'disorders'], first.io)).toBe(
+        0,
+      );
+      const text = first.out.join('');
+      expect(text).toMatch(/page 1 of \d+/);
+
+      const past = makeIo(env);
+      expect(await main(['search', '--per-page', '1', '--page', '99', 'disorders'], past.io)).toBe(
+        0,
+      );
+      const pastText = past.out.join('');
+      expect(pastText).toContain('past the last one');
+      expect(pastText).not.toContain('No provisions match');
+      // The corpus HAS candidates; only the page does not exist.
+      expect(pastText).toMatch(/candidate provision\(s\)/);
     } finally {
       temp.cleanup();
     }
