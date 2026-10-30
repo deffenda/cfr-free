@@ -32,7 +32,31 @@ info:
     no validator.
     Errors are JSON `{ error, message }`; paths not listed under `paths` return
     404, and any method other than `GET`/`HEAD` returns 405 with
-    `allow: GET, HEAD`. All schema fields listed under `required` are always
+    `allow: GET, HEAD`. The two eCFR-fetching routes answer `503
+    upstream_busy` when the upstream fetch queue is full — the request is
+    refused at once instead of being parked behind the fetches already in
+    flight. Rate limiting (armed only when `CFR_ALLOW_REMOTE=1`; loopback
+    never throttles) charges a request what it COSTS, not what it is: the
+    per-peer token bucket is spent in `precheck`, BEFORE the router, so the
+    price follows the path the request would take.
+
+    | request | tokens |
+    | --- | --- |
+    | `/api/v1/diff`, `/api/v1/redline` — they pull the complete Title 38 document from eCFR (~2 MB on the wire, ~16 MB parsed) | 10 |
+    | every other path — the index-backed reads, `/health`, `/metrics`, the web UI and its assets | 1 |
+    | a request the router refuses BEFORE it can price the route — a method other than GET/HEAD (`405`), a URL over 2048 bytes (`414`), a malformed URL (`400`) | 1 |
+    | a request the router rejects AFTER it has priced the route — a param cap (`q` over 800 bytes) on an index-backed read | 1 |
+    | a request the router rejects AFTER it has priced the route — the route's own validation (a malformed date) or a param cap (`q` over 800 bytes) on `/api/v1/diff` or `/api/v1/redline` | 10 |
+
+    The bucket is checked FIRST, so an exhausted budget answers `429
+    rate_limited` even to a request that would have been refused with
+    `405`/`414`/`400` anyway: a refusal is never free to repeat. A request
+    the router refuses before it can price the route costs the refusal
+    price, not the price of the route it aimed at — a `POST` to
+    `/api/v1/diff` costs one token, not ten. A request the router rejects
+    after it has priced the route (a malformed date, an oversized `q`)
+    costs that route's price. All schema
+    fields listed under `required` are always
     present (the optional `Health.diskFree`/`diskTotal` and
     `RedlineResult.fromText`/`toText` are the deliberate exceptions); nullable
     ones use OpenAPI 3.1 `type: [string, "null"]` (never `nullable: true`).
@@ -116,7 +140,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /openapi.yaml:
-    # source: src/titan/http-server.ts#handleDiscovery
+    # source: src/titan/http-server.ts#dispatch
     get:
       summary: The OpenAPI description of this API
       responses:
@@ -191,7 +215,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1:
-    # source: src/titan/http-server.ts#handleDiscovery
+    # source: src/titan/http-server.ts#dispatch
     get:
       summary: API index — the routes this instance serves
       responses:
@@ -440,7 +464,7 @@ paths:
       summary: Point-in-time provision diff between two eCFR issue dates
       responses:
         '200':
-          description: 'Provision-level diff of Title 38 between `from` and `to`: the changed, added and removed citations. Both dates are fetched from eCFR and hashed per citation on the fly (stateless — no local index, no cache). Each citation list is capped at 100 entries and `truncated: true` reports that at least one list was cut. Cache-Control: public, max-age=3600.'
+          description: 'Provision-level diff of Title 38 between `from` and `to`: the changed, added and removed citations. Both dates are fetched from eCFR on demand and hashed per citation on the fly — there is no local index for a point-in-time diff, but a short-lived in-memory memo in the fetching process may serve a document it fetched moments ago (a five-minute reuse window, four documents kept), and concurrent readers of the same date share one upstream fetch. Each citation list is capped at 100 entries and `truncated: true` reports that at least one list was cut. Cache-Control: public, max-age=3600.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DiffResult' }
@@ -449,6 +473,7 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/UpstreamBusy' }
       parameters:
         - name: from
           in: query
@@ -470,6 +495,7 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/UpstreamBusy' }
       parameters:
         - name: from
           in: query
@@ -487,7 +513,7 @@ paths:
       summary: Line redline of one provision between two eCFR issue dates
       responses:
         '200':
-          description: "Line redline of `citation` between `from` and `to`: status (changed/added/removed/unchanged), both sides' raw text, and one hunk per line (same/add/del with 1-based anchors into each side). Both dates are fetched from eCFR per call (stateless — no local index, no cache). The dates are SELECTORS — eCFR serves the revision in force on the requested date; they are not a verified stamp of which issue date was served. Cache-Control: public, max-age=300."
+          description: "Line redline of `citation` between `from` and `to`: status (changed/added/removed/unchanged), both sides' raw text, and one hunk per line (same/add/del with 1-based anchors into each side). Both dates are fetched from eCFR on demand — there is no local index for a point-in-time redline, but a short-lived in-memory memo in the fetching process may serve a document it fetched moments ago (a five-minute reuse window, four documents kept), and concurrent readers of the same date share one upstream fetch. The dates are SELECTORS — eCFR serves the revision in force on the requested date; they are not a verified stamp of which issue date was served. Cache-Control: public, max-age=300."
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RedlineResult' }
@@ -497,6 +523,7 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/UpstreamBusy' }
       parameters:
         - name: from
           in: query
@@ -524,6 +551,7 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/UpstreamBusy' }
       parameters:
         - name: from
           in: query
@@ -570,7 +598,7 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
     RateLimited:
       # source: src/titan/http-server.ts#precheck
-      description: '{ error: "rate_limited", message } — per-peer token bucket exhausted (armed only when CFR_ALLOW_REMOTE=1; loopback never throttles).'
+      description: '{ error: "rate_limited", message } — per-peer token bucket exhausted (armed only when CFR_ALLOW_REMOTE=1; loopback never throttles). The bucket is spent BEFORE the router: a diff or a redline costs 10 tokens, every other path 1, and a request the router refuses before it can price the route (405/414/400) 1 — so an exhausted budget answers 429 even to a request that would have been refused anyway. A request the router rejects after it has priced the route (a malformed date, an oversized q) costs that route''s price. See the token-cost table in the API description.'
       headers:
         retry-after: { description: Seconds to wait., schema: { type: integer } }
       content:
@@ -579,6 +607,12 @@ components:
     InternalError:
       # source: src/titan/http-server.ts#createHttpServer
       description: '{ error: "internal_error", message } — unexpected failure; details are logged server-side only.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    UpstreamBusy:
+      # source: src/titan/http-server.ts#createHttpServer
+      description: '{ error: "upstream_busy", message } — the upstream fetch queue was full: the request was refused at once instead of being parked behind the fetches already in flight (the eCFR-fetching routes only).'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -621,7 +655,7 @@ components:
       properties:
         error:
           type: string
-          description: 'One of invalid_input, not_found, method_not_allowed, uri_too_long, rate_limited, internal_error.'
+          description: 'One of invalid_input, not_found, method_not_allowed, uri_too_long, rate_limited, upstream_busy, internal_error.'
         message: { type: string }
         available: { type: array, items: { type: string } }
       additionalProperties: false
@@ -866,7 +900,7 @@ components:
       additionalProperties: false
     DiffResult:
       type: object
-      description: 'Provision-level diff of Title 38 between two eCFR issue dates — both dates fetched from eCFR and hashed per citation on the fly (stateless; no local index involved).'
+      description: 'Provision-level diff of Title 38 between two eCFR issue dates — both dates fetched from eCFR on demand and hashed per citation on the fly (no local index involved; a short-lived in-memory memo in the fetching process may reuse a document it fetched moments ago).'
       required:
         - fromIssueDate
         - toIssueDate
@@ -902,7 +936,7 @@ components:
       additionalProperties: false
     RedlineResult:
       type: object
-      description: 'Line redline of one provision between two eCFR issue dates — both dates fetched from eCFR and parsed on the fly (stateless; no local index involved). The dates are SELECTORS: eCFR serves the revision in force on the requested date, not a verified issue-date stamp.'
+      description: 'Line redline of one provision between two eCFR issue dates — both dates fetched from eCFR on demand and parsed on the fly (no local index involved; a short-lived in-memory memo in the fetching process may reuse a document it fetched moments ago). The dates are SELECTORS: eCFR serves the revision in force on the requested date, not a verified issue-date stamp.'
       required:
         - fromIssueDate
         - toIssueDate

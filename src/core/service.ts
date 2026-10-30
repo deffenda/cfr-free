@@ -769,9 +769,10 @@ export class CFRService {
    * facade over `diffIssues` so the HTTP surface shares the core's exact
    * validation and error semantics. BOTH dates are required — no default-to
    * resolution happens here (the store's `issue_date` lookup is the CLI's
-   * convenience, deliberately not threaded behind this facade). Stateless by
-   * design: every call fetches both dates' full-title XML from eCFR — no
-   * prefetch, no cache.
+   * convenience, deliberately not threaded behind this facade). Nothing is
+   * prefetched: each call fetches both dates' full-title XML from eCFR,
+   * through the client's own per-process document memo (see `ecfr.ts` —
+   * short-lived, in memory, shared by concurrent readers of the same date).
    *
    * Every `serve`/`mcp` entrypoint injects the client and logger together;
    * the guard fails closed for test-constructed services without the diff
@@ -779,7 +780,9 @@ export class CFRService {
    *
    * @throws {ServiceError} (`invalid_input`) when no eCFR client was
    *   injected, or when a date is malformed/impossible or the two dates are
-   *   identical; upstream fetch failures surface as `HttpError`.
+   *   identical; upstream fetch failures surface as `HttpError`, or as
+   *   `SemaphoreOverflowError` when the upstream fetch queue is full (the
+   *   HTTP layer maps that to `503 upstream_busy`).
    */
   async diffBetween(fromDate: string, toDate: string): Promise<IssueDiff> {
     const { ecfr, logger } = this;
@@ -795,8 +798,10 @@ export class CFRService {
    * the core otherwise. BOTH dates are required on the wire (no default-to
    * resolution); the core owns every validation (malformed/impossible/identical
    * dates, non-citation) and the `not_found` tripwire for a citation missing
-   * from BOTH dates. Stateless by design: every call fetches both dates'
-   * full-title XML from eCFR — no prefetch, no cache.
+   * from BOTH dates. Nothing is prefetched: each call fetches both dates'
+   * full-title XML from eCFR, through the client's own per-process document
+   * memo (see `ecfr.ts` — short-lived, in memory, shared by concurrent
+   * readers of the same date).
    *
    * Every `serve`/`mcp` entrypoint injects the client and logger together;
    * the guard fails closed for test-constructed services without the redline
@@ -807,7 +812,9 @@ export class CFRService {
    *   injected, or when a date is malformed/impossible, the two dates are
    *   identical, or the citation is not recognizable; (`not_found`) when the
    *   citation is missing from BOTH dates' parse results; upstream fetch
-   *   failures surface as `HttpError`.
+   *   failures surface as `HttpError`, or as `SemaphoreOverflowError` when
+   *   the upstream fetch queue is full (the HTTP layer maps that to
+   *   `503 upstream_busy`).
    */
   async redlineBetween(
     fromDate: string,
