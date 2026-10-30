@@ -27,8 +27,11 @@ Python interpreter or PyYAML is involved.
 2. Branch from `main`: `git checkout -b fix/short-description`.
 3. Make the change with tests. `docs/SPEC.md` is the design authority —
    update it when behavior or architecture changes. HTTP API changes must
-   also update `docs/openapi.yaml` (each path cites its router line in
-   `src/titan/http-server.ts`).
+   also update `docs/openapi.yaml` (each path cites the router SYMBOL it
+   comes from — `src/titan/http-server.ts#handleSearch` — not a line
+   number, so inserting a line above the router does not invalidate the
+   citation; the contract suite resolves every citation and fails if the
+   symbol is gone or no longer carries the construct it is cited for).
 4. Run the gates locally before pushing:
 
    ```bash
