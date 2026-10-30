@@ -32,7 +32,7 @@
  * `yaml` package, so the contract needs nothing installed beyond this
  * repository's own devDependencies.
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -1036,74 +1036,163 @@ const CITATION_KEYWORDS = [
   'internal_error',
 ] as const;
 
-/** Statement openers a citation may legitimately name: block conditions and calls. */
-const STATEMENT_OPENER = /\b(?:if|for|while|switch|catch)\s*\(|[A-Za-z_$][\w$]*\s*\(/;
+/**
+ * A `# source:` citation: the marker, then the tail it introduces. The tail
+ * is a comma-separated list of `file#symbol` pairs; a bare symbol inherits
+ * the file of the pair before it.
+ *
+ * The marker must START the comment. The file's own convention note quotes
+ * the marker inline, and a note that quotes it must not be read as a
+ * citation — a citation that checks out nothing is worse than none.
+ */
+const CITATION_RE = /^\s*#\s*source:\s*(.*)$/;
 
-// `file:NN…` — everything after `file:` is the citation tail; line-number
-// tokens are extracted from it separately (linear regexes only, so the
-// security plugin cannot flag catastrophic backtracking).
-const CITATION_RE = /#\s*source:\s*([\w./-]+\.\w+):(.*)$/;
+/** `path/to/file.ts#symbol` — a file and the symbol it must define. */
+const SYMBOL_PAIR_RE = /^([\w./-]+\.\w+)#([A-Za-z_$][\w$]*)$/;
 
-/** Blank, comment-only, and bare-return lines are never valid citation targets. */
-function deadCitationReason(content: string): string | null {
-  if (content === '') return 'that line is blank: the citation drifted';
-  if (content.startsWith('//') || content.startsWith('/*')) {
-    return 'that line is comment-only: the citation drifted';
+/** A bare symbol name. */
+const BARE_SYMBOL_RE = /^[A-Za-z_$][\w$]*$/;
+
+/** One symbol a citation names, and the file it must be defined in. */
+interface CitedSymbol {
+  readonly file: string;
+  readonly symbol: string;
+  /** False when the citation does not parse as a symbol reference at all. */
+  readonly wellFormed: boolean;
+}
+
+/**
+ * The symbols a `# source:` tail names.
+ *
+ * A parenthetical is prose ("(router)", "(encoding, URL parse, byte caps)")
+ * and is dropped before the tail is read: a prose word must never be
+ * mistaken for a symbol.
+ */
+function citedSymbols(tail: string): CitedSymbol[] {
+  const prose = tail.replace(/\([^)]*\)/g, ' ');
+  const cited: CitedSymbol[] = [];
+  let file = '';
+  for (const raw of prose.split(',')) {
+    const token = raw.trim();
+    if (token === '') continue;
+    const pair = SYMBOL_PAIR_RE.exec(token);
+    if (pair !== null) {
+      file = pair[1] ?? '';
+      cited.push({ file, symbol: pair[2] ?? '', wellFormed: true });
+      continue;
+    }
+    if (BARE_SYMBOL_RE.test(token) && file !== '') {
+      cited.push({ file, symbol: token, wellFormed: true });
+      continue;
+    }
+    // An unparsable token is a violation, never a silent skip: a citation
+    // that names nothing checks out nothing.
+    cited.push({ file, symbol: token, wellFormed: false });
   }
-  if (content === 'return;') return 'that line is a bare return; the citation drifted';
+  return cited;
+}
+
+/**
+ * The line that defines a named symbol, or null when the file defines no
+ * such symbol. A commented-out definition does not count: the citation
+ * claims the construct exists, not that it once did.
+ */
+function definitionLine(lines: readonly string[], symbol: string): number | null {
+  // `export`, `default` and `async` sit before the keyword, so the keyword
+  // alone is enough to find the definition — and a flat pattern keeps the
+  // security plugin's unsafe-regex check satisfied.
+  const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`(?:function|class|const|let|var)\\s+${escaped}\\b`);
+  for (const [index, line] of lines.entries()) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
+    if (pattern.test(line)) return index + 1;
+  }
   return null;
 }
 
-/** Step (b): no keyword on the line — escalate through the coarse structure check. */
-function keywordDriftReason(content: string, target: readonly string[], at: number): string | null {
-  if (CITATION_KEYWORDS.some((keyword) => content.includes(keyword))) return null;
-  const neighborhood = target.slice(at - 1, at + 2).join('\n');
-  if (!STATEMENT_OPENER.test(neighborhood)) {
-    return `"${content}" and its 2-line neighborhood contain no statement opener: the citation drifted`;
+/**
+ * The lines a top-level symbol occupies: its definition up to the next
+ * top-level declaration. The section, not the definition line alone, is
+ * what the construct check reads — a function's body is where its work is.
+ */
+function symbolSection(lines: readonly string[], at: number): string[] {
+  const section: string[] = [];
+  for (let index = at - 1; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    if (index > at - 1 && /^(?:export |async )*(?:function|const|class|let|var)\b/.test(line)) {
+      break;
+    }
+    section.push(line);
   }
-  return `"${content}" carries none of the expected constructs; a statement opener sits within the next 2 lines — the citation is likely off by 1–2 lines`;
+  return section;
 }
 
-/** The violation message for one `file:NN` citation site, or null when it checks out. */
-function checkCitation(where: string, target: readonly string[], at: number): string | null {
-  if (at < 1 || at > target.length) {
-    return `${where} — out of range (file has ${target.length} lines)`;
+/** The violation message for one cited symbol, or null when it checks out. */
+function checkCitation(where: string, file: string, symbol: string): string | null {
+  if (!existsSync(fileURLToPath(new URL(`../${file}`, import.meta.url)))) {
+    return `${where} — ${file} does not exist`;
   }
-  const content = (target[at - 1] ?? '').trim();
-  const reason = deadCitationReason(content) ?? keywordDriftReason(content, target, at);
-  return reason === null ? null : `${where} — ${reason}`;
+  const lines = readFileSync(fileURLToPath(new URL(`../${file}`, import.meta.url)), 'utf8').split(
+    '\n',
+  );
+  const at = definitionLine(lines, symbol);
+  if (at === null) {
+    return `${where} — ${file} defines no symbol named ${symbol}`;
+  }
+  const section = symbolSection(lines, at);
+  if (!CITATION_KEYWORDS.some((keyword) => section.join('\n').includes(keyword))) {
+    return `${where} — ${symbol} carries none of the expected constructs`;
+  }
+  return null;
 }
 
 describe('OpenAPI source citations (docs/openapi.yaml # source: lines)', () => {
-  it('every cited file:line exists and carries the construct it names', () => {
+  it('every cited symbol exists in the cited file and carries its construct', () => {
+    // The citations name a SYMBOL, not a line. A line anchor made this
+    // suite a tripwire on every insertion above the router: the cited line
+    // moved, the suite failed, and the failure pointed at the router rather
+    // than at the doc that had to change with it. A symbol is stable — the
+    // router can grow a hundred lines and `#dispatch` still names the same
+    // function — and the claim the citation makes is the one the check
+    // now makes: that symbol exists, and still carries a construct of the
+    // expected family.
     const specText = readFileSync(SPEC_PATH, 'utf8');
     const violations: string[] = [];
     let citations = 0;
     for (const [index, line] of specText.split('\n').entries()) {
       const match = CITATION_RE.exec(line);
       if (match === null) continue;
-      const file = match[1] ?? '';
-      const target = readFileSync(
-        fileURLToPath(new URL(`../${file}`, import.meta.url)),
-        'utf8',
-      ).split('\n');
-      // Number tokens: the `NN[,MM…]` directly after `file:`, then any
-      // further `:NN[,MM…]` groups (`+ :149`, `, :146`). Citation
-      // parentheticals carry no colon-digit prose, so only line numbers match.
-      const numbers = [...(match[2] ?? '').matchAll(/(^|:)\s*[\d][\d,]*/g)]
-        .flatMap((entry) => entry[0].match(/\d+/g) ?? [])
-        .map(Number);
-      for (const at of numbers) {
+      for (const cited of citedSymbols(match[1] ?? '')) {
         citations += 1;
-        const violation = checkCitation(
-          `docs/openapi.yaml:${index + 1} cites ${file}:${at}`,
-          target,
-          at,
-        );
+        const where = `docs/openapi.yaml:${index + 1} cites ${cited.file}#${cited.symbol}`;
+        if (!cited.wellFormed) {
+          violations.push(`${where} — not a symbol reference`);
+          continue;
+        }
+        const violation = checkCitation(where, cited.file, cited.symbol);
         if (violation !== null) violations.push(violation);
       }
     }
     expect(citations, 'docs/openapi.yaml must contain # source: citations').toBeGreaterThan(0);
     expect(violations, 'drifted # source: citations in docs/openapi.yaml').toEqual([]);
+  });
+
+  it('refuses a citation that names no symbol at all', () => {
+    // A citation that cannot be parsed checks out nothing, so the parser
+    // must report it rather than skip it.
+    expect(citedSymbols('src/titan/http-server.ts').map((cited) => cited.wellFormed)).toEqual([
+      false,
+    ]);
+    expect(citedSymbols('src/titan/http-server.ts#dispatch').map((c) => c.wellFormed)).toEqual([
+      true,
+    ]);
+    // A prose word in a parenthetical is prose, not a symbol.
+    expect(citedSymbols('src/titan/http-server.ts#dispatch (the router)')).toHaveLength(1);
+    // A bare symbol inherits the file of the pair before it.
+    expect(citedSymbols('src/titan/http-server.ts#dispatch, handleSearch')).toEqual([
+      { file: 'src/titan/http-server.ts', symbol: 'dispatch', wellFormed: true },
+      { file: 'src/titan/http-server.ts', symbol: 'handleSearch', wellFormed: true },
+    ]);
   });
 });
