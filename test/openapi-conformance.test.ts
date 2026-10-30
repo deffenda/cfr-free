@@ -2252,21 +2252,32 @@ describe('OpenAPI source citations (docs/openapi.yaml # source: lines)', () => {
 // were broken on purpose, one at a time — a hundred and two mutations —
 // and the suite was seen to go red, with four exceptions.
 //
-// Those four are named here rather than left implied — a claim that cannot
-// be shown is not a claim:
+// A later sweep of the same guards found SEVEN survivors, not four: the
+// four above, and three more that DO decide a verdict and are therefore
+// load-bearing. Those three are pinned now, so the claim above holds
+// again. All seven are named here with the others, so that the list
+// matches the sweep that found them:
 //
 //   1. `citedSymbols` skips an empty segment that `readSegment` skips
-//      anyway, and trims the segment it reads (two of the four);
-//   2. the defaults the parsers never produce — an operator token, a
+//      anyway — decides nothing;
+//   2. `citedSymbols` trims the segment it reads — decides nothing;
+//   3. the defaults the parsers never produce — an operator token, a
 //      match group, a line offset, a pending segment — cannot fire, so
 //      the `??` around them, and the guard on the operator token, decide
 //      nothing;
-//   3. `citedFilePath` resolves a cited path against the REPOSITORY ROOT,
+//   4. `citedFilePath` resolves a cited path against the REPOSITORY ROOT,
 //      and the suite always runs from the repository root, so resolving
 //      it against the working directory instead would decide nothing here
-//      either.
+//      either;
+//   5. `carriesConstruct`'s COMPARISON branch — a construct with a space
+//      in it is looked for among the declaration's comparisons — decides
+//      a verdict, and is pinned now;
+//   6. `commentStart`'s QUOTE-CLOSE rule — a `#` inside a quoted scalar
+//      belongs to the scalar — decides a verdict, and is pinned now;
+//   7. `commentStart`'s WHITESPACE rule — a `#` opens a comment only when
+//      whitespace precedes it — decides a verdict, and is pinned now.
 //
-// A fifth guard decides no verdict and was not among the mutations:
+// A further guard decides no verdict and was not among the mutations:
 // `blockScalarRanges` guards a range the YAML parser always sets.
 //
 // A second sweep re-ran the guards this round touched — the four
@@ -2763,6 +2774,37 @@ const SECOND_BRANCH_ROUTER_FIXTURE = [
 ].join('\n');
 
 /**
+ * A router fixture whose `dispatch` compares the path against NOTHING: the
+ * comparison the router's contract claims for it is missing.
+ */
+const NO_COMPARISON_ROUTER_FIXTURE = [
+  'function dispatch(pathname: string): void {',
+  '  handleSearch();',
+  '}',
+  '',
+].join('\n');
+
+/**
+ * A document fixture whose quoted value is CLOSED and followed by a real
+ * comment: the comment after a quoted value is a comment.
+ */
+const QUOTED_VALUE_THEN_COMMENT = [
+  'info:',
+  '  description: "x" # source: src/titan/http-server.ts#handleSearch',
+  '',
+].join('\n');
+
+/**
+ * A document fixture whose plain value carries a `#` with no space before
+ * it: the `#` is part of the value, not the start of a comment.
+ */
+const PLAIN_VALUE_WITH_HASH = [
+  'info:',
+  '  description: x# source: src/titan/http-server.ts#handleSearch',
+  '',
+].join('\n');
+
+/**
  * The facts a fixture's symbol carries, or a failure when the fixture does
  * not declare it: a pin must not read a different fixture than the one it
  * names.
@@ -3018,6 +3060,19 @@ describe('OpenAPI citation resolver: guards pinned against fixtures', () => {
     expect(checkDeclaration('w', ROUTER_FILE, PLAIN_WORD_FIXTURE, 'etagFor')).toContain(
       'carries none of sha256',
     );
+  });
+
+  it('pins the comparison construct: a comparison is looked for among the comparisons', () => {
+    // The construct with a SPACE in it is a comparison, and it is looked
+    // for among the declaration's comparisons. The router's contract claims
+    // `pathname ===` for `dispatch`, so a `dispatch` that compares the
+    // path against nothing carries NONE of it and is reported — the
+    // comparison branch is not a shortcut that accepts every symbol.
+    expect(checkDeclaration('w', ROUTER_FILE, NO_COMPARISON_ROUTER_FIXTURE, 'dispatch')).toContain(
+      'carries none of pathname ===',
+    );
+    // And the comparison is found when it is really there.
+    expect(checkDeclaration('w', ROUTER_FILE, ROUTER_FIXTURE, 'dispatch')).toBeNull();
   });
 
   it('pins the general construct list: every entry of it is reachable', () => {
@@ -3460,6 +3515,25 @@ describe('OpenAPI citation resolver: guards pinned against fixtures', () => {
       '',
     ].join('\n');
     expect(scanDocumentCitations(quoted, 'fixture.yaml').violations).toEqual([]);
+  });
+
+  it('pins the quoted value: a comment after a closed quote is still a comment', () => {
+    // The quotes of a value are read before the comment is looked for, and
+    // they CLOSE again: a `#` after the closing quote is a comment and not
+    // part of the value. A quote that never closed would swallow the
+    // comment after it, and a marker written there would be read as
+    // nothing at all — a citation nobody checked.
+    const scan = scanDocumentCitations(QUOTED_VALUE_THEN_COMMENT, 'fixture.yaml');
+    expect(scan.violations).toHaveLength(1);
+    expect(scan.violations[0]).toContain('must start the comment');
+  });
+
+  it('pins the plain value: a `#` with no space before it is not a comment', () => {
+    // A `#` opens a comment only when whitespace precedes it: `x# source:`
+    // is a plain value that happens to carry a hash, not a marker, and
+    // reporting it as a marker would fail a document over its own prose.
+    const scan = scanDocumentCitations(PLAIN_VALUE_WITH_HASH, 'fixture.yaml');
+    expect(scan.violations).toEqual([]);
   });
 
   it('pins the path constants: a route binds to the constant that serves it', () => {
