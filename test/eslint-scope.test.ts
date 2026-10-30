@@ -41,9 +41,14 @@ describe('the browser script lint scope', () => {
   });
 
   it('still lets the repository tooling reach for Node globals', async () => {
-    // The narrowing must not cost the repo's own scripts their globals.
-    const result = await lintProbe(path.join(ROOT, 'scripts/probe.js'), 'void process.env.HOME;\n');
-    expect(result.messages.map((message) => message.ruleId)).not.toContain('no-undef');
+    // The narrowing must not cost the repo's own scripts their globals. Two
+    // paths, because the node-globals block covers two patterns: a `.js`
+    // script under `scripts/`, and any `.mjs` file in the repository.
+    const js = await lintProbe(path.join(ROOT, 'scripts/probe.js'), 'void process.env.HOME;\n');
+    expect(js.messages.map((message) => message.ruleId)).not.toContain('no-undef');
+
+    const mjs = await lintProbe(path.join(ROOT, 'tools/probe.mjs'), 'void process.env.HOME;\n');
+    expect(mjs.messages.map((message) => message.ruleId)).not.toContain('no-undef');
   });
 
   it('lets the browser script reach for the browser globals it uses', async () => {
