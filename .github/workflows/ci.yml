@@ -55,13 +55,15 @@ jobs:
       - name: lint (eslint)
         run: npm run lint
       # The runner ships no actionlint binary; this is the same pinned
-      # install the `actionlint` job uses, and GITHUB_PATH puts it on
+      # install the `actionlint` job uses — pinned to the COMMIT, not to
+      # the tag, because a retagged release would otherwise run in CI
+      # with the runner's credentials — and GITHUB_PATH puts it on
       # PATH for the `npm run lint:actions` step below. Without it the
       # step would fail with `actionlint: command not found` on every
       # pull request.
       - name: Install actionlint
         run: |
-          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          go install github.com/rhysd/actionlint/cmd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: lint (actionlint, workflows)
         run: npm run lint:actions
@@ -106,7 +108,7 @@ jobs:
       # v1.7.12 is the version AGENTS.md blesses for `npm run lint:actions`:
       # the local gate and this job must lint the same way.
       - name: Install actionlint
-        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
       # Silent failure this prevents: a workflow that is valid YAML but
       # invalid to GitHub's expression parser — a job-level `if` reading the
       # `matrix` context, for instance — yields a failed run with zero jobs,

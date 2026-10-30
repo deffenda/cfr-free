@@ -479,10 +479,13 @@ function checkoutFetchDepth(jobText: string): string | undefined {
  * package.json only, so a version mentioned only in prose is unguarded
  * BY CHOICE — every workflow install must equal the constant below.
  */
+const ACTIONLINT_COMMIT = '914e7df21a07ef503a81201c76d2b11c789d3fca';
+
+/** The release the pinned commit is: named in the comment beside the pin. */
 const ACTIONLINT_VERSION = 'v1.7.12';
 
 /** The pinned install a gate-running job must carry, in an earlier step. */
-const ACTIONLINT_INSTALL = `go install github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}`;
+const ACTIONLINT_INSTALL = `go install github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_COMMIT}`;
 
 /**
  * A line running the actionlint install AS A COMMAND, capturing its
@@ -900,17 +903,20 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
     // make this guard pass on nothing. Only real install COMMAND lines
     // count — a comment quoting the line is not an install, and an echo
     // printing it would otherwise drag a stray quote into the version.
-    const installs: { name: string; version: string }[] = [];
+    const installs: { name: string; commit: string }[] = [];
     for (const { name, path } of workflowFiles) {
       for (const line of readFileSync(path, 'utf8').split('\n')) {
         const found = ACTIONLINT_INSTALL_LINE.exec(stripInlineComment(line));
-        if (found !== null) installs.push({ name, version: found[1] ?? '' });
+        if (found !== null) installs.push({ name, commit: found[1] ?? '' });
       }
     }
     expect(installs.length, 'no actionlint install found').toBeGreaterThan(0);
     for (const install of installs) {
-      const message = `${install.name}: actionlint @${install.version}`;
-      expect(install.version, message).toBe(ACTIONLINT_VERSION);
+      const message = `${install.name}: actionlint @${install.commit}`;
+      // The pin is a COMMIT, not a tag: a retagged release would otherwise
+      // run in CI with the runner's credentials.
+      expect(install.commit, message).toBe(ACTIONLINT_COMMIT);
+      expect(install.commit, message).toMatch(/^[0-9a-f]{40}$/);
     }
   });
 
@@ -932,6 +938,22 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
     expect(named, 'AGENTS.md must name exactly the required checks').toEqual(
       [...REQUIRED_CHECKS].sort(),
     );
+  });
+
+  it('names the actionlint release beside the pinned commit', () => {
+    // The commit alone says nothing to a reader: the comment beside it
+    // carries the version, the way the pinned actions carry theirs.
+    for (const { name, path } of workflowFiles) {
+      const text = readFileSync(path, 'utf8');
+      const pinned = text
+        .split('\n')
+        .filter((line) => line.includes(`actionlint@${ACTIONLINT_COMMIT}`));
+      for (const line of pinned) {
+        expect(line, `${name}: the pinned actionlint install must name its release`).toContain(
+          `# ${ACTIONLINT_VERSION}`,
+        );
+      }
+    }
   });
 
   it('still produces every check branch protection requires', () => {
