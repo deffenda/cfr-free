@@ -1075,9 +1075,20 @@ const GENERAL_CONSTRUCTS = [
   'internal_error',
 ] as const;
 
-/** The constructs a citation of `symbol` expects its declaration to carry. */
-function expectedConstructs(symbol: string): readonly string[] {
-  return SYMBOL_CONSTRUCTS[symbol] ?? GENERAL_CONSTRUCTS;
+/** The file whose symbols carry the per-symbol expectations above. */
+const ROUTER_FILE = 'src/titan/http-server.ts';
+
+/**
+ * The constructs a citation of `symbol` in `file` expects its declaration
+ * to carry.
+ *
+ * The per-symbol expectations were chosen for the ROUTER, so they apply
+ * only there: a same-named symbol in another file is held to the general
+ * list, not to the router's contract.
+ */
+function expectedConstructs(file: string, symbol: string): readonly string[] {
+  if (file === ROUTER_FILE) return SYMBOL_CONSTRUCTS[symbol] ?? GENERAL_CONSTRUCTS;
+  return GENERAL_CONSTRUCTS;
 }
 
 /**
@@ -1097,8 +1108,14 @@ const SYMBOL_PAIR_RE = /^([\w./-]+\.\w+)#([A-Za-z_$][\w$]*)$/;
 /** A bare symbol name. */
 const BARE_SYMBOL_RE = /^[A-Za-z_$][\w$]*$/;
 
-/** An inline `file#symbol` anchor in the document's prose. */
-const INLINE_ANCHOR_RE = /([\w./-]+\.\w+)#([A-Za-z_$][\w$]*)/g;
+/**
+ * An inline `file#symbol` anchor in the document's prose.
+ *
+ * The file part must end in a SOURCE extension: without that, a URL with
+ * a word fragment (`example.com#intro`) would be read as an anchor, and
+ * the suite would fail on a link rather than on a citation.
+ */
+const INLINE_ANCHOR_RE = /([\w./-]+\.(?:ts|tsx|js|mjs|cjs|json|ya?ml|md))#([A-Za-z_$][\w$]*)/g;
 
 /** One symbol a citation names, and the file it must be defined in. */
 interface CitedSymbol {
@@ -1134,11 +1151,16 @@ function splitTail(tail: string): readonly string[] {
 /**
  * The symbols a `# source:` tail names.
  *
- * A parenthetical is prose ("(router)", "(encoding, URL parse, byte caps)")
- * and is dropped before the tail is read: a prose word must never be
- * mistaken for a symbol. A parenthetical that WRAPS a symbol reference is
- * not prose — it is a citation written in parentheses, and it is unwrapped
- * and checked rather than dropped.
+ * A parenthetical is prose ("(the router)", "(encoding, URL parse, byte
+ * caps)") and is dropped before the tail is read: a prose word must never
+ * be mistaken for a symbol. A parenthetical that WRAPS a symbol reference
+ * is not prose — it is a citation written in parentheses, and it is
+ * unwrapped and checked rather than dropped.
+ *
+ * The rule for which is which is the PAIR: a wrapped segment names a
+ * symbol when it carries a `file#symbol` pair, because a pair says which
+ * file it is about. A wrapped bare word carries no file, so it cannot be
+ * checked against one — it is prose, and it stays prose.
  */
 function citedSymbols(tail: string): CitedSymbol[] {
   const cited: CitedSymbol[] = [];
@@ -1150,9 +1172,10 @@ function citedSymbols(tail: string): CitedSymbol[] {
     if (segment === '') continue;
     if (segment.startsWith('(') && segment.endsWith(')')) {
       const inner = segment.slice(1, -1).trim();
-      // A parenthetical that names no symbol is prose and stays prose; one
-      // that names a symbol is a citation, and is read as one.
-      if (!inner.includes('#') && !BARE_SYMBOL_RE.test(inner)) continue;
+      // A wrapped PAIR names a symbol and is a citation, unwrapped and
+      // checked. A wrapped bare word names no file, so it cannot be
+      // checked against one: it is prose, and it stays prose.
+      if (!inner.includes('#')) continue;
       pending.unshift(...splitTail(inner));
       continue;
     }
@@ -1331,20 +1354,36 @@ function citedFilePath(file: string): string | null {
 }
 
 /**
+ * The violation message for one cited symbol in a file's SOURCE, or null
+ * when it checks out.
+ *
+ * The source is a parameter so the check can be pinned against a fixture:
+ * a guard that can only be exercised through the repository's own files
+ * cannot be shown to fail when it is removed.
+ */
+function checkDeclaration(
+  where: string,
+  file: string,
+  source: string,
+  symbol: string,
+): string | null {
+  const declaration = declarationText(source, symbol);
+  if (declaration === null) return `${where} — ${file} declares no symbol named ${symbol}`;
+  const expected = expectedConstructs(file, symbol);
+  if (!expected.some((keyword) => declaration.includes(keyword))) {
+    return `${where} — ${symbol} carries none of ${expected.join(', ')}`;
+  }
+  return null;
+}
+
+/**
  * The violation message for one cited symbol, or null when it checks out.
  */
 function checkCitation(where: string, file: string, symbol: string): string | null {
   const path = citedFilePath(file);
   if (path === null) return `${where} — ${file} resolves outside the repository`;
   if (!existsSync(path)) return `${where} — ${file} does not exist`;
-  const source = readFileSync(path, 'utf8');
-  const declaration = declarationText(source, symbol);
-  if (declaration === null) return `${where} — ${file} declares no symbol named ${symbol}`;
-  const expected = expectedConstructs(symbol);
-  if (!expected.some((keyword) => declaration.includes(keyword))) {
-    return `${where} — ${symbol} carries none of ${expected.join(', ')}`;
-  }
-  return null;
+  return checkDeclaration(where, file, readFileSync(path, 'utf8'), symbol);
 }
 
 /**
@@ -1361,7 +1400,11 @@ function checkRouteBinding(
   if (symbol === 'dispatch') return null;
   const wanted = path.replace(/\{[^}]*\}/g, '');
   const constant = pathConstants(source).find((entry) => entry.path === wanted);
-  if (constant === undefined) return null;
+  if (constant === undefined) {
+    // The router holds no constant for this path, so the claim cannot be
+    // checked — and a check that cannot be run must say so, not pass.
+    return `${where} — the router has no path constant for ${path}, so the citation cannot be checked`;
+  }
   if (branchCalls(source, constant.name, symbol)) return null;
   return `${where} — ${path} is served by the router, not by ${symbol}`;
 }
