@@ -3,9 +3,10 @@
 Audited commit: `aa3f73c`, then rebased onto `8c876c5` when `main` moved
 mid-audit (see "Provenance" for exactly what was re-verified after the
 rebase).
-Scope: `src/` (37 files, ~8.4k lines), `test/` (36 test files; 743 test cases
-— 722 executed in the audited run, plus the 21 in `openapi-conformance` that
-could not load locally without PyYAML),
+Scope: `src/` (37 files, ~8.4k lines), `test/` (36 test files; 766 test cases
+— 722 executed in the audited run, plus the 44 in `openapi-conformance`, whose
+21 source-level declarations expand to 44 cases, and which could not load
+locally without PyYAML),
 `.github/workflows/` (3 files), `Dockerfile`, `docker-compose.yml`,
 `package.json`, `scripts/`, `tools/`, `docs/SPEC.md`, `docs/openapi.yaml`,
 `README.md`, `ROADMAP.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`.
@@ -162,8 +163,9 @@ job), which runs no tests. The `security` job does use `fetch-depth: 0`
 Two consequences:
 
 1. **The protection is absent from the merge gate.** The guard was added in
-   `ebd1475` to prevent a version/tag collision; in CI it has never
-   executed.
+   `21ae9da` ("fix(distribution): make the git install routes work"), which
+   created `test/install-paths.test.ts`; `ebd1475` later _modified_ it to
+   exempt the tag being released. In CI the guard has never executed.
 2. **Its invariant contradicts the release workflow.** `release.yml:148` and
    `release.yml:246` both require `tag == package.json version`, so `main` is
    _guaranteed_ to hold `version == latest tag` between releases — exactly
@@ -1572,7 +1574,7 @@ These were verified, not assumed. Do not regress them while fixing the above.
   emits only `"${word}"*` where words come from `split(/[^\p{L}\p{N}]+/u)`,
   and the expression is always a bound parameter. The one path where user
   text re-enters the builder — `service.ts:490` `notFoundMessage` →
-  `.search({ query: `"${citation}"` })`, with an appendix citation that may
+  `.search({ query: `"${citation}"`, page: 1, perPage: 5 })`, with an appendix citation that may
   contain quotes (`src/core/citations.ts:27`) — is neutralised by the
   span/token splitter. No operator can escape.
 - **SQL is fully parameterized.** Every user-derived value in `store.ts` is
@@ -1726,13 +1728,13 @@ Ordered by dependency and by cost, not by severity alone.
 Required by `AGENTS.md:51` (_"If a test asserts on the text of another file,
 surface it"_).
 
-| Test file                                       | Reads                                                                                                                                                                  | Cost of a false failure                                                                                                                 |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/install-paths.test.ts:67,109,472-474,486` | literal strings in `package.json` and `scripts/prepare.mjs`; **all three** workflow files (`ci.yml`, `release.yml`, `live-e2e.yml`); and the raw text of `release.yml` | renaming a script or env var breaks the test; **editing any workflow file breaks it** — e.g. renaming `gh release create` fails 3 tests |
-| `test/ci-workflow.test.ts` (1 627 lines)        | **every** `.yml`/`.yaml` in `.github/workflows/` (`:61-66`, `:788`, `:815`, `:900`) and `package.json` (`:52`)                                                         | **any** reformat of **any** workflow file breaks the guard — see CR-30                                                                  |
-| `test/openapi-conformance.test.ts:1020-1035`    | exact line numbers in `src/titan/http-server.ts`                                                                                                                       | see CR-11                                                                                                                               |
-| `test/markdown-tables.test.ts:152-171`          | the text of every tracked `.md`                                                                                                                                        | a malformed table fails the suite                                                                                                       |
-| `test/no-conflict-markers.test.ts:75-96`        | the text of every tracked file                                                                                                                                         | a conflict marker fails the suite                                                                                                       |
+| Test file                                                          | Reads                                                                                                                                                           | Cost of a false failure                                                                                                                         |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/install-paths.test.ts:55,96,101,247,287,310,472-474,486,600` | **seven** repo files: `package.json`, `src/cli.ts`, `scripts/prepare.mjs`, `Dockerfile`, and all three workflow files (`ci.yml`, `release.yml`, `live-e2e.yml`) | renaming a script or env var breaks the test; **editing any workflow file breaks it** — e.g. renaming `gh release create` fails 2 further tests |
+| `test/ci-workflow.test.ts` (1 627 lines)                           | **every** `.yml`/`.yaml` in `.github/workflows/` (`:61-66`, `:788`, `:815`, `:900`) and `package.json` (`:52`)                                                  | **any** reformat of **any** workflow file breaks the guard — see CR-30                                                                          |
+| `test/openapi-conformance.test.ts:1020-1035`                       | exact line numbers in `src/titan/http-server.ts`                                                                                                                | see CR-11                                                                                                                                       |
+| `test/markdown-tables.test.ts:152-171`                             | the text of every tracked `.md`                                                                                                                                 | a malformed table fails the suite                                                                                                               |
+| `test/no-conflict-markers.test.ts:75-96`                           | the text of every tracked file                                                                                                                                  | a conflict marker fails the suite                                                                                                               |
 
 **Assessment:** the first two are defensible inter-file contract tests —
 `install-paths.test.ts:36-40` states the rationale explicitly and each
@@ -1741,8 +1743,9 @@ assertion names the file it reads — but their blast radius is wider than the
 Two edits that the earlier form of this table did not disclose were confirmed
 to break the suite: unpinning `actions/checkout@v7` in `live-e2e.yml` fails
 `ci-workflow.test.ts` ("pins every action to a full commit SHA"), and renaming
-`gh release create` to `gh release upload` in `release.yml` fails
-`install-paths.test.ts` in 3 tests. The markdown and conflict-marker guards
+`gh release create` to `gh release upload` in `release.yml` fails 2 further
+`install-paths.test.ts` tests (a third, the release guard, was already red —
+see CR-01). The markdown and conflict-marker guards
 are structural rather than textual-brittle, and both document precisely what
 they cannot see (a marker inside a fenced block; a setext `=======` underline)
 and skip vacuously rather than falsely when there is no git checkout
@@ -1778,7 +1781,7 @@ below — and raised the following corrections, all of which are now applied:
 | The ETag claim cited one range for two separate locations                                                                                | split into `http-server.ts:62-71` (sha256) and `:116-135` (matcher)                                                                                                                                                                                                                                                                                                          |
 | "Eighteen `# source:` comments" — 17 citations plus the convention note at `docs/openapi.yaml:4`                                         | corrected to seventeen                                                                                                                                                                                                                                                                                                                                                       |
 | "`test/ci-workflow.test.ts` is ~11 % of the ~14 700-line suite"                                                                          | corrected to ~10 % of ~16 300 lines (16 150 in `*.test.ts`)                                                                                                                                                                                                                                                                                                                  |
-| Scope header said `test/` has 39 files                                                                                                   | corrected to 36 `*.test.ts` files and a measured 743 cases                                                                                                                                                                                                                                                                                                                   |
+| Scope header said `test/` has 39 files                                                                                                   | corrected to 36 `*.test.ts` files and a measured 766 cases                                                                                                                                                                                                                                                                                                                   |
 | `Dockerfile:25-26` quoted a four-line `ENV` block                                                                                        | corrected to `:23-26`                                                                                                                                                                                                                                                                                                                                                        |
 | `SPEC.md:24-58` for the `src/` tree                                                                                                      | corrected to `:26-61`                                                                                                                                                                                                                                                                                                                                                        |
 | A quoted YAML citation spliced two non-adjacent lines                                                                                    | shown as two separate lines with their line numbers                                                                                                                                                                                                                                                                                                                          |
@@ -1786,6 +1789,7 @@ below — and raised the following corrections, all of which are now applied:
 | `test/ui.test.ts` "39 assertions"                                                                                                        | corrected to 39 test cases / 96 assertions                                                                                                                                                                                                                                                                                                                                   |
 | The linter control experiment's configuration was not stated                                                                             | stated (a `.ts` control under the repo's own eslint config — a `.js` control reproduces a different count, because `eqeqeq` is scoped to `**/*.ts`)                                                                                                                                                                                                                          |
 | The `innerHTML` claim did not mention the two comment hits                                                                               | noted                                                                                                                                                                                                                                                                                                                                                                        |
+| The `LOOPBACK_HOSTS` caveat and the `openapi-conformance` range fix were applied but unlisted                                            | both added to the corrections table                                                                                                                                                                                                                                                                                                                                          |
 | **The AGENTS.md:51 Disclosure table under-reported which files are text-asserted on**                                                    | both rows expanded: `ci-workflow.test.ts` reads **every** workflow file plus `package.json`; `install-paths.test.ts` reads **all three** workflow files and the raw text of `release.yml`. Two edits the earlier table did not disclose were confirmed to break the suite (unpinning `actions/checkout@v7` in `live-e2e.yml`; renaming `gh release create` in `release.yml`) |
 | `AGENTS.md:48` and `test/ci-workflow.test.ts:55` name three required checks; branch protection requires four                             | added as **CR-42**                                                                                                                                                                                                                                                                                                                                                           |
 
