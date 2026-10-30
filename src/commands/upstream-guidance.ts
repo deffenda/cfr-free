@@ -15,6 +15,23 @@ export interface UpstreamFailure {
 }
 
 /**
+ * What eCFR did, in the reader's words.
+ *
+ * The reason says what happened, and never says more than the failure
+ * knows. A status is reported when there was one; an answer that arrived
+ * but was not usable is described as such rather than as the status it
+ * happened to carry — "eCFR answered HTTP 200" reads like a success
+ * report, and "the response was too large" is what actually happened.
+ */
+function reasonFor(error: HttpError): string {
+  if (error.kind === 'transport') return 'eCFR could not be reached';
+  if (error.kind === 'parse') return 'eCFR answered, but not with valid JSON';
+  if (error.kind === 'size') return 'eCFR answered, but the response was too large';
+  if (error.status === undefined) return 'eCFR answered';
+  return `eCFR answered HTTP ${error.status}`;
+}
+
+/**
  * What the reader can do next, given what eCFR answered.
  *
  * The advice must not blame the reader's network when eCFR answered: a
@@ -22,14 +39,26 @@ export interface UpstreamFailure {
  * "check your network connection" because eCFR answered 404 is how a reader
  * spends an hour unplugging a router that was never the problem.
  *
+ * The same holds for an answer that was not usable. eCFR answered 200 and
+ * the body was a page of HTML — a captive portal, a proxy, a CDN error
+ * page. The router is fine, and "check your network connection" would send
+ * the reader after the wrong thing; what they can do is try again.
+ *
  * - no answer at all: the network is the only suspect;
  * - 5xx: eCFR is unwell, and waiting is the only move;
  * - 4xx: eCFR answered and refused. Retrying changes nothing, so no advice
- *   is offered — the reason alone says what happened.
+ *   is offered — the reason alone says what happened;
+ * - an answer that was not usable: try again, because the upstream did
+ *   answer;
+ * - an answer over the cap: nothing the reader does changes it.
  */
-function adviceFor(status: number | undefined): string {
-  if (status === undefined) return 'Check your network connection and try again.';
-  if (status >= 500) return 'The service is unavailable, so try again later.';
+function adviceFor(error: HttpError): string {
+  if (error.kind === 'transport') return 'Check your network connection and try again.';
+  if (error.kind === 'parse') return 'Try again in a moment.';
+  if (error.kind === 'size') return '';
+  if (error.status !== undefined && error.status >= 500) {
+    return 'The service is unavailable, so try again later.';
+  }
   return '';
 }
 
@@ -51,8 +80,8 @@ export function upstreamFailure(error: unknown): UpstreamFailure | null {
   if (!(error instanceof HttpError)) return null;
   const status = error.status;
   return {
-    reason: status === undefined ? 'eCFR could not be reached' : `eCFR answered HTTP ${status}`,
-    advice: adviceFor(status),
+    reason: reasonFor(error),
+    advice: adviceFor(error),
     url: error.url,
     status,
     detail: error.message,

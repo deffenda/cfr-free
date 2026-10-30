@@ -214,6 +214,20 @@ describe('main', () => {
     const refused = new HttpError('request failed for /api/versioner/v1/titles.json', '/x', 404);
     expect(failureMessage(refused)).toBe('eCFR answered HTTP 404');
 
+    // An answer that was not JSON is still an answer: eCFR replied, the
+    // reply was not its data. The reader's router is not the suspect, and
+    // telling them to check it sends them after the wrong thing.
+    const notJson = new HttpError('invalid JSON response from /x', '/x', 200, 'parse');
+    expect(failureMessage(notJson)).toContain('eCFR answered, but not with valid JSON');
+    expect(failureMessage(notJson)).not.toContain('network connection');
+
+    // A body over the cap is not a success either, even though it carries
+    // the status of the answer it came with.
+    const tooLarge = new HttpError('response from /x exceeds 52428800 bytes', '/x', 200, 'size');
+    expect(failureMessage(tooLarge)).toContain('the response was too large');
+    expect(failureMessage(tooLarge)).not.toContain('HTTP 200');
+    expect(failureMessage(tooLarge)).not.toContain('network connection');
+
     // An ordinary failure keeps its own message.
     expect(failureMessage(new Error('the index has no structure data'))).toBe(
       'the index has no structure data',
