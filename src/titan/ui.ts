@@ -55,9 +55,9 @@ export const UI_HTML = `<!doctype html>
       <h1><a href="#/search">cfr-free</a></h1>
       <p>Read-only search over the local Title 38 CFR index.</p>
       <nav class="site-tabs" aria-label="Views">
-        <a href="#/search">Search</a>
-        <a href="#/browse">Browse</a>
-        <a href="#/redline">Redline</a>
+        <a id="tab-search" href="#/search">Search</a>
+        <a id="tab-browse" href="#/browse">Browse</a>
+        <a id="tab-redline" href="#/redline">Redline</a>
       </nav>
     </header>
     <noscript>
