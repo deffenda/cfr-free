@@ -68,6 +68,12 @@ Every PR runs `npm audit` (high+), gitleaks (secret scan over full git
 history) and osv-scanner in CI. Locally, `npm run scan` additionally runs
 trivy and semgrep when installed.
 
+The release path (a `v*` tag) does NOT re-run the secret scan: its gate is
+`npm run ci`, whose last step is `npm audit` alone, and CI's `security` job
+has no tag trigger. The release checklist (`docs/SPEC.md` §11.1) therefore
+requires `npm run scan:strict`, which fails unless gitleaks and osv-scanner
+actually ran.
+
 ## Operator-run local scans
 
 The operator MAY run throwaway-instance scans locally: Schemathesis

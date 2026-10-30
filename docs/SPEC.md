@@ -405,9 +405,19 @@ Unit: citation parser, FTS sanitizer (incl. injection attempts `" OR 1=1--`), XM
 - Trunk-based flow: bootstrap `main` (docs/license only) → feature branch → **PR** → CI green → **squash merge** + branch delete.
 - Branch protection on `main`: PR required, strict up-to-date, required checks `quality (22)` + `quality (24)` + `security` (the `security` context is required per the live protection config; `docker` runs in CI as gate evidence but is not itself required). Review process: **an independent fresh-context review of the exact head is required for every PR** — see [`AGENTS.md`](../AGENTS.md) (the historical "no mandatory review (solo maintainer)" posture is superseded; solo-maintainer practice was documented in CONTRIBUTING).
 - Repo settings: squash merge only, auto-delete head branches, Dependabot (npm, actions and docker weekly), all workflow Actions **SHA-pinned** (Dependabot re-pins on updates), minimal `GITHUB_TOKEN` permissions (`contents: read`).
-- Local pre-push gates: `npm run ci` + `npm run scan` (npm audit, osv-scanner, gitleaks, trivy, semgrep).
+- Local pre-push gates: `npm run ci` + `npm run scan` (npm audit, osv-scanner, gitleaks, trivy, semgrep). `npm run scan` SKIPS a tool that is not installed, and skips a network scanner whose backend is unreachable, so a green `npm run scan` is not by itself proof that a secret scan ran. `npm run scan:strict` is the release-path form: gitleaks and osv-scanner MUST run, and a missing binary or an unreachable backend fails it.
 - Container (v0.5): multi-stage `Dockerfile` (node:22-alpine, non-root, index in `/data` volume); CI `docker` job builds the image and runs a hermetic offline smoke (no eCFR in PR CI). `release.yml` on `v*` tags runs the full CI gate + a live container e2e (real sync, HTTP surface, MCP `list_parts` handshake), then publishes multi-arch (`linux/amd64` + `linux/arm64`) `ghcr.io/deffenda/cfr-free:{version,major.minor,latest}` with SLSA provenance attestation — built-in `GITHUB_TOKEN` only, no secrets.
 - Live E2E: `.github/workflows/live-e2e.yml` runs `LIVE_TESTS=1` against real eCFR on a weekly cron and on `workflow_dispatch` (format-drift tripwire); PR CI stays hermetic.
+
+### 11.1 Release checklist (a `v*` tag)
+
+The release workflow's gate job runs `npm run ci`, whose last step is `scan:audit` — `npm audit --audit-level=high` alone. The `v*` tag publish path therefore runs NEITHER gitleaks NOR osv-scanner: CI's `security` job (gitleaks + osv-scanner) is triggered by `push: branches: [main]` and by `pull_request` only, so a tag push matches neither trigger and a tag can point at a commit no `security` job ever saw. Until the release workflow runs that job's scanner set itself, the secret scan is the releaser's step, and this checklist is it:
+
+1. `npm run ci` — the gate the release workflow also runs.
+2. `npm run scan:strict` — gitleaks and osv-scanner MUST both run; a missing binary or an unreachable osv backend FAILS. Read the output: `pass: gitleaks` and `pass: osv-scanner`, never `skip:`.
+3. `npm run build` — the release workflow builds the tarball and the image from the tag.
+
+`npm run scan:strict` is the local stand-in for the `security` job's scanner set (gitleaks + osv-scanner). trivy and semgrep stay optional in it, because CI does not run them either.
 
 ## 12. Implementation review round (v0.3 — post-code reviews + live smoke)
 

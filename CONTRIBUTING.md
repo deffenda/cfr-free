@@ -32,6 +32,11 @@ The local gate also needs `actionlint` on PATH — `npm run ci` runs
    npm run scan      # optional: gitleaks/osv/trivy/semgrep (skips missing tools)
    ```
 
+   `npm run scan` skips a tool that is not installed, so a green run is not by
+   itself proof that a secret scan happened. Before tagging a release, run
+   `npm run scan:strict` instead — it fails unless gitleaks and osv-scanner
+   actually ran.
+
 5. Open a pull request using the template. CI must be green
    (`quality (22)`, `quality (24)`, `security`).
 6. Squash-merged PRs only; keep commit messages meaningful in the squash
@@ -44,6 +49,14 @@ The local gate also needs `actionlint` on PATH — `npm run ci` runs
 - Run `npm test`, then `npm run ci`, before pushing (full suite, coverage floors).
 - `/health` should still match its schema — the conformance test asserts it live.
 - Want to see the served shape? `cfr-free serve`, then `GET /health` in a browser.
+
+## Releasing
+
+A `v*` tag is cut by the operator, and the release workflow's gate is
+`npm run ci` — which does not include the secret scan. The release checklist
+is [`docs/SPEC.md`](docs/SPEC.md) §11.1; in short: `npm run ci`, then
+`npm run scan:strict`, then `npm run build`, and check the scan output says
+`pass: gitleaks` and `pass: osv-scanner` rather than `skip:`.
 
 ## Style
 
