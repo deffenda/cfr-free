@@ -496,14 +496,37 @@ const ACTIONLINT_INSTALL_LINE =
  */
 const NPM_RUN_COMMAND = /(?:^|[\s;&|(`'"])npm run\s+([\w:.-]+)/g;
 
-/** The scripts a run value invokes with `npm run`, in the order they sit. */
+/**
+ * A bare `npm test` in command position: npm's own spelling of the `test`
+ * script, which the `npm run <script>` form does not match. The word
+ * `test` must END there, so `npm run test:coverage` — a different script,
+ * matched by the form above — is not read as the bare form.
+ */
+const NPM_TEST_COMMAND = /(?:^|[\s;&|(`'"])npm test\b/g;
+
+/**
+ * The scripts a run value invokes, in the order they sit: the `npm run
+ * <script>` forms and the bare `npm test`, which npm resolves to the
+ * `test` script.
+ */
 function invokedScripts(run: string): string[] {
-  return [...run.matchAll(NPM_RUN_COMMAND)].map((match) => match[1] ?? '');
+  const found = [
+    ...[...run.matchAll(NPM_RUN_COMMAND)].map((match) => ({
+      index: match.index ?? 0,
+      script: match[1] ?? '',
+    })),
+    ...[...run.matchAll(NPM_TEST_COMMAND)].map((match) => ({
+      index: match.index ?? 0,
+      script: 'test',
+    })),
+  ];
+  return found.sort((a, b) => a.index - b.index).map((entry) => entry.script);
 }
 
 /**
  * The scripts that make a job a GATE job: `npm run ci` itself and every
- * step the `ci` script runs.
+ * step the `ci` script runs, plus the two scripts that run the whole test
+ * suite on their own.
  *
  * DERIVED from package.json, not hard-coded. The hard-coded list was
  * `ci|lint:actions`, and it went stale the moment the gate grew a step:
@@ -512,10 +535,20 @@ function invokedScripts(run: string): string[] {
  * not a gate job at all, so the checkout-depth guard never saw it. A
  * step of the `ci` script that is no script of its own (a raw command)
  * invokes no gate command and is not one.
+ *
+ * `test` and `validate` are added on top of that derivation, because the
+ * `ci` script names NEITHER of them: it runs `test:coverage`. Both run
+ * the test file that holds the release guard — `test` runs the whole
+ * vitest suite, `validate` runs the suite over the changed set — so a
+ * job running either with a shallow checkout leaves the release guard
+ * asserting nothing. That is CR-01's shape, one script name away, so
+ * the set names them. Each is read from the manifest, so a rename drops
+ * it rather than leaving a name behind that names nothing.
  */
 const GATE_SCRIPTS = [
   ...new Set([
     'ci',
+    ...['test', 'validate'].filter((name) => name in manifest.scripts),
     ...localGateCommands(manifest.scripts.ci ?? '')
       .map((step) => step.split(/\s+/)[0] ?? '')
       .filter((step) => step in manifest.scripts),
@@ -1467,6 +1500,27 @@ describe('the workflow files — what the merge gate runs', () => {
     // A quoted value is the same value: the quotes are YAML syntax.
     const quoted = fullHistory.replace('fetch-depth: 0', 'fetch-depth: "0"');
     expect(checkoutFetchDepth(quoted)).toBe('0');
+  });
+
+  it('reads a fetch-depth value that carries a trailing comment', () => {
+    // The value may carry a trailing comment (`fetch-depth: 0 # why`) — YAML
+    // reads the comment as a comment, so it is stripped before the value is
+    // read; without the strip, a job whose depth is right is reported as
+    // wrong. Until now the strip was pinned only INDIRECTLY, by the one
+    // comment in release.yml (`fetch-depth: 0 # the previous tag is needed
+    // for the release notes`): neutralise that comment and the strip could
+    // be removed with the suite still green. This pins it DIRECTLY.
+    const withComment = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - name: Check out',
+      '        uses: actions/checkout@abc123',
+      '        with:',
+      '          fetch-depth: 0 # the tags the release guard reads',
+      '      - uses: actions/setup-node@def456',
+    ].join('\n');
+    expect(checkoutFetchDepth(withComment)).toBe('0');
   });
 
   it('keeps a comment inside the security job from ending the block', () => {
