@@ -31,7 +31,7 @@ const READ_ONLY_ANNOTATIONS = {
   openWorldHint: false,
 } as const;
 
-// get_section_at, diff_issues and redline hit the live eCFR versioner on every call — openWorld stays true while the other hints stay read-only.
+// get_section_at, diff_issues and redline read from the live eCFR versioner — openWorld stays true while the other hints stay read-only.
 const DIFF_ANNOTATIONS = {
   ...READ_ONLY_ANNOTATIONS,
   openWorldHint: true,
@@ -556,8 +556,10 @@ export function registerTools(
           'eCFR serves the revision IN FORCE on that date, so a date that is not itself an ' +
           'issue date resolves to the revision that was in force then; the upstream does not ' +
           'report which issue date it served, so the response names the REQUESTED date and ' +
-          'never a served-revision date. Stateless: the revision is fetched from eCFR on ' +
-          "every call — no local index, no cache. eCFR's point-in-time archive starts at " +
+          'never a served-revision date. Fetched from eCFR on demand — there is no ' +
+          'local index for a point-in-time read; a short-lived in-memory memo may ' +
+          'serve a document this process fetched moments ago, and concurrent readers ' +
+          "of the same date share one fetch. eCFR's point-in-time archive starts at " +
           `${ARCHIVE_FLOOR}; a date before that is rejected as invalid_input. Use this for ` +
           'date-of-claim and CUE questions ("what did this section say when the claim was ' +
           'filed?"); for the CURRENT text use get_section.',
@@ -621,8 +623,11 @@ export function registerTools(
           'which were added, and which were removed between `from_date` and `to_date` ' +
           '(both YYYY-MM-DD, both required — this tool has no default-to; for ' +
           '"what changed since my index was built" run `cfr-free diff <from>` locally, ' +
-          "which resolves `to` from the index issue date). Stateless: both dates' full-title XML is " +
-          'fetched from eCFR and hashed per citation on the fly — no local index needed, no cache. ' +
+          'which resolves `to` from the index issue date). Fetched from eCFR on ' +
+          "demand: both dates' full-title XML is hashed per citation on the fly — " +
+          'there is no local index for a point-in-time diff; a short-lived in-memory ' +
+          'memo may serve a document this process fetched moments ago, and concurrent ' +
+          'readers of the same date share one fetch. ' +
           `Each citation list is capped at ${CHANGE_LIST_CAP} entries; \`truncated: true\` means at least ` +
           'one list was cut. Identical dates or an impossible calendar date (e.g. month 13) are ' +
           'rejected as errors before any fetch.',
@@ -676,8 +681,11 @@ export function registerTools(
           "issue date was served. Returns the status (changed/added/removed/unchanged), both sides' raw " +
           "text, and one hunk per line (same/add/del with 1-based anchors into each side's text). " +
           'Identical or impossible dates (e.g. month 13) are rejected as errors before any fetch; a ' +
-          'citation missing from BOTH dates is a not_found error after the fetches. Stateless: both ' +
-          "dates' full-title XML is fetched from eCFR per call — no local index needed, no cache. " +
+          'citation missing from BOTH dates is a not_found error after the fetches. Fetched ' +
+          "from eCFR on demand: both dates' full-title XML is read on demand — there " +
+          'is no local index for a point-in-time redline; a short-lived in-memory ' +
+          'memo may serve a document this process fetched moments ago, and concurrent ' +
+          'readers of the same date share one fetch. ' +
           "When either side exceeds the core's line cap the per-line walk is replaced by two whole-text " +
           "coarse blocks (`coarse: true`) — passed through uncapped here, the core's own bound.",
         inputSchema: {

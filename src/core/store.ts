@@ -1059,7 +1059,6 @@ export class Store {
     return rows.map((row) => String(row['citation']));
   }
 
-  /** sha256 of every indexed section's text — the pre-sync snapshot. */
   /**
    * SHA-256 of every section's text, keyed by citation. Read in bounded
    * rowid batches: materializing the whole corpus in one `.all()` would
