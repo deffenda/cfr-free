@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,6 +60,7 @@ import { describe, expect, it } from 'vitest';
 const WORKFLOW_PATH = fileURLToPath(new URL('../.github/workflows/ci.yml', import.meta.url));
 const WORKFLOWS_DIR = fileURLToPath(new URL('../.github/workflows/', import.meta.url));
 const PACKAGE_PATH = fileURLToPath(new URL('../package.json', import.meta.url));
+const ROOT = fileURLToPath(new URL('../', import.meta.url));
 /** The release-time guard: the packed tarball must carry what the program reads. */
 const VERIFIER_PATH = fileURLToPath(new URL('../scripts/verify-packed.mjs', import.meta.url));
 /** The reader that turns `npm pack --json` into a list of paths. */
@@ -1743,8 +1752,9 @@ describe('the release guard — the packed package must carry what the program r
     // package records, npm 12 prints an object keyed by the package name
     // (both measured). The payload also arrives with whatever a lifecycle
     // script printed in front of it, because npm shares stdout with the
-    // scripts it runs — npm runs `prepare` during a pack (npm 10.9.9 and
-    // 12.2.1 do so even with --ignore-scripts; measured). The reader must
+    // scripts it runs — npm runs `prepare` during a pack (npm 10.9.9 does
+    // so even with --ignore-scripts; measured — npm 11 and 12 honour the
+    // flag). The reader must
     // not depend on any of that.
     const files = [{ path: 'dist/cli.js' }, { path: 'dist/titan/ui-client.js' }];
     const expected = ['dist/cli.js', 'dist/titan/ui-client.js'];
@@ -1762,14 +1772,28 @@ describe('the release guard — the packed package must carry what the program r
     }
   });
 
-  it('passes on this repository, and names the runtime assets', () => {
+  it('passes on this repository, names the runtime assets, and measures a clean build', () => {
     // The guard is run, not only read: a guard that always failed would
     // satisfy every assertion above.
     //
     // The timeout is raised because the guard builds before it packs: the
     // build is a compiler run, not an instant.
-    const out = execFileSync(process.execPath, [VERIFIER_PATH], { encoding: 'utf8' });
-    expect(out).toContain('dist/titan/ui-client.js');
-    expect(out).toContain('dist/titan/ui-client.css');
+    const stale = join(ROOT, 'dist', 'stale-artifact.js');
+    mkdirSync(join(ROOT, 'dist'), { recursive: true });
+    writeFileSync(stale, '// left over from a build that no longer makes it\n');
+    try {
+      const out = execFileSync(process.execPath, [VERIFIER_PATH], { encoding: 'utf8' });
+      expect(out).toContain('dist/titan/ui-client.js');
+      expect(out).toContain('dist/titan/ui-client.css');
+      // The whole import CLOSURE, not only the entry point's own imports:
+      // a tarball with the entry point but not the module two levels down
+      // would fail at runtime, in a stranger's terminal.
+      expect(out).toContain('dist/core/store.js');
+      // And a clean build: the build does not clean `dist/`, so a file it
+      // no longer produces would survive it — and be packed.
+      expect(existsSync(stale), 'the guard must not measure a stale build').toBe(false);
+    } finally {
+      rmSync(stale, { force: true });
+    }
   }, 120_000);
 });
