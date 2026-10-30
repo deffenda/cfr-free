@@ -22,6 +22,10 @@ mcp  sync  diff  redline  historical  search  serve  export  help  version
 Signatures and one-line purposes live in `USAGE` (`src/cli.ts`); `help`
 and `version` dispatch there, the other eight in `src/commands/`.
 
+`cfr-free search` takes a query of 3–200 characters; a query outside that
+range is refused before the index is opened, so a rejected query costs no
+sync.
+
 ```
 src/
   cli.ts              arg parsing, subcommand dispatch (thin)

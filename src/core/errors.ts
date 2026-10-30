@@ -15,8 +15,16 @@
  * now, and nothing imports a facade to throw one.
  */
 
-/** The codes a service failure carries. */
-export type ServiceErrorCode = 'invalid_input' | 'not_found';
+/**
+ * The codes a service failure carries.
+ *
+ * `invalid_input` is the READER's mistake (exit 2 on the CLI, HTTP 400) and
+ * `not_found` is a missing provision (HTTP 404). `unavailable` is neither:
+ * it is a DEPLOYMENT fault — the service was wired without the client it
+ * needs — so it is a service failure (exit 1, HTTP 500), never a usage
+ * error a script would retry forever.
+ */
+export type ServiceErrorCode = 'invalid_input' | 'not_found' | 'unavailable';
 
 /** Domain error carrying a machine-readable code and client-safe message. */
 export class ServiceError extends Error {
