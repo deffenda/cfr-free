@@ -943,7 +943,7 @@ describe('the workflow files — what the merge gate runs', () => {
     );
   });
 
-  it('checks out the tags the release guard reads', () => {
+  it('checks out the full history the gates read', () => {
     // Silent failure this prevents: `actions/checkout` clones with
     // `--depth 1` and fetches NO tags by default, so `git tag` returns
     // nothing and the release guard (test/install-paths.test.ts) asserts
@@ -951,9 +951,14 @@ describe('the workflow files — what the merge gate runs', () => {
     // (measured 2026-10-29: a depth-1 clone of the public repository
     // reports zero tags, so the guard's loop never ran). The jobs that
     // run the gate must therefore check out the full history and its tags.
+    //
+    // The `security` job is here for the same reason and a second one:
+    // gitleaks scans COMMITS, so a shallow checkout leaves every commit
+    // before the tip unscanned — and the job still reports green.
     const gateJobs = [
       { file: 'ci.yml', job: 'quality' },
       { file: 'release.yml', job: 'ci' },
+      { file: 'ci.yml', job: 'security' },
     ];
     for (const { file, job } of gateJobs) {
       const workflow = loadWorkflow(file);
@@ -965,7 +970,7 @@ describe('the workflow files — what the merge gate runs', () => {
       expect(checkout, `${file}: job \`${job}\` has no checkout step`).toBeDefined();
       expect(
         String(checkout?.with['fetch-depth'] ?? ''),
-        `${file}: job \`${job}\` must check out the full history and its tags`,
+        `${file}: job \`${job}\` must check out the full history`,
       ).toBe('0');
     }
   });
