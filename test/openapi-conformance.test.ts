@@ -1125,6 +1125,29 @@ function expectedConstructs(file: string, symbol: string): readonly string[] {
  */
 const CITATION_RE = /^\s*#\s*source:\s*(.*)$/;
 
+/**
+ * A `# source:` marker wherever the COMMENT carries it.
+ *
+ * The marker is looked for in the comment, not at the start of the line:
+ * a contributor who writes the marker at the end of a line of YAML wrote
+ * something the citation parser cannot read, and that is reported rather
+ * than ignored — a citation that is never checked is a silent skip.
+ *
+ * The marker must open the comment or follow whitespace, so the
+ * convention note — which quotes the marker inside backticks — is not
+ * read as one.
+ */
+const MARKER_RE = /(^|\s)#\s*source:/;
+
+/**
+ * A YAML key: the indent, the name, and the colon that ends it.
+ *
+ * What follows the colon is read apart from the key: a key that carries
+ * a VALUE is a mapping entry and not a path key, and a key that carries
+ * a COMMENT is still the key it is.
+ */
+const KEY_RE = /^(\s*)([^\s#][^:]*):/;
+
 /** `path/to/file.ts#symbol` — a file and the symbol it must define. */
 const SYMBOL_PAIR_RE = /^([\w./-]+\.\w+)#([A-Za-z_$][\w$]*)$/;
 
@@ -1410,6 +1433,19 @@ function scanDocumentCitations(
       const violation = checkCitedSymbol(where, cited.file, cited.symbol, path);
       if (violation !== null) violations.push(violation);
     }
+    // A citation in the paths mapping with no path item above it claims a
+    // route the document does not name, so the binding cannot be asked of
+    // it — and a check that cannot be run must say so, not pass.
+    if (citation.pathUnknown) {
+      violations.push(
+        `${document}:${citation.line} — the document does not say which path this citation documents, so the route binding cannot be checked`,
+      );
+    }
+  }
+  // A marker the parser cannot read is a citation nobody checked, and it is
+  // reported rather than ignored.
+  for (const malformed of malformedCitationsIn(specText)) {
+    violations.push(`${document}:${malformed.line} — ${malformed.reason}`);
   }
   return { citations, violations };
 }
@@ -1869,24 +1905,52 @@ function lineOffsets(text: string): readonly number[] {
 }
 
 /**
- * The path a citation documents, or null when it documents a construct
- * rather than a route.
+ * What a citation documents: a ROUTE, a shared construct, or a path the
+ * document does not name.
+ *
+ * A citation that documents a route makes a claim about the router's
+ * dispatch, and the claim is checked. A citation that documents a
+ * construct makes no such claim, and none is asked of it. A citation in
+ * the paths mapping with no path item above it claims a route the
+ * document does not name, and that claim cannot be checked at all.
+ */
+type DocumentedPath =
+  | { readonly kind: 'route'; readonly path: string }
+  | { readonly kind: 'construct' }
+  | { readonly kind: 'unknown' };
+
+/**
+ * The path a citation documents.
  *
  * A citation sits inside the path item it documents — between the path key
  * and its first operation — so the path is the nearest path key above it.
  * The walk stops at the first key at indent two or less: `responses:` and
  * `schemas:` are such keys, and a citation under one of them documents a
  * construct, not a route.
+ *
+ * A path key may carry a comment of its own, and the comment does not make
+ * it a different key: the key is still the key the citation sits under.
+ * A key that carries a VALUE is not a path key, and the walk steps over it.
  */
-function documentedPath(lines: readonly string[], citationLine: number): string | null {
+function documentedPath(lines: readonly string[], citationLine: number): DocumentedPath {
   for (let at = citationLine - 1; at >= 0; at -= 1) {
-    const key = /^(\s*)([^\s#][^:]*):\s*$/.exec(lines[at] ?? '');
+    const line = lines[at] ?? '';
+    const key = KEY_RE.exec(line);
     if (key === null) continue;
+    // What follows the colon decides what the line is: nothing, or a
+    // comment — the key is still the key — or a value, which makes the
+    // line a mapping entry and not a key.
+    const after = line.slice(key[0].length);
+    if (after.trim() !== '' && !/^\s+#/.test(after)) continue;
     if ((key[1] ?? '').length > 2) continue;
     const name = (key[2] ?? '').trim();
-    return name.startsWith('/') ? name : null;
+    if (name.startsWith('/')) return { kind: 'route', path: name };
+    // The paths mapping holds the routes, so a citation inside it that has
+    // no path key above it documents a route the document does not name.
+    if (name === 'paths') return { kind: 'unknown' };
+    return { kind: 'construct' };
   }
-  return null;
+  return { kind: 'construct' };
 }
 
 /** A citation in the document: the line it is on, its tail, and the route it documents. */
@@ -1895,6 +1959,8 @@ interface Citation {
   readonly tail: string;
   /** The path the citation documents, or null for a shared construct. */
   readonly path: string | null;
+  /** True when the document does not say which path the citation documents. */
+  readonly pathUnknown: boolean;
 }
 
 /**
@@ -1914,13 +1980,78 @@ function citationsIn(specText: string): readonly Citation[] {
     if (insideRanges(blocks, offset)) continue;
     const match = CITATION_RE.exec(line);
     if (match === null) continue;
+    const documented = documentedPath(lines, index);
     citations.push({
       line: index + 1,
       tail: match[1] ?? '',
-      path: documentedPath(lines, index),
+      path: documented.kind === 'route' ? documented.path : null,
+      pathUnknown: documented.kind === 'unknown',
     });
   }
   return citations;
+}
+
+/**
+ * The index at which the line's YAML comment starts, or -1 when the line
+ * carries no comment.
+ *
+ * A `#` inside a quoted scalar is part of the string, not a comment, so the
+ * quotes are read before the comment is looked for: a value that quotes the
+ * marker must not be read as a marker.
+ */
+function commentStart(line: string): number {
+  let quote: string | null = null;
+  for (let at = 0; at < line.length; at += 1) {
+    const char = line[at] ?? '';
+    if (quote !== null) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === '#' && (at === 0 || /\s/.test(line[at - 1] ?? ''))) return at;
+  }
+  return -1;
+}
+
+/** A `# source:` marker the citation parser cannot read. */
+interface MalformedCitation {
+  /** The line the marker is on. */
+  readonly line: number;
+  /** Why the parser cannot read it. */
+  readonly reason: string;
+}
+
+/**
+ * The `# source:` markers the citation parser cannot read.
+ *
+ * A citation is a comment that STARTS the line, so a marker written
+ * anywhere else — at the end of a line of YAML, or after another note in
+ * the same comment — is not a citation. It was not read as one, and it
+ * was not reported either: a contributor who wrote it got no check and no
+ * signal that the check was missing. A marker the parser cannot read is
+ * reported instead of ignored.
+ */
+function malformedCitationsIn(specText: string): readonly MalformedCitation[] {
+  const blocks = blockScalarRanges(specText);
+  const offsets = lineOffsets(specText);
+  const malformed: MalformedCitation[] = [];
+  for (const [index, line] of specText.split('\n').entries()) {
+    const offset = offsets[index] ?? 0;
+    if (insideRanges(blocks, offset)) continue;
+    // A citation is read elsewhere; only a marker that is NOT one is left.
+    if (CITATION_RE.test(line)) continue;
+    const start = commentStart(line);
+    if (start === -1) continue;
+    if (!MARKER_RE.test(line.slice(start))) continue;
+    malformed.push({
+      line: index + 1,
+      reason: 'the `# source:` marker must start the comment, so the citation cannot be read',
+    });
+  }
+  return malformed;
 }
 
 /** An inline `file#symbol` anchor in the document's prose. */
@@ -2099,6 +2230,13 @@ describe('OpenAPI source citations (docs/openapi.yaml # source: lines)', () => {
 //
 // A fifth guard decides no verdict and was not among the mutations:
 // `blockScalarRanges` guards a range the YAML parser always sets.
+//
+// A second sweep re-ran the guards this round touched — the four
+// survivors above, the citation marker, the path attribution and the
+// scans that use them — and broke the four guards this round added:
+// twenty-nine mutations, twenty-five CAUGHT, and the same four
+// SURVIVED. The one that was caught by nothing before it — a comment
+// line read as a path key — is pinned now.
 //
 // The sweep also broke each entry of the general construct list, each
 // extension of the anchor pattern, and the values the rules compare (the
@@ -3172,6 +3310,118 @@ describe('OpenAPI citation resolver: guards pinned against fixtures', () => {
       '',
     ].join('\n');
     expect(citationsIn(besideValue)[0]?.path).toBe('/x');
+    // A comment is not a key, even when it ends in a colon: the walk steps
+    // over it to the path key above it.
+    const besideComment = [
+      'paths:',
+      '  /x:',
+      '  # a note:',
+      '    # source: src/titan/http-server.ts#dispatch',
+      '',
+    ].join('\n');
+    expect(citationsIn(besideComment)[0]?.path).toBe('/x');
+  });
+
+  it('pins the path attribution: a path key may carry a comment of its own', () => {
+    // A path key may carry a comment, and the comment does not make it a
+    // different key: the citation under it still documents that path. A
+    // key whose comment hid it from the walk attributed the citation to
+    // the PREVIOUS path item — and a citation in the FIRST path item was
+    // attributed to nothing at all, so it could name another route's
+    // handler and the suite had nothing to say about it.
+    const spec = [
+      'paths:',
+      '  /api/v1/search: # the search route',
+      '    # source: src/titan/http-server.ts#handleSearch',
+      '',
+    ].join('\n');
+    expect(citationsIn(spec)[0]?.path).toBe('/api/v1/search');
+    // And the citation is CHECKED against that path: the document's scan
+    // is the call site the shipped document goes through.
+    const scan = scanDocumentCitations(spec, 'fixture.yaml');
+    expect(scan.citations).toBe(1);
+    expect(scan.violations).toEqual([]);
+    // The same key, with the comment, names the same handler — so a
+    // citation repointed at another route's handler is still reported.
+    const repointed = [
+      'paths:',
+      '  /api/v1/search: # the search route',
+      '    # source: src/titan/http-server.ts#handleSection',
+      '',
+    ].join('\n');
+    expect(scanDocumentCitations(repointed, 'fixture.yaml').violations).toHaveLength(1);
+  });
+
+  it('pins the path attribution: a citation with no path to attribute is reported', () => {
+    // A citation in the paths mapping with no path item above it claims a
+    // route the document does not name, so the route binding cannot be
+    // asked of it — and a check that cannot be run must say so, not pass.
+    // It used to say nothing at all: the citation was read as a construct,
+    // and the handler it named was never compared with any route.
+    const spec = ['paths:', '  # source: src/titan/http-server.ts#handleSearch', ''].join('\n');
+    const scan = scanDocumentCitations(spec, 'fixture.yaml');
+    expect(scan.citations).toBe(1);
+    expect(scan.violations).toHaveLength(1);
+    expect(scan.violations[0]).toContain('does not say which path');
+    expect(scan.violations[0]).toContain('fixture.yaml:2');
+    // A citation under a construct is not a route claim, and it is not
+    // reported as one: the components of the document name no route.
+    const shared = [
+      'components:',
+      '  responses:',
+      '    BadRequest:',
+      '      # source: src/titan/http-server.ts#handleSection',
+      '',
+    ].join('\n');
+    expect(scanDocumentCitations(shared, 'fixture.yaml').violations).toEqual([]);
+  });
+
+  it('pins the citation marker: it must start the comment', () => {
+    // A `# source:` marker that does not start the comment is not a
+    // citation, and it used to be read as nothing at all: no violation,
+    // no warning, no check. A contributor who wrote the marker inline got
+    // a claim that was never verified and no sign that it was missing.
+    const inline = [
+      'paths:',
+      '  /api/v1/search:',
+      '    get: # source: src/titan/http-server.ts#handleSearch',
+      '',
+    ].join('\n');
+    const scan = scanDocumentCitations(inline, 'fixture.yaml');
+    expect(scan.citations).toBe(0);
+    expect(scan.violations).toHaveLength(1);
+    expect(scan.violations[0]).toContain('must start the comment');
+    expect(scan.violations[0]).toContain('fixture.yaml:3');
+    // A marker that follows another note in the same comment is reported
+    // too: the marker is read at the START of the comment.
+    const noted = [
+      'paths:',
+      '  /api/v1/search:',
+      '    # a note # source: src/titan/http-server.ts#handleSearch',
+      '',
+    ].join('\n');
+    const trailing = scanDocumentCitations(noted, 'fixture.yaml');
+    expect(trailing.citations).toBe(0);
+    expect(trailing.violations).toHaveLength(1);
+    expect(trailing.violations[0]).toContain('must start the comment');
+    // And the marker on a line of its own is a citation, and it is CHECKED.
+    const standalone = [
+      'paths:',
+      '  /api/v1/search:',
+      '    # source: src/titan/http-server.ts#handleSearch',
+      '',
+    ].join('\n');
+    const read = scanDocumentCitations(standalone, 'fixture.yaml');
+    expect(read.citations).toBe(1);
+    expect(read.violations).toEqual([]);
+    // A value that QUOTES the marker is prose, not a marker: the quotes
+    // are read before the comment is looked for.
+    const quoted = [
+      'info:',
+      '  description: "the marker is # source: src/titan/http-server.ts#handleSearch"',
+      '',
+    ].join('\n');
+    expect(scanDocumentCitations(quoted, 'fixture.yaml').violations).toEqual([]);
   });
 
   it('pins the path constants: a route binds to the constant that serves it', () => {
