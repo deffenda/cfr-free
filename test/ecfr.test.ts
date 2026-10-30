@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_FULL_TITLE_XML_TTL_MS,
+  DEFAULT_MAX_CONCURRENT_FETCHES,
+  DEFAULT_MAX_QUEUED_FETCHES,
   EcfrApi,
   FULL_TITLE_XML_MEMO_CAP,
 } from '../src/core/ecfr.js';
 import { HttpClient } from '../src/core/http-client.js';
 import type { FetchLike } from '../src/core/http-client.js';
+import { SemaphoreOverflowError } from '../src/core/semaphore.js';
 
 const DATE = '2026-01-01';
 const OTHER_DATE = '2026-06-01';
@@ -189,5 +192,63 @@ describe('EcfrApi.getFullTitleXml', () => {
     await api.getFullTitleXml(DATE);
 
     expect(requested).toEqual([DATE, DATE]);
+  });
+
+  it('refuses a fetch once the wait queue is full', async () => {
+    // The published contract (SPEC §5): four fetches run at a time and
+    // SIXTEEN may wait for a permit. The CONSTANT that said sixteen was
+    // pinned to the SPEC, but the number the semaphore was actually
+    // CONSTRUCTED with was not: a hardcoded thousand waiters there left
+    // every test green, and the published "sixteen waiting" became a lie
+    // the code never enforced.
+    let openGate: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      openGate = resolve;
+    });
+    const api = makeApi(async () => {
+      await gate;
+      return new Response('<ECFR></ECFR>', {
+        status: 200,
+        headers: { 'content-type': 'application/xml' },
+      });
+    });
+
+    // One more request than the bound allows: the last one must be the
+    // one refused, so the refusal happens exactly AT the bound.
+    const bound = DEFAULT_MAX_CONCURRENT_FETCHES + DEFAULT_MAX_QUEUED_FETCHES;
+    const requests = Array.from({ length: bound + 1 }, (_, index) =>
+      api.getFullTitleXml(`2026-01-${String(index + 1).padStart(2, '0')}`),
+    );
+    // Track what settles: a PARKED request stays pending, and a REFUSED
+    // one rejects at once.
+    const settled = requests.map(() => false);
+    requests.forEach((request, index) => {
+      void request.then(
+        () => {
+          settled[index] = true;
+        },
+        () => {
+          settled[index] = true;
+        },
+      );
+    });
+    // Let the queueing and the refusals settle.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Everything up to the bound is parked, not refused...
+    expect(
+      settled.slice(0, bound).some((done) => done),
+      'every fetch up to the bound must be parked, not refused',
+    ).toBe(false);
+    // ...and the one past it is refused at once, naming the bound it hit.
+    expect(settled[bound], 'the fetch past the queue bound must be refused').toBe(true);
+    await expect(requests[bound]).rejects.toBeInstanceOf(SemaphoreOverflowError);
+    await expect(requests[bound]).rejects.toThrow(
+      `${DEFAULT_MAX_QUEUED_FETCHES} upstream fetches are already waiting`,
+    );
+
+    // Let the parked fetches finish so nothing is left running.
+    openGate?.();
+    await Promise.allSettled(requests);
   });
 });

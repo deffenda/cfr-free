@@ -219,18 +219,18 @@ function presenceHunks(lines: readonly string[], presentSide: 'from' | 'to'): Hu
 }
 
 /**
- * Derive status + hunks from the two parses: existence first (added/removed,
- * neither → not_found), then text equality via hashText (unchanged before any
- * line work — a large identical provision never reaches the LCS), then the
- * capped line diff itself.
- */
-/**
  * The redline WITHOUT the notice, so the notice is attached once, at the
  * single place the redline leaves the core, and cannot be missing from one
  * status.
  */
 type RedlineBody = Omit<SectionRedline, 'notice'>;
 
+/**
+ * Derive status + hunks from the two parses: existence first (added/removed,
+ * neither → not_found), then text equality via hashText (unchanged before any
+ * line work — a large identical provision never reaches the LCS), then the
+ * capped line diff itself.
+ */
 function deriveRedline(
   fromSections: readonly RawSection[],
   toSections: readonly RawSection[],

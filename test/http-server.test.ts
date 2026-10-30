@@ -559,11 +559,18 @@ describe('Titan HTTP rate limiting', () => {
     }
   });
 
-  it('charges the routes that pull the whole upstream document', async () => {
-    // The cost of a request is what it COSTS. The diff route fetches the
-    // complete Title 38 document from eCFR — ~2 MB on the wire, ~16 MB
-    // parsed — so it must not be buyable with one token: a budget of one
-    // token per request bought twenty whole documents a second.
+  it.each([
+    '/api/v1/diff?from=2026-01-01&to=2026-02-01',
+    '/api/v1/redline?from=2026-01-01&to=2026-02-01&citation=4.125',
+  ])('charges the route that pulls the whole upstream document: %s', async (query) => {
+    // The cost of a request is what it COSTS. The diff and the redline
+    // route fetch the complete Title 38 document from eCFR — ~2 MB on the
+    // wire, ~16 MB parsed — so NEITHER may be buyable with one token: a
+    // budget of one token per request bought twenty whole documents a
+    // second. The redline pulls TWO documents, exactly as the diff does.
+    // Only the diff was pinned: dropping `|| pathname === REDLINE_PATH`
+    // from the price left every test green, while the published table
+    // still said the redline costs ten.
     server = createHttpServer(
       new CFRService(temp.store, 7, diffEcfr(), createTestLogger()),
       createTestLogger(),
@@ -576,9 +583,9 @@ describe('Titan HTTP rate limiting', () => {
     expect((await fetch(`${base}/health`)).status).toBe(200);
     // The expensive route costs ten tokens: the first fits in what is
     // left of twenty, the second does not.
-    const first = await fetch(`${base}/api/v1/diff?from=2026-01-01&to=2026-02-01`);
+    const first = await fetch(`${base}${query}`);
     expect(first.status).toBe(200);
-    const second = await fetch(`${base}/api/v1/diff?from=2026-01-01&to=2026-02-01`);
+    const second = await fetch(`${base}${query}`);
     expect(second.status).toBe(429);
     expect(((await second.json()) as Json)['error']).toBe('rate_limited');
   });
