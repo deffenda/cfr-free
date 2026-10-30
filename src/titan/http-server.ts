@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import http from 'node:http';
 import { CHANGE_LIST_CAP } from '../core/changes.js';
+import { SemaphoreOverflowError } from '../core/semaphore.js';
 import { ServiceError, type CFRService } from '../core/service.js';
 import { StructureError } from '../core/structure.js';
 import type { Logger } from '../logger.js';
@@ -9,10 +10,10 @@ import { UI_CSP, UI_CSS, UI_HTML, UI_JS } from './ui.js';
 
 /**
  * Titan HTTP API: a tiny GET-only JSON surface over the local index, plus
- * the stateless `/api/v1/diff` and `/api/v1/redline` point-in-time
- * comparisons (two issue dates fetched from eCFR per call — see
- * handleDiff/handleRedline), plus the read-only web UI at the serve root
- * (`/`, `/ui.js`, `/ui.css` — see ui.ts) that consumes the same surface.
+ * the `/api/v1/diff` and `/api/v1/redline` point-in-time comparisons (two
+ * issue dates fetched from eCFR — see handleDiff/handleRedline), plus the
+ * read-only web UI at the serve root (`/`, `/ui.js`, `/ui.css` — see
+ * ui.ts) that consumes the same surface.
  *
  * Deliberately dependency-free (`node:http`) and hardened by construction:
  * no request bodies, no templating, no dynamic SQL, validated query strings,
@@ -341,8 +342,10 @@ function handleBrowse(
  *
  * The `await` rejects into the same catch every sync handler uses:
  * `ServiceError` maps through `statusFor` (400/404 + client-safe message),
- * anything else (`HttpError` from an upstream fetch, `SyncError`) falls to
- * the generic 500 path with the detail logged server-side only.
+ * a full upstream queue (`SemaphoreOverflowError`) answers 503
+ * `upstream_busy`, and anything else (`HttpError` from an upstream fetch,
+ * `SyncError`) falls to the generic 500 path with the detail logged
+ * server-side only.
  */
 async function handleDiff(
   service: CFRService,
@@ -395,9 +398,10 @@ async function handleDiff(
  *
  * The `await` rejects into the same catch every sync handler uses:
  * `ServiceError` maps through `statusFor` (invalid_input → 400, not_found →
- * 404 — a citation missing from BOTH dates), anything else (`HttpError` from
- * an upstream fetch, `SyncError`) falls to the generic 500 path with the
- * detail logged server-side only.
+ * 404 — a citation missing from BOTH dates), a full upstream queue
+ * (`SemaphoreOverflowError`) answers 503 `upstream_busy`, and anything else
+ * (`HttpError` from an upstream fetch, `SyncError`) falls to the generic 500
+ * path with the detail logged server-side only.
  */
 async function handleRedline(
   service: CFRService,
@@ -431,7 +435,7 @@ async function handleRedline(
   // Pure function of two fixed dates + one citation: cacheable like the diff
   // route. 5 min (not 3600) because a redline spans two upstream fetches and
   // the from/to window is only rarely an identical document; errors below carry
-  // no cache-control (matching handleDiff's shape).
+  // no Cache-Control header (matching handleDiff's shape).
   sendJson(req, res, 200, { ...redline }, 'public, max-age=300');
 }
 
@@ -595,10 +599,6 @@ export interface DiskSnapshot {
   readonly totalBytes: number;
 }
 
-/**
- * Method, rate, and size gates that run before routing. Returns the parsed
- * URL, or null when the request was already answered with an error.
- */
 /** The request's URL, or null when it does not parse. */
 function parseRequestUrl(raw: string | undefined): URL | null {
   try {
@@ -608,6 +608,9 @@ function parseRequestUrl(raw: string | undefined): URL | null {
   }
 }
 
+/** The token cost of a route that pulls the whole upstream document. */
+export const EXPENSIVE_ROUTE_COST = 10;
+
 /**
  * What a request costs the server, in rate-limit tokens.
  *
@@ -615,27 +618,59 @@ function parseRequestUrl(raw: string | undefined): URL | null {
  * redline routes fetch the complete Title 38 document from eCFR — ~2 MB on
  * the wire, ~16 MB parsed — so they charge a route a peer cannot buy with
  * a single token. One token per request meant the published image's budget
- * (60 burst, 10 a second) bought ten whole upstream documents a second.
+ * (60 burst, 10 a second) bought ten whole upstream documents a second —
+ * twenty of them, counting the two documents a diff or a redline pulls.
  */
 function requestCost(pathname: string): number {
   if (pathname === DIFF_PATH || pathname === REDLINE_PATH) return EXPENSIVE_ROUTE_COST;
   return 1;
 }
 
-/** The token cost of a route that pulls the whole upstream document. */
-const EXPENSIVE_ROUTE_COST = 10;
+/**
+ * The cost of a request the router will REFUSE (a bad method, an
+ * oversized URL): one token.
+ *
+ * The request does no work, so it does not cost what a routed request
+ * costs — but it is still a request, and an uncharged one is free to
+ * repeat. The budget bounds how much traffic the server will look at,
+ * not only how much work it will do.
+ */
+const REFUSED_REQUEST_COST = 1;
 
+/**
+ * Method, rate, and size gates that run before routing. Returns the parsed
+ * URL, or null when the request was already answered with an error.
+ */
 function precheck(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   limiter: RateLimiter | null,
 ): URL | null {
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
+  const methodRefused = req.method !== 'GET' && req.method !== 'HEAD';
+  const urlTooLong = Buffer.byteLength(req.url ?? '/', 'utf8') > MAX_URL_BYTES;
+  // The URL is parsed before the limiter, because the cost of a request
+  // depends on the route it will take.
+  const url = parseRequestUrl(req.url);
+  if (limiter !== null) {
+    // Every request is charged, including the ones the gates below
+    // refuse: a refused request is still a request, and leaving the
+    // refusal free would let a peer send unlimited 2 KB URLs (or
+    // unlimited POSTs) without ever touching the budget.
+    const refused = methodRefused || urlTooLong || url === null;
+    const cost = refused ? REFUSED_REQUEST_COST : requestCost(url.pathname);
+    const verdict = limiter.consume(req.socket.remoteAddress ?? 'unknown', cost);
+    if (!verdict.allowed) {
+      res.setHeader('retry-after', String(Math.max(1, Math.ceil(verdict.retryAfterSec))));
+      sendJson(req, res, 429, errorBody('rate_limited', 'too many requests — retry shortly'));
+      return null;
+    }
+  }
+  if (methodRefused) {
     res.setHeader('allow', 'GET, HEAD');
     sendJson(req, res, 405, errorBody('method_not_allowed', 'only GET and HEAD are supported'));
     return null;
   }
-  if (Buffer.byteLength(req.url ?? '/', 'utf8') > MAX_URL_BYTES) {
+  if (urlTooLong) {
     sendJson(
       req,
       res,
@@ -643,20 +678,6 @@ function precheck(
       errorBody('uri_too_long', `request URL exceeds ${MAX_URL_BYTES} bytes`),
     );
     return null;
-  }
-  // The URL is parsed before the limiter, because the cost of a request
-  // depends on the route it will take.
-  const url = parseRequestUrl(req.url);
-  if (limiter !== null) {
-    // A malformed URL still costs a token: it is a request, and refusing
-    // to charge for it would make the malformed shape free.
-    const cost = url === null ? 1 : requestCost(url.pathname);
-    const verdict = limiter.consume(req.socket.remoteAddress ?? 'unknown', cost);
-    if (!verdict.allowed) {
-      res.setHeader('retry-after', String(Math.max(1, Math.ceil(verdict.retryAfterSec))));
-      sendJson(req, res, 429, errorBody('rate_limited', 'too many requests — retry shortly'));
-      return null;
-    }
   }
   if (url === null) {
     sendJson(req, res, 400, errorBody('invalid_input', 'malformed request URL'));
@@ -700,6 +721,21 @@ export function createHttpServer(
             res,
             status,
             errorBody(code, error.message, available ? { available } : undefined),
+          );
+          return;
+        }
+        if (error instanceof SemaphoreOverflowError) {
+          // The upstream queue is full: the request could not be parked
+          // behind the fetches already in flight. A fast, explicit
+          // refusal beats a request that waits minutes for a permit.
+          logger.warn('http request refused — upstream queue full', {
+            path: url.pathname,
+          });
+          sendJson(
+            req,
+            res,
+            503,
+            errorBody('upstream_busy', 'too many requests in flight — retry shortly'),
           );
           return;
         }
