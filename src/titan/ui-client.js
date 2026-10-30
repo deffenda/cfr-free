@@ -1040,7 +1040,45 @@
     announcer.textContent = VIEW_LABELS[view] || '';
   }
 
+  /**
+   * True when the fragment is one of this app's routes.
+   *
+   * Everything else — the skip link's `#main`, an anchor someone typed —
+   * is a fragment, not a destination, and must not change the view.
+   */
+  function isRouteHash(hash) {
+    return hash === '' || hash.indexOf('#/') === 0;
+  }
+
+  /**
+   * The skip link reaches the content — it does not navigate.
+   *
+   * The link points at `#main`, and a router that reads every fragment as a
+   * route would throw away the view the reader was in — and the query they
+   * had typed — to show them the search form again. So the click is handled
+   * here: the fragment never changes, and the focus lands on the content
+   * the link names.
+   */
+  function wireSkipLink() {
+    const link = byId('skip-link');
+    if (link === null || typeof link.addEventListener !== 'function') return;
+    link.addEventListener('click', (event) => {
+      if (event && typeof event.preventDefault === 'function') event.preventDefault();
+      const main = byId('main');
+      if (main === null || typeof main.focus !== 'function') return;
+      main.focus();
+    });
+  }
+
   function renderRoute() {
+    // A fragment that is not one of this app's routes is not a navigation.
+    // The skip link points at `#main`, and a router that treated that as a
+    // route would throw away the view the reader was in — and the query
+    // they had typed — to show them the search form again.
+    //
+    // The first render is exempt: a page loaded AT `#main` must still show
+    // something.
+    if (lastView !== null && !isRouteHash(window.location.hash)) return;
     // Route ownership: every navigation (including an empty search, the
     // browse tree and a repeat of the same route) invalidates the work
     // started by the previous one. A response may only touch the DOM while
@@ -1070,5 +1108,6 @@
   }
 
   window.addEventListener('hashchange', renderRoute);
+  wireSkipLink();
   renderRoute();
 })();
