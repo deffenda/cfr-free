@@ -4,7 +4,11 @@ node_modules
 dist
 coverage
 test
-docs
+# `docs/*` and not `docs`: a directory that is excluded outright cannot
+# have a file re-included under it, and the OpenAPI document has to reach
+# the image — the service serves it at /openapi.yaml.
+docs/*
+!docs/openapi.yaml
 tools
 *.md
 Dockerfile
