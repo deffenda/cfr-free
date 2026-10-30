@@ -34,8 +34,10 @@ import { describe, expect, it } from 'vitest';
  * instead of in a stranger's terminal.
  *
  * The file list is read from the repository root, so this test asserts on
- * the TEXT of four other files (`package.json`, `src/cli.ts`, `Dockerfile`,
- * `scripts/prepare.mjs`). That is deliberate: each assertion below is about
+ * the TEXT of seven other files (`package.json`, `src/cli.ts`,
+ * `scripts/prepare.mjs`, `Dockerfile`, `ci.yml`, `release.yml`,
+ * `live-e2e.yml`) and on the repository's TAG HISTORY (`git tag`, `git show
+ * <tag>:package.json`). That is deliberate: each assertion below is about
  * an INTER-FILE contract that no single-file test can see, and each names
  * the file it reads.
  */
@@ -219,6 +221,52 @@ function versionVerdict(input: VersionVerdictInput): string[] {
     }
   }
   return findings;
+}
+
+/**
+ * The guard's FAILURE STEP: the findings, when there are any, fail the run.
+ *
+ * The verdict itself is a pure function, so a unit test reaches every
+ * branch of it. What no unit test could reach was the step that turns a
+ * finding into a failure — and that step is where CR-01's state could
+ * hide: replacing the `throw` with a `console.error` computes the finding
+ * and discards it, which is lint-clean and leaves the suite green. So the
+ * step is a function of its own, and a test drives a finding through it.
+ */
+function assertNoFindings(findings: readonly string[]): void {
+  if (findings.length > 0) {
+    throw new Error(findings.join('\n'));
+  }
+}
+
+/**
+ * The facts the release guard reads from THIS checkout, and the verdict it
+ * reaches on them: the findings, empty when the tree holds.
+ *
+ * The guard and the test that pins it read the facts through this one
+ * function, so the two cannot drift apart: a guard that judged different
+ * facts than its test checked would assert nothing.
+ */
+function releaseGuardFindings(): string[] {
+  const tags = versionTags();
+  if (tags.length === 0) {
+    throw new Error(
+      'no release tag (vX.Y.Z) found in this checkout — the release guard cannot run. ' +
+        'A checkout without tags (actions/checkout defaults to --depth 1) makes every ' +
+        'check vacuous, so the suite fails instead of passing silently. CI must check ' +
+        'out with fetch-depth: 0; a shallow local clone needs `git fetch --tags`.',
+    );
+  }
+  const newest = tags.reduce((a, b) => (compareVersions(b.version, a.version) > 0 ? b : a));
+  const manifest = readManifest();
+  return versionVerdict({
+    current: manifest.version ?? '',
+    newestTag: newest.tag,
+    newestVersion: newest.tag.slice(1),
+    atTag: manifestVersionAt(newest.tag),
+    head: git('rev-parse', 'HEAD').trim(),
+    tagCommit: git('rev-parse', `${newest.tag}^{commit}`).trim(),
+  });
 }
 
 describe('the npm manifest', () => {
@@ -884,29 +932,11 @@ describe('the release guard', () => {
       ).toEqual([]);
     }
 
-    const tags = versionTags();
-    expect(
-      tags.length,
-      'no release tag (vX.Y.Z) found in this checkout — the release guard cannot ' +
-        'run; see the companion assertion in this describe block.',
-    ).toBeGreaterThan(0);
-
-    const newest = tags.reduce((a, b) => (compareVersions(b.version, a.version) > 0 ? b : a));
-    // The decision itself is `versionVerdict` — a pure function, unit-tested
-    // branch by branch. The guard below only GATHERS the facts it reads.
-    const head = git('rev-parse', 'HEAD').trim();
-    const tagCommit = git('rev-parse', `${newest.tag}^{commit}`).trim();
-    const findings = versionVerdict({
-      current: version,
-      newestTag: newest.tag,
-      newestVersion: newest.tag.slice(1),
-      atTag: manifestVersionAt(newest.tag),
-      head,
-      tagCommit,
-    });
-    if (findings.length > 0) {
-      throw new Error(findings.join('\n'));
-    }
+    const findings = releaseGuardFindings();
+    // A finding must FAIL the run, not be computed and discarded: the step
+    // that raises it is `assertNoFindings`, and a test drives a finding
+    // through that very step.
+    assertNoFindings(findings);
   });
 });
 
@@ -954,5 +984,44 @@ describe('the packed artifact', () => {
     } finally {
       rmSync(staging, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * The release guard's WIRING: the step that turns a finding into a failure,
+ * and the facts it reads in this checkout.
+ *
+ * The verdict is unit-tested branch by branch, and the guard's own state
+ * exercises it only when the tree happens to hold a state the verdict
+ * finds. The two steps between them — GATHER the facts, RAISE the
+ * finding — are what a one-line edit can break without any test
+ * noticing, so each is pinned here.
+ */
+describe('the release guard — the wiring from verdict to failure', () => {
+  it('fails the run when the verdict has a finding', () => {
+    // The step the guard's own state cannot reach: this tree holds, so the
+    // guard finds nothing and the failure step never runs. Swapping the
+    // `throw` for a `console.error` would compute the finding and discard
+    // it — lint-clean, and green. So the step is driven here with a
+    // finding it cannot ignore.
+    expect(() =>
+      assertNoFindings(['package.json 0.2.1 is BEHIND the released tag v0.2.1']),
+    ).toThrow('package.json 0.2.1 is BEHIND the released tag v0.2.1');
+
+    // And a run with nothing to report must NOT fail: the step is not a
+    // blanket failure, and the guard's green state depends on it.
+    expect(() => assertNoFindings([])).not.toThrow();
+  });
+
+  it('finds no violation in this checkout', () => {
+    // The live facts, as an assertion rather than a thrown error: when the
+    // tree is in CR-01's state — the manifest back at the released
+    // version, on a tree that is not the commit the release was cut from
+    // — this fails WHATEVER the failure step does. The guard's own test
+    // reads the same facts through the same function.
+    expect(
+      releaseGuardFindings(),
+      'the release guard must find no violation in this checkout',
+    ).toEqual([]);
   });
 });

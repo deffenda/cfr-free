@@ -520,53 +520,131 @@ const YARN_RUN_COMMAND = /(?:^|[\s;&|(`'"])yarn[ \t]+(?:run)?[ \t]*([\w:.-]+)/g;
 /**
  * A `vitest run` invocation in command position: `npx vitest run …`, or a
  * bare `vitest run …`. The tail of the match is the command's own
- * arguments, which may name a FILE FILTER.
+ * arguments, which may name FILE FILTERS.
  *
  * The spelling matters: the derived gate set names npm SCRIPTS, and a job
  * that invokes vitest directly — the spelling `live-e2e.yml` already uses
  * — named no script at all, so it was not a gate job and no checkout depth
  * was demanded of it. A `vitest run` over the WHOLE suite runs the
  * release guard, so it is one.
+ *
+ * The `--run` spelling counts too: `vitest --run` is the same command
+ * without the `run` subcommand, and it runs the same suite.
  */
-const VITEST_RUN_COMMAND = /(?:^|[\s;&|(`'"])(?:npx)?[ \t]*vitest[ \t]+run\b([^\n;&|)]*)/g;
+const VITEST_RUN_COMMAND =
+  /(?:^|[\s;&|(`'"])(?:npx)?[ \t]*vitest[ \t]+(?:run|--run)\b([^\n;&|)]*)/g;
 
 /**
- * The file filter a `vitest run` invocation names, or undefined when it
- * names none — and so runs the WHOLE suite, the release guard included.
- *
- * A token right after an option is that option's VALUE (`--exclude
- * test/live.test.ts`), not a filter: such a run still covers the whole
- * suite but one file, so it is treated as no filter at all. The first
- * positional token that is not an option's value is the filter.
+ * The options that select tests by NAME rather than by file: `-t` and
+ * `--testNamePattern`. Such a run does not narrow the FILE set, so the
+ * whole suite — the release guard included — is what runs.
  */
-function vitestFilter(tail: string): string | undefined {
-  const tokens = tail
-    .trim()
-    .split(/\s+/)
-    .filter((token) => token.length > 0);
+const NAME_PATTERN_OPTIONS = new Set(['-t', '--testNamePattern']);
+
+/**
+ * A `vitest` invocation's own words, with a quoted string kept as ONE
+ * token: a test-name pattern (`-t "release guard"`) is two words to the
+ * shell but one argument to vitest.
+ */
+function vitestTokens(tail: string): string[] {
+  const tokens: string[] = [];
+  let current = '';
+  let quote = '';
+  for (const char of tail) {
+    if (quote) {
+      if (char === quote) {
+        quote = '';
+        continue;
+      }
+      current += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) tokens.push(current);
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+/**
+ * The file filters a `vitest` invocation names, and whether it selected
+ * tests by NAME.
+ *
+ * Every positional token is a filter, not just the first: a run may name
+ * several files, and it reaches the release guard when ANY of them is the
+ * guard's own file. A token right after an option is that option's VALUE
+ * (`--exclude test/live.test.ts`), not a filter: such a run still covers
+ * the whole suite but one file, so it is treated as no filter at all.
+ */
+function vitestFileFilters(tail: string): { filters: string[]; namePattern: boolean } {
+  const tokens = vitestTokens(tail);
+  const filters: string[] = [];
+  let namePattern = false;
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index] ?? '';
-    if (token.startsWith('-')) continue;
-    const previous = tokens[index - 1] ?? '';
-    if (previous.startsWith('-')) continue;
-    return token;
+    if (!token.startsWith('-')) {
+      filters.push(token);
+      continue;
+    }
+    if (NAME_PATTERN_OPTIONS.has(token.split('=')[0] ?? token)) namePattern = true;
+    if (!token.includes('=')) {
+      const next = tokens[index + 1];
+      if (next !== undefined && !next.startsWith('-')) index += 1;
+    }
   }
-  return undefined;
+  return { filters, namePattern };
+}
+
+/**
+ * Whether a filter names a WHOLE SET of files rather than one file: a glob
+ * (any name holding a `*` or a `?`), a directory (`test`, `test/`), or a
+ * name with no file extension at all. Such a filter reaches every file
+ * under it, the release guard included.
+ */
+function namesAWholeSuite(token: string): boolean {
+  if (/[*?[\]{}]/.test(token)) return true;
+  if (token.endsWith('/')) return true;
+  if (/\.[A-Za-z0-9]+$/.test(token)) return false;
+  return true;
+}
+
+/**
+ * Whether a `vitest` invocation's tail reaches the file that holds the
+ * release guard.
+ *
+ * A whole-suite run is a gate run: the release guard is one of its files,
+ * and a shallow checkout leaves it asserting nothing. A run with explicit
+ * file filters runs THOSE files only, so it is a gate run when one of them
+ * is the release guard's own file.
+ */
+function vitestReachesReleaseGuard(tail: string): boolean {
+  const { filters, namePattern } = vitestFileFilters(tail);
+  // A name pattern selects by NAME, not by file: the file set stays whole.
+  if (namePattern) return true;
+  // No filter at all: the whole suite runs, the release guard included.
+  if (filters.length === 0) return true;
+  for (const filter of filters) {
+    if (filter.includes('install-paths')) return true;
+    if (namesAWholeSuite(filter)) return true;
+  }
+  return false;
 }
 
 /**
  * Whether a run value invokes vitest over the file that holds the
  * release guard — either the whole suite, or that file itself.
- *
- * A whole-suite run is a gate run: the release guard is one of its files,
- * and a shallow checkout leaves it asserting nothing. A run with an
- * explicit file filter runs THAT file only, so it is a gate run only when
- * the filter names the release guard's own file.
  */
 function runsReleaseGuardSuite(run: string): boolean {
   for (const match of run.matchAll(VITEST_RUN_COMMAND)) {
-    const filter = vitestFilter(match[1] ?? '');
-    if (filter === undefined || filter.includes('install-paths')) return true;
+    if (vitestReachesReleaseGuard(match[1] ?? '')) return true;
   }
   return false;
 }
@@ -1662,6 +1740,40 @@ describe('the derived gate set — the spellings that reach the release guard', 
       '      - run: LIVE_TESTS=1 npx vitest run test/live.test.ts',
     ]);
     expect(otherFile).toEqual([]);
+  });
+
+  it('reads every spelling that reaches the release guard as a gate job', () => {
+    // The classification, pinned on the matcher itself. Every spelling
+    // below RUNS the release guard: a filter that names it, a filter SET
+    // that names it among others, a directory, a glob, a test-name
+    // pattern, and the `--run` spelling without the `run` subcommand. A
+    // job that uses one of them runs the guard, so it must carry the tags
+    // a shallow checkout does not have.
+    const gate = [
+      'npx vitest run',
+      'npx vitest --run',
+      'npx vitest run test/install-paths.test.ts',
+      'npx vitest run test/live.test.ts test/install-paths.test.ts',
+      'npx vitest run test/',
+      'npx vitest run test',
+      'npx vitest run test/**',
+      'npx vitest run **/*.test.ts',
+      'npx vitest run -t "release guard"',
+      'npx vitest run --exclude test/live.test.ts',
+    ];
+    for (const run of gate) {
+      expect(runsReleaseGuardSuite(run), `${run} must be read as a gate run`).toBe(true);
+      const jobs = gateJobs(['  gate:', '    steps:', `      - run: ${run}`]);
+      expect(jobs, `${run} must make the job a gate job`).toEqual(['gate']);
+    }
+
+    // The CONTROL: a run filtered to another file runs that file only, so
+    // it does not reach the release guard and is not a gate job. This is
+    // the spelling `live-e2e.yml` uses, and it must not be forced to
+    // carry the tags.
+    const control = 'npx vitest run test/live.test.ts';
+    expect(runsReleaseGuardSuite(control), `${control} must not be read as a gate run`).toBe(false);
+    expect(gateJobs(['  live:', '    steps:', `      - run: ${control}`])).toEqual([]);
   });
 
   it('reads a fetch-depth written as a literal expression', () => {
