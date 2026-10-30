@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   copyFileSync,
   existsSync,
@@ -202,6 +202,25 @@ describe('the prepare script', () => {
     const manifest = readManifest();
     expect(manifest.scripts?.['build']).toContain('tsconfig.build.json');
     expect(manifest.devDependencies?.['typescript']).toBe('5.9.3');
+  });
+
+  it('keeps stdout clean, so npm can print a machine-readable payload', () => {
+    // npm's stdout is shared with the output of any lifecycle script it
+    // runs: `npm pack --json` writes its payload there, and npm runs
+    // `prepare` during a pack (npm 10.9.9 and 12.2.1 do so even with
+    // --ignore-scripts; measured), so a line printed here corrupts that
+    // payload — and the release guard cannot tell a broken package from a
+    // broken parser.
+    //
+    // The production path is the one that prints: a production install
+    // skips the build, so it runs in a moment and without a compiler.
+    const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'prepare.mjs')], {
+      env: { ...process.env, npm_config_omit: 'dev' },
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout, 'the prepare script must not write to stdout').toBe('');
+    expect(result.stderr).toContain('production install');
   });
 });
 
@@ -657,9 +676,17 @@ describe('the build copies the UI assets', () => {
         copyFileSync(path.join(ROOT, 'src', 'titan', asset), path.join(dir, 'src', 'titan', asset));
       }
 
-      execFileSync(process.execPath, [path.join(dir, 'scripts', 'copy-assets.mjs')], {
+      const out = execFileSync(process.execPath, [path.join(dir, 'scripts', 'copy-assets.mjs')], {
         cwd: dir,
+        encoding: 'utf8',
       });
+      // Nothing on stdout. npm's stdout is shared with the output of any
+      // lifecycle script it runs: `npm pack --json` writes its payload
+      // there, and npm runs `prepare` during a pack (npm 10.9.9 and
+      // 12.2.1 do so even with --ignore-scripts; measured), so a line
+      // printed here corrupts that payload — and the release guard cannot
+      // tell a broken package from a broken parser.
+      expect(out, 'the copy script must not write to stdout').toBe('');
 
       for (const asset of ['ui-client.js', 'ui-client.css']) {
         const copied = path.join(dir, 'dist', 'titan', asset);
@@ -800,13 +827,15 @@ describe('the packed artifact', () => {
       mkdirSync(path.join(staging, 'scripts'), { recursive: true });
       writeFileSync(path.join(staging, 'scripts', 'prepare.mjs'), '// stub\n');
 
-      const output = execFileSync('npm', ['pack', '--dry-run', '--ignore-scripts', '--json'], {
-        cwd: staging,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
-      const parsed = JSON.parse(output) as Array<{ files?: Array<{ path: string }> }>;
-      const paths = (parsed[0]?.files ?? []).map((file) => file.path);
+      const output = execFileSync(
+        process.execPath,
+        [path.join(ROOT, 'scripts', 'pack-list.mjs'), staging],
+        {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        },
+      );
+      const paths = JSON.parse(output) as string[];
       expect(paths).toContain('dist/cli.js');
       expect(paths).toContain('dist/config.js');
       expect(paths).toContain('scripts/prepare.mjs');
