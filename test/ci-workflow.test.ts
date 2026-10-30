@@ -1366,6 +1366,35 @@ describe('the workflow files — what the merge gate runs', () => {
     expect(steps.join('\n'), 'the security job no longer runs osv-scanner').toContain(osv);
   });
 
+  it('runs trivy and semgrep in CI', () => {
+    // The finding was that a container or SAST problem surfaced only on a
+    // developer machine that happened to have the scanners installed: CI
+    // ran three of the five scanners the local sweep runs, and the other
+    // two existed nowhere but the local path.
+    //
+    // Neither job is a REQUIRED check, and that is deliberate: the
+    // vulnerability database trivy reads and the rule registry semgrep's
+    // `auto` config reads both move without this repository changing, so a
+    // merge floor that depends on either can move under it. They run on
+    // every pull request, so a finding is VISIBLE — promoting them to
+    // required is the operator's call, and it changes the merge floor.
+    const trivy = jobBlock(workflow, 'trivy');
+    const semgrepJob = jobBlock(workflow, 'semgrep');
+    expect(trivy, 'ci.yml has no `trivy` job').not.toBe('');
+    expect(semgrepJob, 'ci.yml has no `semgrep` job').not.toBe('');
+    const refs = [...usesLines(trivy), ...usesLines(semgrepJob)]
+      .map((entry) => entry.reference)
+      .join('\n');
+    expect(refs, 'the trivy job does not run trivy').toContain('aquasecurity/trivy-action');
+    expect(refs, 'the semgrep job does not run semgrep').toContain('semgrep/semgrep');
+    // The same scan the local sweep runs: the tree for dependencies,
+    // secrets and misconfiguration.
+    expect(trivy, 'the trivy job must scan the working tree').toContain('scan-type: fs');
+    expect(trivy, 'the trivy job must scan the same severities').toContain(
+      'severity: HIGH,CRITICAL',
+    );
+  });
+
   it('checks out the tags the release guard reads', () => {
     // Silent failure this prevents: `actions/checkout` clones with
     // `--depth 1` and fetches NO tags by default, so `git tag` returns

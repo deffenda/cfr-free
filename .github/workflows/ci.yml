@@ -119,6 +119,45 @@ jobs:
       - name: actionlint (workflow lint)
         run: '"$(go env GOPATH)/bin/actionlint"'
 
+  trivy:
+    name: trivy
+    runs-on: ubuntu-latest
+    # NOT a required check, deliberately: the vulnerability database this
+    # scanner reads is a moving target, so a database update can turn a
+    # green pull request red without a line of this repository changing.
+    # It runs on every pull request, so a finding is VISIBLE where it used
+    # to be invisible — the finding was that a container or dependency
+    # problem surfaced only on a developer machine that happened to have
+    # the scanner installed. Promoting this job to required is the
+    # operator's call, and it changes the merge floor.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: trivy (vulns, secrets, misconfig)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          # The same scan the local `npm run scan` runs: the working tree
+          # for dependencies, secrets and misconfiguration (the Dockerfile
+          # among them).
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+  semgrep:
+    name: semgrep
+    runs-on: ubuntu-latest
+    # NOT a required check, for the same reason as the trivy job above,
+    # and one more: `--config auto` reads semgrep's rule registry, which is
+    # upstream-mutable. A merge floor that depends on a rule set the
+    # repository does not pin is a floor that can move under it.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: semgrep (general static analysis)
+        uses: semgrep/semgrep@4fe07d805dd2a4b64fed486e95136923f08648d0 # v1.183.0
+        with:
+          config: auto
+
   docker:
     name: docker
     runs-on: ubuntu-latest
