@@ -43,6 +43,11 @@ export async function syncWithGuidance(
     logger.error('eCFR request failed', {
       url: failure.url,
       status: failure.status ?? null,
+      // The kind is the discriminator the operator needs: a status alone
+      // cannot tell an upstream that answered 200 with a page of HTML
+      // from one that answered 200 with a body over the cap, and the
+      // reader's line already tells them apart.
+      kind: failure.kind,
       message: failure.detail,
     });
     const advice = failure.advice === '' ? '' : ` ${failure.advice}`;
