@@ -44,6 +44,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 
@@ -148,7 +149,16 @@ function main() {
     return;
   }
 
-  process.exitCode = run(process.execPath, [compiler, '-p', 'tsconfig.build.json']);
+  const status = run(process.execPath, [compiler, '-p', 'tsconfig.build.json']);
+  if (status !== 0) {
+    process.exitCode = status;
+    return;
+  }
+  // The browser assets are not TypeScript sources, so tsc copies them
+  // nowhere: the build copies them into dist/ itself, and a package built
+  // without them would serve a 404 for /ui.js.
+  const copyAssets = fileURLToPath(new URL('./copy-assets.mjs', import.meta.url));
+  process.exitCode = run(process.execPath, [copyAssets]);
 }
 
 main();

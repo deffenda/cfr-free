@@ -581,6 +581,48 @@ describe('the release workflow', () => {
   });
 });
 
+describe('the build copies the UI assets', () => {
+  it('copies every asset the UI module reads, into dist/', () => {
+    // The UI's page script and stylesheet are real files, so that eslint
+    // and prettier can see them — but `tsc` compiles TypeScript and copies
+    // nothing else. The build copies them into dist/ itself. A package
+    // built without them would serve a 404 for /ui.js, and a package that
+    // shipped the asset in src/ would serve the wrong path at runtime.
+    const build = readManifest().scripts?.['build'] ?? '';
+    expect(build, 'the build must run the asset copy').toContain('copy-assets.mjs');
+
+    const uiModule = readRepoFile('src/titan/ui.ts');
+    const read = [...uiModule.matchAll(/readAsset\('([^']+)'\)/g)].map((match) => match[1] ?? '');
+    expect(
+      read.length,
+      'no asset read by the UI module — this guard passes on nothing',
+    ).toBeGreaterThan(0);
+
+    const copyScript = readRepoFile('scripts/copy-assets.mjs');
+    const copies = [...copyScript.matchAll(/from: '([^']+)', to: '([^']+)'/g)];
+    expect(copies.length, 'the copy script lists no asset').toBeGreaterThan(0);
+    for (const [, from, to] of copies) {
+      expect(to, `${from} must land in dist/, beside the module that reads it`).toMatch(/^dist\//);
+    }
+
+    const sources = copies.map(([, from]) => from);
+    for (const asset of read) {
+      expect(
+        sources,
+        `src/titan/${asset} is read by the UI module but the build does not copy it`,
+      ).toContain(`src/titan/${asset}`);
+    }
+  });
+
+  it('ships the asset copy script, so a git install can build', () => {
+    // `prepare` runs the build for a git install, and the build copies the
+    // assets. A tarball that carried `prepare` without the copy script
+    // would fail to build wherever npm runs it.
+    const files = readManifest().files ?? [];
+    expect(files).toContain('scripts/copy-assets.mjs');
+  });
+});
+
 describe('the release guard', () => {
   it('has the tags it needs to judge the version', () => {
     // Every check below reads the tag list, so an EMPTY tag list makes them
