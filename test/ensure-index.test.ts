@@ -101,12 +101,31 @@ describe('ensureIndex', () => {
   });
 
   it('fails loudly when the initial sync cannot run', async () => {
+    // The error a first-time user is most likely to hit: no network, no
+    // index yet. It must say what happened and what to do, and it must not
+    // show the upstream path — no user action depends on which endpoint
+    // failed, and the raw message is developer-facing.
     const temp = openTempStore({ seed: false });
     try {
       const config = loadConfig({ CFR_AUTO_SYNC: '1' });
-      await expect(
-        ensureIndex(temp.store, config, createTestLogger(), { createEcfr: offlineEcfr }),
-      ).rejects.toThrow(/network disabled/);
+      const logger = createTestLogger();
+      const failure = ensureIndex(temp.store, config, logger, { createEcfr: offlineEcfr });
+      await expect(failure).rejects.toThrow(/could not build the index from eCFR/);
+      await expect(failure).rejects.toThrow(/eCFR could not be reached/);
+      await expect(failure).rejects.toThrow(/cfr-free sync/);
+      await expect(failure).rejects.not.toThrow(/\/api\/versioner/);
+      // The detail belongs in the log, where an operator can act on it.
+      const logged = logger.records.filter((record) => record.level === 'error');
+      expect(logged.length).toBeGreaterThan(0);
+      expect(logged.map((record) => record.message).join(' ')).toContain('eCFR request failed');
+      expect(JSON.stringify(logged)).toContain('/api/versioner');
+      // The kind travels with it. The reader's line tells the kinds apart
+      // ("eCFR could not be reached" against "eCFR answered, but not with
+      // valid JSON"), and the operator's record must say the same thing:
+      // a status alone cannot tell an upstream that answered 200 with a
+      // page of HTML from one that answered 200 with a body over the cap.
+      const fields = logged[logged.length - 1]?.fields as Record<string, unknown> | undefined;
+      expect(fields?.['kind']).toBe('transport');
     } finally {
       temp.cleanup();
     }
