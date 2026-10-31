@@ -22,11 +22,12 @@ keys, no telemetry — one Node process and one SQLite file.
   so a missing table is never mistaken for complete text. Nothing is
   fetched or transcribed — the service stays fully offline.
 - **Read-only web UI** (search, browse, section reads, line-level redlines,
-  copy-a-citation) over the same JSON API.
+  copy-a-citation) over the same JSON API — rating tables keep their
+  structure, and the whole UI is reachable from the keyboard.
 - **MCP server** with nine read-only tools any MCP client can use: six
   offline index-backed ones (`search_regulations`, `get_section`,
   `browse_title38`, `index_status`, `list_parts`, `health`) plus three that
-  fetch the live eCFR versioner per call (`get_section_at` (one provision
+  fetch the live eCFR versioner on demand (`get_section_at` (one provision
   as it stood at a date), `diff_issues`, `redline`).
 - **HTTP JSON API** for scripts and apps: search, read sections, browse the
   CFR hierarchy, health check, Prometheus metrics.
@@ -51,7 +52,7 @@ keys, no telemetry — one Node process and one SQLite file.
   and `mcp` when `CFR_REFRESH_HOURS` is set (default 0 = off);
   `serve`'s `/api/v1/diff` and `/api/v1/redline` routes; and `mcp`'s
   three eCFR-backed tools (`get_section_at`, `diff_issues`, `redline`),
-  which fetch from eCFR on every call. Reads from a fresh index never
+  which fetch from eCFR on demand. Reads from a fresh index never
   touch the network.
 
 ## Quickstart
@@ -64,7 +65,7 @@ needs npm and a compiler; the fifth needs a checkout.
 ### 1. Docker (nothing to install)
 
 ```bash
-docker run -d --name cfr-free -p 8787:8787 -v cfr-data:/data \
+docker run -d --name cfr-free -p 127.0.0.1:8787:8787 -v cfr-data:/data \
   ghcr.io/deffenda/cfr-free:latest
 ```
 
@@ -75,6 +76,10 @@ CLI command works the same way, e.g. `docker run --rm -v cfr-data:/data
 ghcr.io/deffenda/cfr-free:latest sync` to refresh, or `… export
 /data/backup.sqlite` to snapshot into the volume. Details under
 [Docker](#docker) below.
+
+**The API has no authentication.** The command above publishes it on loopback
+only, so only this machine can reach it. Publishing it on every interface
+takes `-p 8787:8787` instead — and then it needs your own auth in front.
 
 ### 2. From npm (no compiler, no Docker)
 
@@ -112,7 +117,7 @@ filename together to pick another release.
 ### 4. From GitHub (no publish step)
 
 ```bash
-npx -y github:deffenda/cfr-free version    # -> 0.2.1
+npx -y github:deffenda/cfr-free version    # -> 0.2.2
 npx -y github:deffenda/cfr-free serve      # HTTP API on http://127.0.0.1:8787
 ```
 
@@ -153,7 +158,7 @@ cd cfr-free
 npm ci                  # install the pinned dependencies
 npm run build           # compile to dist/ (the CLI entry point is dist/cli.js)
 
-node dist/cli.js version        # -> 0.2.1   (verifies the build)
+node dist/cli.js version        # -> 0.2.2   (verifies the build)
 node dist/cli.js sync           # build the local index (~2-3 MB download, ~5 s)
 node dist/cli.js serve          # HTTP API on http://127.0.0.1:8787
 # or
@@ -161,7 +166,7 @@ node dist/cli.js mcp            # MCP server on stdio (default command)
 
 node dist/cli.js export ./backup.sqlite   # consistent snapshot of the local index
 
-node dist/cli.js search PTSD               # ranked provisions from the local index (top 10)
+node dist/cli.js search PTSD               # ranked provisions from the local index
 
 node dist/cli.js diff 2026-01-01 2026-06-01   # provision changes between two issue dates
 node dist/cli.js redline 2026-01-01 2026-06-01 4.125   # line-level redline of one provision
@@ -169,6 +174,25 @@ node dist/cli.js redline 2026-01-01 2026-06-01 4.125   # line-level redline of o
 
 `npm link` in the checkout puts `cfr-free` on your PATH, after which the
 examples above work verbatim as `cfr-free …`.
+
+### Searching from the command line
+
+`cfr-free search` runs the same search the MCP and HTTP surfaces run, and
+takes the same parameters — the flag names mirror the API's query
+parameters (`--per-page` is `per_page`, `--kind` is `kind`):
+
+```bash
+cfr-free search PTSD                        # the hits, then the grounding summary
+cfr-free search --json PTSD                 # the search response verbatim, for a script
+cfr-free search --per-page 20 PTSD          # 20 hits per page (1-20; the default is 10)
+cfr-free search --page 2 --per-page 20 PTSD # the second page
+cfr-free search --part 4 --chapter I PTSD   # narrowed to one part and chapter
+cfr-free search --kind appendix PTSD        # sections (the default) or appendices
+```
+
+The flags are query parameters, not configuration: everything that
+_configures_ the service stays an environment variable, so an MCP client
+config stays uniform.
 
 `cfr-free sync` writes the index at `~/.cfr-free/index.sqlite`. To try it
 against a throwaway index instead of your own, point `CFR_INDEX_PATH`
@@ -181,9 +205,14 @@ CFR_INDEX_PATH=/tmp/cfr-smoke.sqlite node dist/cli.js sync   # ~5 s, then delete
 ### Docker
 
 ```bash
-docker run -d --name cfr-free -p 8787:8787 -v cfr-data:/data \
+docker run -d --name cfr-free -p 127.0.0.1:8787:8787 -v cfr-data:/data \
   ghcr.io/deffenda/cfr-free:latest
 ```
+
+**The API has no authentication.** The command above publishes it on loopback
+only, so only this machine can reach it. Publishing it on every interface
+takes `-p 8787:8787` instead — and then it needs a reverse proxy with auth in
+front of it.
 
 The container syncs on first start (~5 s, ~2–3 MB from eCFR), then serves
 the HTTP API; the index persists in the `cfr-data` volume mounted at `/data`.
@@ -191,16 +220,13 @@ Any CLI command works the same way, e.g.
 `docker run --rm -v cfr-data:/data ghcr.io/deffenda/cfr-free:latest sync` to
 refresh, or `… export /data/backup.sqlite` to snapshot into the volume.
 
-The image runs as a non-root user and binds `0.0.0.0` with the remote opt-in
-already set — inside a container the published port (`-p`) is the exposure
-gate, and loopback would make it unreachable. Outside Docker the CLI still
-defaults to `127.0.0.1` with `CFR_ALLOW_REMOTE=1` required. When you do
-expose it, a per-peer token-bucket rate limit (60-burst, 10 req/s) turns on
-automatically. Images are published to GHCR on `v*` tags with
-build-provenance attestations.
+The image runs as a non-root user and binds `0.0.0.0` inside the container with the remote opt-in already set. That part is a container-networking requirement, not an exposure decision: a process bound to the container's own `127.0.0.1` cannot be reached through a published port, so the **published port is the exposure gate** — and the documented default publishes on loopback. Outside Docker the CLI still defaults to `127.0.0.1` with `CFR_ALLOW_REMOTE=1` required. When you do expose it, a per-peer token-bucket rate limit (60-burst, 10 tokens/s) turns on automatically. The budget is spent by cost, not by request: a read of the local index costs one token, and a route that pulls the whole upstream document from eCFR costs ten.
 
-Prefer Compose? `docker compose up -d --build` serves the API on
-`127.0.0.1:8787` with a named volume, healthcheck, and sync left explicit
+Behind a TLS-terminating proxy, add `Strict-Transport-Security` there rather than in the app: the header is a promise about the public hostname, and the app does not know it. The app answers with `Referrer-Policy: no-referrer` on every route, so a link out of a response cannot carry the URL you were reading to the next site. Images are published to GHCR on `v*` tags with build-provenance attestations.
+
+Compose is the one-command deployment, and it binds loopback too:
+`docker compose up -d --build` serves the API on `127.0.0.1:8787` with a
+named volume, healthcheck, and sync left explicit
 (`docker compose run --rm cfr-free sync`) so starts never trigger a surprise
 download.
 
@@ -238,7 +264,7 @@ fetch.
 export CFR_INDEX_PATH=/tmp/smoke.sqlite   # never your real index
 
 # 1. the build is what you think it is
-node dist/cli.js version                  # -> 0.2.1
+node dist/cli.js version                  # -> 0.2.2
 
 # 2. network: build the index (~2-3 MB, ~5 s)
 node dist/cli.js sync
@@ -264,8 +290,9 @@ printf '%s\n%s\n%s\n' \
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_section","arguments":{"citation":"38 C.F.R. § 4.130"}}}' \
   | node dist/cli.js mcp | tail -1 | head -c 120
-# -> {"result":{"content":[{"type":"text","text":"{\n  \"citation\": \"4.130\"...
-# (note: the DOTTED display citation resolves — P1-03)
+# -> {"result":{"content":[{"type":"text","text":"citation: 4.130\nkind: section\nheadi...
+# (note: the DOTTED display citation resolves — P1-03; the text channel is a
+#  human-readable rendering, the machine contract is `structuredContent`)
 
 # 6. export: the whole corpus, offline
 node dist/cli.js export /tmp/smoke.jsonl jsonl
@@ -337,14 +364,16 @@ disorders?"_ or _"Search Title 38 for traumatic brain injury compensation."_
 | `index_status`       | —                                                           | Issue date, last sync, row counts, staleness, drift flag, corpus receipt hash, and what the last sync amended/added/removed                                                                                                                                                                                                                      |
 | `list_parts`         | —                                                           | Parts in the index with titles and section/appendix counts                                                                                                                                                                                                                                                                                       |
 | `health`             | —                                                           | One-call readiness verdict: `ready`, `stale`, `degraded` (structure drift), or `empty`                                                                                                                                                                                                                                                           |
-| `get_section_at`     | `at_date` (YYYY-MM-DD), `citation`                          | One provision as it stood at a date: the eCFR revision in force then, fetched statelessly on every call (no local index; the point-in-time archive starts 2017-01-01)                                                                                                                                                                            |
+| `get_section_at`     | `at_date` (YYYY-MM-DD), `citation`                          | One provision as it stood at a date: the eCFR revision in force then, fetched from eCFR on demand (no local index; a short-lived in-memory memo may reuse a document fetched moments ago; the point-in-time archive starts 2017-01-01)                                                                                                           |
 | `diff_issues`        | `from_date`, `to_date`                                      | Provision-level diff between two eCFR issue dates: changed/added/removed citations (capped, with a truncation flag)                                                                                                                                                                                                                              |
 | `redline`            | `from_date`, `to_date`, `citation`                          | Line-level redline of one provision between two eCFR issue dates: status, both sides' text, and per-line hunks                                                                                                                                                                                                                                   |
 
 All tools are **read-only**; the six index tools query only the local index and
 never hit the network, while `get_section_at`, `diff_issues` and `redline`
-fetch from eCFR on each call (a point-in-time revision, or two issue dates'
-full-title XML). Search and section responses carry a freshness envelope
+fetch from eCFR on demand (a point-in-time revision, or two issue dates'
+full-title XML); a fetched document is reused for up to five minutes by the
+process that fetched it (at most four documents are kept), and concurrent
+readers of the same date share one upstream fetch. Search and section responses carry a freshness envelope
 (`indexStale` + a `notice` when the local index has aged out) so a client can
 never unknowingly quote a lapsed version.
 
@@ -360,15 +389,15 @@ follow cross-references → paste-ready citations with source URLs.
 
 ### HTTP API
 
-| Method         | Path                         | Query params                                                           |
-| -------------- | ---------------------------- | ---------------------------------------------------------------------- |
-| `GET` / `HEAD` | `/health`                    | —                                                                      |
-| `GET` / `HEAD` | `/metrics`                   | — (Prometheus text format)                                             |
-| `GET` / `HEAD` | `/api/v1/search`             | `q` (required), `page`, `per_page`, `part`, `kind`, `chapter`          |
-| `GET` / `HEAD` | `/api/v1/sections/:citation` | — (URL-encode citations with spaces)                                   |
-| `GET` / `HEAD` | `/api/v1/browse`             | `chapter`, `part`, `subpart`, `subjgrp`                                |
-| `GET` / `HEAD` | `/api/v1/diff`               | `from`, `to` (both required; fetches from eCFR per request)            |
-| `GET` / `HEAD` | `/api/v1/redline`            | `from`, `to`, `citation` (all required; fetches from eCFR per request) |
+| Method         | Path                         | Query params                                                         |
+| -------------- | ---------------------------- | -------------------------------------------------------------------- |
+| `GET` / `HEAD` | `/health`                    | —                                                                    |
+| `GET` / `HEAD` | `/metrics`                   | — (Prometheus text format)                                           |
+| `GET` / `HEAD` | `/api/v1/search`             | `q` (required), `page`, `per_page`, `part`, `kind`, `chapter`        |
+| `GET` / `HEAD` | `/api/v1/sections/:citation` | — (URL-encode citations with spaces)                                 |
+| `GET` / `HEAD` | `/api/v1/browse`             | `chapter`, `part`, `subpart`, `subjgrp`                              |
+| `GET` / `HEAD` | `/api/v1/diff`               | `from`, `to` (both required; fetches from eCFR on demand)            |
+| `GET` / `HEAD` | `/api/v1/redline`            | `from`, `to`, `citation` (all required; fetches from eCFR on demand) |
 
 `/health` and `/metrics` additionally expose `diskFree`/`diskTotal` and the
 `cfr_free_disk_free_bytes`/`cfr_free_disk_total_bytes` gauges when the platform
@@ -482,7 +511,8 @@ eCFR API ──sync──▶ SQLite (sections + FTS5 + structure meta)
 - `src/commands/` — one entrypoint per subcommand: `mcp`, `sync`, `diff`,
   `redline`, `historical`, `search`, `serve`, `export` (`help` and
   `version` dispatch from `src/cli.ts`)
-- `docs/SPEC.md` — design decisions and review dispositions
+- `docs/SPEC.md` — the design authority; `docs/research/delivery-log.md` —
+  the review dispositions and the closed delivery record
 
 Sync is atomic: the whole index is replaced inside one `BEGIN IMMEDIATE`
 transaction under WAL, so concurrent readers never see a partial build, and

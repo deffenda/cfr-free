@@ -1,5 +1,4 @@
-import { ServiceError } from '../core/service.js';
-import { StructureError } from '../core/structure.js';
+import { ServiceError, StructureError } from '../core/errors.js';
 
 /**
  * Client-safe error text for the MCP surface — the parity fix for SPEC §7

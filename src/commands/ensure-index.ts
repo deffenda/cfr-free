@@ -4,13 +4,59 @@ import { EcfrApi } from '../core/ecfr.js';
 import { CommandError, EXIT } from '../exit-codes.js';
 import type { Logger } from '../logger.js';
 import type { Store } from '../core/store.js';
-import { syncIndex } from '../core/sync.js';
+import { syncIndex, type SyncDeps, type SyncReport } from '../core/sync.js';
 import { CFRService } from '../core/service.js';
+import { upstreamFailure } from './upstream-guidance.js';
 import { VERSION } from '../version.js';
 
 /** Create the eCFR client with a versioned User-Agent. */
 export function createEcfrApi(): EcfrApi {
   return new EcfrApi(new HttpClient({ userAgent: `cfr-free/${VERSION}` }));
+}
+
+/**
+ * A sync that cannot reach eCFR, re-thrown as a message the reader can act
+ * on.
+ *
+ * The upstream path stays OUT of the user-facing text: no user action
+ * depends on which endpoint failed, and the raw message — "request failed
+ * for /api/versioner/v1/titles.json: fetch failed" — is developer-facing.
+ * The detail stays in the structured log, where it belongs.
+ *
+ * Only an upstream failure is rewritten. A parse failure ("eCFR XML format
+ * may have changed") says something different and keeps its own message.
+ *
+ * `nextStep` is the caller's advice, and the two callers are in different
+ * places: the `cfr-free sync` command must not be told to run itself, while
+ * an automatic sync during `serve` can be.
+ */
+export async function syncWithGuidance(
+  deps: SyncDeps,
+  logger: Logger,
+  nextStep: string,
+): Promise<SyncReport> {
+  try {
+    return await syncIndex(deps);
+  } catch (error) {
+    const failure = upstreamFailure(error);
+    if (failure === null) throw error;
+    logger.error('eCFR request failed', {
+      url: failure.url,
+      status: failure.status ?? null,
+      // The kind is the discriminator the operator needs: a status alone
+      // cannot tell an upstream that answered 200 with a page of HTML
+      // from one that answered 200 with a body over the cap, and the
+      // reader's line already tells them apart.
+      kind: failure.kind,
+      message: failure.detail,
+    });
+    const advice = failure.advice === '' ? '' : ` ${failure.advice}`;
+    const step = nextStep === '' ? '' : ` ${nextStep}`;
+    throw new CommandError(
+      `could not build the index from eCFR — ${failure.reason}.${advice}${step}`,
+      EXIT.ERROR,
+    );
+  }
 }
 
 export type Freshness = 'fresh' | 'synced' | 'stale';
@@ -23,12 +69,13 @@ export interface EnsureIndexDeps {
 /**
  * Guarantee a usable index before serving.
  *
- * Policy (SPEC §10 #2): sync before serving; if a refresh fails but rows
+ * Policy (delivery log §10 #2): sync before serving; if a refresh fails but rows
  * exist, serve the stale index with a warning; if there are no rows at all,
  * fail with an actionable error.
  *
  * @throws {CommandError} (exit 3) when the index is empty and auto-sync is
- *   off; `SyncError` when a sync attempt itself fails.
+ *   off; `CommandError` (exit 1) when the initial sync fails and the index
+ *   is still empty.
  */
 export async function ensureIndex(
   store: Store,
@@ -48,7 +95,11 @@ export async function ensureIndex(
       );
     }
     logger.info('index empty, running initial sync', { index: config.indexPath });
-    await syncIndex({ ecfr: createEcfr(), store, logger });
+    await syncWithGuidance(
+      { ecfr: createEcfr(), store, logger },
+      logger,
+      'Run `cfr-free sync` to build the index.',
+    );
     return 'synced';
   }
 
@@ -58,7 +109,11 @@ export async function ensureIndex(
       maxAgeDays: config.maxAgeDays,
     });
     try {
-      await syncIndex({ ecfr: createEcfr(), store, logger });
+      await syncWithGuidance(
+        { ecfr: createEcfr(), store, logger },
+        logger,
+        'Run `cfr-free sync` to build the index.',
+      );
       return 'synced';
     } catch (error) {
       logger.warn('refresh failed, serving existing index', {

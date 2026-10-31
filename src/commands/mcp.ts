@@ -27,11 +27,13 @@ export async function runMcpCommand(config: AppConfig, logger: Logger): Promise<
   let scheduler: RefreshScheduler | null = null;
 
   try {
-    const freshness = await ensureIndex(store, config, logger);
-    // One stateless eCFR client serves both the diff tool registration and
-    // the service's diff facade (batch-7 D2); createEcfrApi() was already
-    // imported here for the refresh scheduler.
+    // One eCFR client — with its own document memo — serves the startup
+    // sync, the diff tool registration and the service's diff facade
+    // (batch-7 D2), and the background refresh scheduler shares it too:
+    // the memo and the upstream-fetch semaphore bound THIS process, not
+    // each caller separately.
     const ecfr = createEcfrApi();
+    const freshness = await ensureIndex(store, config, logger, { createEcfr: () => ecfr });
     const service = new CFRService(store, config.maxAgeDays, ecfr, logger);
     const server = buildMcpServer(service, logger, { ecfr });
 
@@ -42,7 +44,7 @@ export async function runMcpCommand(config: AppConfig, logger: Logger): Promise<
         refreshHours: config.refreshHours,
         logger,
         refresh: async () => {
-          await syncIndex({ ecfr: createEcfrApi(), store, logger });
+          await syncIndex({ ecfr, store, logger });
         },
       });
       scheduler.schedule();

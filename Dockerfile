@@ -9,6 +9,13 @@ COPY package.json package-lock.json tsconfig.json tsconfig.build.json ./
 # run against an empty source tree and fail. The build is run explicitly below.
 RUN npm ci --ignore-scripts
 COPY src ./src
+# The build copies the browser assets (src/titan/ui-client.js and .css)
+# into dist/ itself — `tsc` compiles TypeScript and copies nothing else —
+# so the copy script has to be in the tree the build runs in.
+COPY scripts ./scripts
+# The OpenAPI document: the service serves it at /openapi.yaml, so a
+# running instance carries its own contract.
+COPY docs/openapi.yaml ./docs/openapi.yaml
 RUN npm run build && npm prune --omit=dev
 
 # --- runtime stage: minimal image, non-root, index in /data -----------------
@@ -27,6 +34,8 @@ ENV NODE_ENV=production \
 COPY --from=build --chown=cfr:cfr /app/dist ./dist
 COPY --from=build --chown=cfr:cfr /app/node_modules ./node_modules
 COPY --from=build --chown=cfr:cfr /app/package.json ./package.json
+# The OpenAPI document, served at /openapi.yaml.
+COPY --from=build --chown=cfr:cfr /app/docs/openapi.yaml ./docs/openapi.yaml
 RUN mkdir -p /data && chown cfr:cfr /data
 USER cfr
 
@@ -36,9 +45,15 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD node 
 VOLUME /data
 EXPOSE 8787
 
-# Binding 0.0.0.0 with the remote opt-in is deliberate inside a container:
-# the published port (`-p 8787:8787`) is the explicit exposure gate, and
-# loopback inside the container would make the port unreachable. Outside
-# Docker the CLI still defaults to 127.0.0.1 with the opt-in required.
+# The container binds 0.0.0.0 with the remote opt-in set, and that is a
+# CONTAINER-NETWORKING requirement, not an exposure decision: a process bound
+# to the container's own 127.0.0.1 cannot be reached through a published
+# port, so the EXPOSURE GATE is the host-side published port.
+#
+# The documented default for that port is loopback — `-p 127.0.0.1:8787:8787`
+# in the README and in docker-compose.yml — and publishing on every interface
+# (`-p 8787:8787`) is the opt-in. The API has NO authentication, so an
+# exposed port needs a reverse proxy with auth in front of it. Outside Docker
+# the CLI still defaults to 127.0.0.1 with the opt-in required.
 ENTRYPOINT ["node", "dist/cli.js"]
 CMD ["serve"]
