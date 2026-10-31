@@ -1,4 +1,15 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -50,6 +61,36 @@ import { describe, expect, it } from 'vitest';
 const WORKFLOW_PATH = fileURLToPath(new URL('../.github/workflows/ci.yml', import.meta.url));
 const WORKFLOWS_DIR = fileURLToPath(new URL('../.github/workflows/', import.meta.url));
 const PACKAGE_PATH = fileURLToPath(new URL('../package.json', import.meta.url));
+const ROOT = fileURLToPath(new URL('../', import.meta.url));
+/** The release-time guard: the packed tarball must carry what the program reads. */
+const VERIFIER_PATH = fileURLToPath(new URL('../scripts/verify-packed.mjs', import.meta.url));
+/** The reader that turns `npm pack --json` into a list of paths. */
+const PACK_LIST_PATH = fileURLToPath(new URL('../scripts/pack-list.mjs', import.meta.url));
+
+/**
+ * The paths the pack list reports, for a given `npm pack --json` payload.
+ *
+ * A FAKE npm is put in front of the real one on PATH, so the reader is
+ * exercised against a payload this test chooses — including the shapes
+ * the npm in use does not produce.
+ */
+function readPackedPaths(payload: string): string[] {
+  const dir = mkdtempSync(join(tmpdir(), 'cfr-pack-list-'));
+  try {
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    const payloadFile = join(dir, 'payload.json');
+    writeFileSync(payloadFile, payload);
+    writeFileSync(join(bin, 'npm'), `#!/bin/sh\ncat "${payloadFile}"\n`, { mode: 0o755 });
+    const out = execFileSync(process.execPath, [PACK_LIST_PATH], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}:${process.env['PATH'] ?? ''}` },
+    });
+    return JSON.parse(out) as string[];
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 /** The checks branch protection on `main` requires. Keep in step with it. */
 const REQUIRED_CHECKS = ['quality (22)', 'quality (24)', 'security'] as const;
@@ -381,6 +422,67 @@ function jobBlock(text: string, jobName: string): string {
 }
 
 /**
+ * The `fetch-depth` a job's checkout step asks for, or undefined when the
+ * step does not ask for one — `actions/checkout`'s default is a depth-1
+ * clone, which carries no tags.
+ */
+function checkoutFetchDepth(jobText: string): string | undefined {
+  const lines = jobText.split('\n');
+  const checkout = lines.findIndex((line) => /uses:\s*actions\/checkout@/.test(line));
+  if (checkout === -1) return undefined;
+  // The step that owns the `uses:` line. The `uses:` line is not always the
+  // step's first line — the `- name:` form puts it one line deeper — so the
+  // step's own indent comes from the nearest PRECEDING step marker, and the
+  // scan ends at the next marker at that indent or shallower. Deriving the
+  // boundary from the `uses:` line's indent instead would let the scan run
+  // past the checkout and read a LATER step's `fetch-depth`, which is how
+  // this guard could pass while the checkout stayed shallow.
+  let stepIndent = 0;
+  for (let index = checkout; index >= 0; index -= 1) {
+    const marker = /^(\s*)-\s/.exec(lines[index] ?? '');
+    if (marker !== null) {
+      stepIndent = (marker[1] ?? '').length;
+      break;
+    }
+  }
+  for (const line of lines.slice(checkout + 1)) {
+    const marker = /^(\s*)-\s/.exec(line);
+    if (marker !== null && (marker[1] ?? '').length <= stepIndent) return undefined;
+    // The value may carry a trailing comment (`fetch-depth: 0 # why`) — YAML
+    // reads the comment as a comment, so it is stripped before the value is
+    // read; without that, a job whose depth is right is reported as wrong.
+    const found = /^\s*fetch-depth:\s*(.+?)\s*$/.exec(stripInlineComment(line));
+    // The value may be quoted (`fetch-depth: "0"`); the quotes are YAML
+    // syntax, not part of the value.
+    if (found !== null) {
+      return resolveFetchDepth((found[1] ?? '').replace(/^["']|["']$/g, ''));
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The depth a `fetch-depth` value asks for, with a LITERAL expression
+ * resolved.
+ *
+ * GitHub evaluates `${{ … }}` before the action reads the input, so
+ * `fetch-depth: ${{ 0 }}` asks for depth 0 exactly as `fetch-depth: 0`
+ * does, and reading the raw text would fail a workflow that is correct.
+ * Only a LITERAL is resolved — an expression that names something else
+ * (`${{ inputs.depth }}`, `${{ matrix.depth }}`) cannot be read out of the
+ * workflow text at all, so the value is returned as written and the guard
+ * says what it can and cannot read.
+ */
+function resolveFetchDepth(value: string): string {
+  const expression = /^\$\{\{\s*(.+?)\s*\}\}$/.exec(value);
+  if (expression === null) return value;
+  const literal = expression[1] ?? '';
+  if (/^\d+$/.test(literal)) return literal;
+  const quoted = /^["'](\d+)["']$/.exec(literal);
+  return quoted === null ? value : (quoted[1] ?? '');
+}
+
+/**
  * The actionlint version every WORKFLOW install pins. One version across
  * the workflows — ci.yml's quality job, ci.yml's `actionlint` job and
  * release's `ci` job — or a change is green on one leg and red on
@@ -405,18 +507,251 @@ const ACTIONLINT_INSTALL_LINE =
   /^\s*-?\s*(?:run:)?\s*go install github\.com\/rhysd\/actionlint\/cmd\/actionlint@(\S+)\s*$/;
 
 /**
- * The gate's command — `npm run ci` or `npm run lint:actions`, the two
- * spellings a step uses to run what runs locally under `npm run ci` — in
- * command position anywhere in a run value. The command must stand alone
- * as a word: `npm ci` is an install, and `npm run ci:extra` is another
+ * A `npm run <script>` command in command position anywhere in a run
+ * value. The script name is the WHOLE token, so the command stands
+ * alone: `npm ci` is an install, and `npm run ci:extra` is another
  * script. The value arrives as one line, or as block-scalar lines joined
  * by `\n`, so a command folded across lines still reads as one. The match
- * is textual, not shell-aware: a value that only PRINTS the command
+ * is textual, not shell-aware: a value that only PRINTS a command
  * (`echo "npm run ci"`) counts as a consumer too — treating a step that
  * may run the gate as one that does is the safe direction, since the
  * finding it can raise is a missing install, never a skipped gate.
  */
-const GATE_COMMAND = /(?:^|[\s;&|(`'"])npm run\s+(?:ci|lint:actions)(?![\w:.-])/;
+const NPM_RUN_COMMAND = /(?:^|[\s;&|(`'"])npm run\s+([\w:.-]+)/g;
+
+/**
+ * A bare `npm test` in command position: npm's own spelling of the `test`
+ * script, which the `npm run <script>` form does not match. The word
+ * `test` must END there, so `npm run test:coverage` — a different script,
+ * matched by the form above — is not read as the bare form.
+ */
+const NPM_TEST_COMMAND = /(?:^|[\s;&|(`'"])npm test\b/g;
+
+/**
+ * The scripts a run value invokes, in the order they sit: the `npm run
+ * <script>` forms and the bare `npm test`, which npm resolves to the
+ * `test` script.
+ */
+function invokedScripts(run: string): string[] {
+  const found = [
+    ...[...run.matchAll(NPM_RUN_COMMAND)].map((match) => ({
+      index: match.index ?? 0,
+      script: match[1] ?? '',
+    })),
+    ...[...run.matchAll(NPM_TEST_COMMAND)].map((match) => ({
+      index: match.index ?? 0,
+      script: 'test',
+    })),
+    ...[...run.matchAll(YARN_RUN_COMMAND)].map((match) => ({
+      index: match.index ?? 0,
+      script: match[1] ?? '',
+    })),
+  ];
+  return found.sort((a, b) => a.index - b.index).map((entry) => entry.script);
+}
+
+/**
+ * A `yarn <script>` command in command position: yarn's spelling of the
+ * `npm run <script>` form, resolving the same script names — `yarn test`
+ * is the `test` script, `yarn test:coverage` the script of that name.
+ * The name must END there, so `yarn testing` is not the `test` script.
+ */
+const YARN_RUN_COMMAND = /(?:^|[\s;&|(`'"])yarn[ \t]+(?:run)?[ \t]*([\w:.-]+)/g;
+
+/**
+ * A `vitest run` invocation in command position: `npx vitest run …`, or a
+ * bare `vitest run …`. The tail of the match is the command's own
+ * arguments, which may name FILE FILTERS.
+ *
+ * The spelling matters: the derived gate set names npm SCRIPTS, and a job
+ * that invokes vitest directly — the spelling `live-e2e.yml` already uses
+ * — named no script at all, so it was not a gate job and no checkout depth
+ * was demanded of it. A `vitest run` over the WHOLE suite runs the
+ * release guard, so it is one.
+ *
+ * The `--run` spelling counts too: `vitest --run` is the same command
+ * without the `run` subcommand, and it runs the same suite.
+ */
+const VITEST_RUN_COMMAND =
+  /(?:^|[\s;&|(`'"])(?:npx)?[ \t]*vitest[ \t]+(?:run|--run)\b([^\n;&|)]*)/g;
+
+/**
+ * The options that select tests by NAME rather than by file: `-t` and
+ * `--testNamePattern`. Such a run does not narrow the FILE set, so the
+ * whole suite — the release guard included — is what runs.
+ */
+const NAME_PATTERN_OPTIONS = new Set(['-t', '--testNamePattern']);
+
+/**
+ * A `vitest` invocation's own words, with a quoted string kept as ONE
+ * token: a test-name pattern (`-t "release guard"`) is two words to the
+ * shell but one argument to vitest.
+ */
+function vitestTokens(tail: string): string[] {
+  const tokens: string[] = [];
+  let current = '';
+  let quote = '';
+  for (const char of tail) {
+    if (quote) {
+      if (char === quote) {
+        quote = '';
+        continue;
+      }
+      current += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) tokens.push(current);
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+/**
+ * The file filters a `vitest` invocation names, and whether it selected
+ * tests by NAME.
+ *
+ * Every positional token is a filter, not just the first: a run may name
+ * several files, and it reaches the release guard when ANY of them is the
+ * guard's own file. A token right after an option is that option's VALUE
+ * (`--exclude test/live.test.ts`), not a filter: such a run still covers
+ * the whole suite but one file, so it is treated as no filter at all.
+ */
+function vitestFileFilters(tail: string): { filters: string[]; namePattern: boolean } {
+  const tokens = vitestTokens(tail);
+  const filters: string[] = [];
+  let namePattern = false;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index] ?? '';
+    if (!token.startsWith('-')) {
+      filters.push(token);
+      continue;
+    }
+    if (NAME_PATTERN_OPTIONS.has(token.split('=')[0] ?? token)) namePattern = true;
+    if (!token.includes('=')) {
+      const next = tokens[index + 1];
+      if (next !== undefined && !next.startsWith('-')) index += 1;
+    }
+  }
+  return { filters, namePattern };
+}
+
+/**
+ * Whether a filter names a WHOLE SET of files rather than one file: a glob
+ * (any name holding a `*` or a `?`), a directory (`test`, `test/`), or a
+ * name with no file extension at all. Such a filter reaches every file
+ * under it, the release guard included.
+ */
+function namesAWholeSuite(token: string): boolean {
+  if (/[*?[\]{}]/.test(token)) return true;
+  if (token.endsWith('/')) return true;
+  if (/\.[A-Za-z0-9]+$/.test(token)) return false;
+  return true;
+}
+
+/**
+ * Whether a `vitest` invocation's tail reaches the file that holds the
+ * release guard.
+ *
+ * A whole-suite run is a gate run: the release guard is one of its files,
+ * and a shallow checkout leaves it asserting nothing. A run with explicit
+ * file filters runs THOSE files only, so it is a gate run when one of them
+ * is the release guard's own file.
+ */
+function vitestReachesReleaseGuard(tail: string): boolean {
+  const { filters, namePattern } = vitestFileFilters(tail);
+  // A name pattern selects by NAME, not by file: the file set stays whole.
+  if (namePattern) return true;
+  // No filter at all: the whole suite runs, the release guard included.
+  if (filters.length === 0) return true;
+  for (const filter of filters) {
+    if (filter.includes('install-paths')) return true;
+    if (namesAWholeSuite(filter)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether a run value invokes vitest over the file that holds the
+ * release guard — either the whole suite, or that file itself.
+ */
+function runsReleaseGuardSuite(run: string): boolean {
+  for (const match of run.matchAll(VITEST_RUN_COMMAND)) {
+    if (vitestReachesReleaseGuard(match[1] ?? '')) return true;
+  }
+  return false;
+}
+
+/**
+ * The scripts that make a job a GATE job: `npm run ci` itself and every
+ * step the `ci` script runs, plus the two scripts that run the whole test
+ * suite on their own.
+ *
+ * DERIVED from package.json, not hard-coded. The hard-coded list was
+ * `ci|lint:actions`, and it went stale the moment the gate grew a step:
+ * a job that runs only `npm run test:coverage` — which runs the release
+ * guard, and so needs the tags a shallow checkout does not carry — was
+ * not a gate job at all, so the checkout-depth guard never saw it. A
+ * step of the `ci` script that is no script of its own (a raw command)
+ * invokes no gate command and is not one.
+ *
+ * `test` and `validate` are added on top of that derivation, because the
+ * `ci` script names NEITHER of them: it runs `test:coverage`.
+ *
+ * `test` runs the WHOLE vitest suite, the release guard among its files,
+ * so a job running it with a shallow checkout leaves the release guard
+ * asserting nothing. That is CR-01's shape, one script name away, so the
+ * set names it.
+ *
+ * `validate` runs the suite over the CHANGED SET, and whether that set
+ * carries the release guard depends on what changed: the guard's file
+ * imports nothing from `src/`, so a change to a source file does not pull
+ * it in, while a change to the guard's own file (or to a file it imports)
+ * does. This guard cannot know the changed set of a job it only reads the
+ * workflow text of, so `validate` is named anyway: over-forcing
+ * `fetch-depth: 0` on a `validate` job is the safe side — a job that turns
+ * out not to need the tags carries them — while dropping it would leave
+ * the hole CR-01 describes open for every `validate` job whose changed
+ * set DOES include the guard. The cost of that over-forcing is stated in
+ * the review, not hidden here.
+ *
+ * Each is read from the manifest, so a rename drops it rather than
+ * leaving a name behind that names nothing.
+ */
+const GATE_SCRIPTS = [
+  ...new Set([
+    'ci',
+    ...['test', 'validate'].filter((name) => name in manifest.scripts),
+    ...localGateCommands(manifest.scripts.ci ?? '')
+      .map((step) => step.split(/\s+/)[0] ?? '')
+      .filter((step) => step in manifest.scripts),
+  ]),
+];
+
+/**
+ * The scripts that invoke actionlint: `npm run ci` (which runs
+ * `npm run lint:actions`) and every gate step whose own command runs
+ * actionlint. DERIVED from package.json, so renaming the actionlint
+ * script cannot leave the guard behind. A job running one of these shells
+ * out to a bare `actionlint`, which the runner does not ship — so it
+ * needs the pinned install and the PATH echo in an earlier step. A job
+ * running any other gate step does not, and demanding the install of it
+ * would fail a workflow that is correct.
+ */
+const ACTIONLINT_SCRIPTS = [
+  ...new Set([
+    'ci',
+    ...GATE_SCRIPTS.filter((name) => (manifest.scripts[name] ?? '').includes('actionlint')),
+  ]),
+];
 
 /**
  * A line appending GOPATH's bin dir to GITHUB_PATH as a command, in the
@@ -443,7 +778,10 @@ type GateLine = { step: string; ordinal: number };
 
 /** What one job says about the shared gate, for `gateFindings` to judge. */
 type JobGate = {
+  /** Steps invoking any gate command. */
   consumers: GateLine[];
+  /** Steps invoking a gate command that shells out to actionlint. */
+  actionlintConsumers: GateLine[];
   actionlintRuns: GateLine[];
   /** Step carrying the pinned install; -1 when the job carries none. */
   installOrdinal: number;
@@ -565,18 +903,24 @@ function runValueAt(lines: string[], index: number): string | undefined {
 
 /**
  * Everything one job says about the shared gate: which STEP invokes it,
- * which steps run actionlint by absolute GOPATH path, and which step
- * carries the pinned install and the GITHUB_PATH echo. Steps are
- * numbered so `gateFindings` can order by step, not by line: a step's
- * own lines all sit together, and the effect the guard needs from the
- * echo reaches only LATER steps. Install and echo detection runs on the
- * line with its inline comment stripped AND anchored at the command
- * position, so a commented-out install, an echo PRINTING the install
- * line, or any text quoting the redirect counts for neither — the guard
- * needs the command to run, not its words to appear.
+ * which of those steps invoke actionlint, which steps run actionlint by
+ * absolute GOPATH path, and which step carries the pinned install and the
+ * GITHUB_PATH echo. Steps are numbered so `gateFindings` can order by
+ * step, not by line: a step's own lines all sit together, and the effect
+ * the guard needs from the echo reaches only LATER steps. Install and echo
+ * detection runs on the line with its inline comment stripped AND anchored
+ * at the command position, so a commented-out install, an echo PRINTING
+ * the install line, or any text quoting the redirect counts for neither —
+ * the guard needs the command to run, not its words to appear.
  */
 function scanJobGate(lines: string[]): JobGate {
-  const gate: JobGate = { consumers: [], actionlintRuns: [], installOrdinal: -1, echoOrdinal: -1 };
+  const gate: JobGate = {
+    consumers: [],
+    actionlintConsumers: [],
+    actionlintRuns: [],
+    installOrdinal: -1,
+    echoOrdinal: -1,
+  };
   let step = '(no run step)';
   let ordinal = -1;
   for (let index = 0; index < lines.length; index += 1) {
@@ -594,13 +938,19 @@ function scanJobGate(lines: string[]): JobGate {
     }
     const run = runValueAt(lines, index);
     if (run === undefined) continue;
-    if (GATE_COMMAND.test(run)) gate.consumers.push({ step, ordinal });
+    const invoked = invokedScripts(run);
+    if (invoked.some((name) => GATE_SCRIPTS.includes(name)) || runsReleaseGuardSuite(run)) {
+      gate.consumers.push({ step, ordinal });
+    }
+    if (invoked.some((name) => ACTIONLINT_SCRIPTS.includes(name))) {
+      gate.actionlintConsumers.push({ step, ordinal });
+    }
     if (ACTIONLINT_BY_PATH.test(run)) gate.actionlintRuns.push({ step, ordinal });
   }
   return gate;
 }
 
-/** Every step of every job whose run value invokes the shared gate. */
+/** Every step of every job whose run value invokes a gate command. */
 function workflowGateConsumers(text: string): { job: string; step: string }[] {
   const consumers: { job: string; step: string }[] = [];
   for (const job of workflowJobs(text)) {
@@ -676,7 +1026,12 @@ function unreadRunFindings(file: string, text: string): string[] {
   for (let index = from; index < to; index += 1) {
     if (read.has(index)) continue;
     const stripped = stripInlineComment(lines[index] ?? '');
-    if (GATE_COMMAND.test(stripped) || ACTIONLINT_BY_PATH.test(stripped)) {
+    const invoked = invokedScripts(stripped);
+    if (
+      GATE_SCRIPTS.some((name) => invoked.includes(name)) ||
+      ACTIONLINT_BY_PATH.test(stripped) ||
+      runsReleaseGuardSuite(stripped)
+    ) {
       findings.push(
         `${file}:${index + 1}: gate or actionlint run on a line this guard does not read as a run value — run values must be a block-style \`run:\` key at step indent, not flow style, a plain-scalar continuation or compact step indentation`,
       );
@@ -689,15 +1044,16 @@ function unreadRunFindings(file: string, text: string): string[] {
  * Every invariant a workflow's jobs break, as messages naming the file,
  * the job and the step. Empty when every job holds them:
  *
- *  - a job whose run value invokes the shared gate carries the pinned
- *    actionlint install AND the `>> "$GITHUB_PATH"` echo in a STRICTLY
- *    EARLIER step than the first consumer step — the gate shells out to
- *    a bare `actionlint`, which the runner does not ship. The step rule
- *    is deliberately stricter than line order: `GITHUB_PATH` applies
- *    only to subsequent steps, so install, echo and gate folded into
- *    one step still die with `actionlint: command not found` however
- *    they are ordered inside it, and holding every line of the rule to
- *    one uniform test keeps such a fold from passing on line order;
+ *  - a job whose run value invokes a gate command that SHELLS OUT TO
+ *    ACTIONLINT carries the pinned actionlint install AND the
+ *    `>> "$GITHUB_PATH"` echo in a STRICTLY EARLIER step than the first
+ *    such consumer step — the gate shells out to a bare `actionlint`,
+ *    which the runner does not ship. The step rule is deliberately
+ *    stricter than line order: `GITHUB_PATH` applies only to subsequent
+ *    steps, so install, echo and gate folded into one step still die
+ *    with `actionlint: command not found` however they are ordered
+ *    inside it, and holding every line of the rule to one uniform test
+ *    keeps such a fold from passing on line order;
  *  - a job that invokes actionlint by absolute GOPATH path carries the
  *    install in an earlier step too, but needs no PATH echo: the
  *    absolute path never reads PATH.
@@ -712,7 +1068,7 @@ function gateFindings(file: string, text: string): string[] {
   for (const job of workflowJobs(text)) {
     const scan = scanJobGate(job.lines);
     const where = (step: string): string => `${file}: job \`${job.name}\`, step \`${step}\``;
-    const consumer = scan.consumers[0];
+    const consumer = scan.actionlintConsumers[0];
     if (consumer !== undefined) {
       if (scan.installOrdinal === -1) {
         findings.push(`${where(consumer.step)}: runs the gate with no pinned actionlint install`);
@@ -1233,6 +1589,128 @@ describe('the workflow files — what the merge gate runs', () => {
     expect(steps.join('\n'), 'the security job no longer runs osv-scanner').toContain(osv);
   });
 
+  it('checks out the tags the release guard reads', () => {
+    // Silent failure this prevents: `actions/checkout` clones with
+    // `--depth 1` and fetches NO tags by default, so `git tag` returns
+    // nothing and the release guard (test/install-paths.test.ts) asserts
+    // nothing at all. It stayed green in CI for exactly that reason
+    // (measured 2026-10-29: a depth-1 clone of the public repository
+    // reports zero tags, so the guard's loop never ran). The jobs that
+    // run the gate must therefore check out the full history and its tags.
+    //
+    // The job list is DERIVED from the workflows, not named: the jobs
+    // whose run values invoke the shared gate are read out of the files
+    // themselves (`workflowGateConsumers`), so a gate job added later —
+    // one that checks out shallow — fails HERE instead of leaving the
+    // release guard vacuous in that job. Naming the two jobs the
+    // workflows happen to have today would guard those two and nothing
+    // else.
+    let checked = 0;
+    for (const file of workflowFiles) {
+      const text = readFileSync(file.path, 'utf8');
+      const gateJobs = [...new Set(workflowGateConsumers(text).map((entry) => entry.job))];
+      for (const name of gateJobs) {
+        const job = workflowJobs(text).find((entry) => entry.name === name);
+        expect(job, `${file.name} has no ${name} job`).toBeDefined();
+        const depth = job === undefined ? undefined : checkoutFetchDepth(job.lines.join('\n'));
+        expect(
+          depth,
+          `${file.name} job ${name} must check out with fetch-depth: 0 — a shallow ` +
+            'checkout carries no tags, which leaves the release guard asserting nothing. ' +
+            'The value is read literally (a literal expression such as `${{ 0 }}` is ' +
+            'resolved); an expression that names something else cannot be read from ' +
+            'the workflow text',
+        ).toBe('0');
+        checked += 1;
+      }
+    }
+    // The guard passes on nothing if the parser saw no gate job at all:
+    // a change that hides every run value would leave the loop empty
+    // and this test green.
+    expect(
+      checked,
+      'no gate job found in any workflow — this guard passes on nothing',
+    ).toBeGreaterThan(0);
+  });
+
+  it('reads the checkout depth from the checkout step, not a later step', () => {
+    // The hole this closes: a job whose checkout is shallow, followed by a
+    // later step that asks for `fetch-depth: 0`, must NOT read as a
+    // checkout with full history. The step's own indent comes from the
+    // nearest preceding step marker, so the `- name:` form of a step (where
+    // `uses:` sits one line deeper) is handled too.
+    const shallowCheckout = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - uses: actions/checkout@abc123',
+      '      - uses: actions/setup-node@def456',
+      '        with:',
+      '          fetch-depth: 0',
+    ].join('\n');
+    expect(checkoutFetchDepth(shallowCheckout)).toBeUndefined();
+
+    const namedCheckout = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - name: Check out',
+      '        uses: actions/checkout@abc123',
+      '      - uses: actions/setup-node@def456',
+      '        with:',
+      '          fetch-depth: 0',
+    ].join('\n');
+    expect(checkoutFetchDepth(namedCheckout)).toBeUndefined();
+
+    // A checkout with no `fetch-depth` as the LAST step of a job: no
+    // later step ends the scan, so it falls through to the end of the
+    // job — a path the cases above never reach.
+    const lastStepCheckout = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - uses: actions/checkout@abc123',
+    ].join('\n');
+    expect(checkoutFetchDepth(lastStepCheckout)).toBeUndefined();
+
+    const fullHistory = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - name: Check out',
+      '        uses: actions/checkout@abc123',
+      '        with:',
+      '          fetch-depth: 0',
+      '      - uses: actions/setup-node@def456',
+    ].join('\n');
+    expect(checkoutFetchDepth(fullHistory)).toBe('0');
+
+    // A quoted value is the same value: the quotes are YAML syntax.
+    const quoted = fullHistory.replace('fetch-depth: 0', 'fetch-depth: "0"');
+    expect(checkoutFetchDepth(quoted)).toBe('0');
+  });
+
+  it('reads a fetch-depth value that carries a trailing comment', () => {
+    // The value may carry a trailing comment (`fetch-depth: 0 # why`) — YAML
+    // reads the comment as a comment, so it is stripped before the value is
+    // read; without the strip, a job whose depth is right is reported as
+    // wrong. Until now the strip was pinned only INDIRECTLY, by the one
+    // comment in release.yml (`fetch-depth: 0 # the previous tag is needed
+    // for the release notes`): neutralise that comment and the strip could
+    // be removed with the suite still green. This pins it DIRECTLY.
+    const withComment = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - name: Check out',
+      '        uses: actions/checkout@abc123',
+      '        with:',
+      '          fetch-depth: 0 # the tags the release guard reads',
+      '      - uses: actions/setup-node@def456',
+    ].join('\n');
+    expect(checkoutFetchDepth(withComment)).toBe('0');
+  });
+
   it('keeps a comment inside the security job from ending the block', () => {
     // A comment at the same indent as the job key is not a key: it ends
     // nothing. Ending the block there would drop the scanners below it
@@ -1256,6 +1734,110 @@ describe('the workflow files — what the merge gate runs', () => {
     expect(steps.join('\n'), 'the security job no longer runs gitleaks').toContain(gitleaks);
     expect(steps.join('\n'), 'the security job no longer runs osv-scanner').toContain(osv);
     expect(security, 'the block ran on into the next job').not.toContain('npm test');
+  });
+});
+
+/**
+ * How a job is recognised as a GATE job — the spellings that run the
+ * release guard without naming an npm script, and the checkout depth a
+ * gate job is read as asking for.
+ */
+describe('the derived gate set — the spellings that reach the release guard', () => {
+  /** The jobs of a synthetic workflow that run the gate. */
+  function gateJobs(jobLines: string[]): string[] {
+    return [...new Set(workflowGateConsumers(syntheticWorkflow(jobLines)).map((e) => e.job))];
+  }
+
+  it('recognises a suite run that names no npm script', () => {
+    // Silent failure this prevents: the derived gate set names npm SCRIPTS,
+    // so a job that runs vitest DIRECTLY — `npx vitest run`, the spelling
+    // `live-e2e.yml` already uses — named no script at all. It was not a
+    // gate job, so no checkout depth was demanded of it, and a job running
+    // the whole suite (the release guard among its files) from a shallow
+    // checkout left the guard asserting nothing. That is CR-01's shape,
+    // one spelling away.
+    const wholeSuite = gateJobs(['  gate:', '    steps:', '      - run: npx vitest run']);
+    expect(wholeSuite).toEqual(['gate']);
+
+    // The same suite, run through yarn's spelling of the `test` script.
+    const yarn = gateJobs(['  gate:', '    steps:', '      - run: yarn test']);
+    expect(yarn).toEqual(['gate']);
+
+    // A run filtered to the release guard's OWN file runs that file, so
+    // it is a gate job too.
+    const guardFile = gateJobs([
+      '  gate:',
+      '    steps:',
+      '      - run: npx vitest run test/install-paths.test.ts',
+    ]);
+    expect(guardFile).toEqual(['gate']);
+
+    // A run filtered to ANOTHER file runs only that file, so it does not
+    // reach the release guard and is not a gate job. This is the spelling
+    // `live-e2e.yml` uses, and it must not be forced to carry the tags.
+    const otherFile = gateJobs([
+      '  live:',
+      '    steps:',
+      '      - run: LIVE_TESTS=1 npx vitest run test/live.test.ts',
+    ]);
+    expect(otherFile).toEqual([]);
+  });
+
+  it('reads every spelling that reaches the release guard as a gate job', () => {
+    // The classification, pinned on the matcher itself. Every spelling
+    // below RUNS the release guard: a filter that names it, a filter SET
+    // that names it among others, a directory, a glob, a test-name
+    // pattern, and the `--run` spelling without the `run` subcommand. A
+    // job that uses one of them runs the guard, so it must carry the tags
+    // a shallow checkout does not have.
+    const gate = [
+      'npx vitest run',
+      'npx vitest --run',
+      'npx vitest run test/install-paths.test.ts',
+      'npx vitest run test/live.test.ts test/install-paths.test.ts',
+      'npx vitest run test/',
+      'npx vitest run test',
+      'npx vitest run test/**',
+      'npx vitest run **/*.test.ts',
+      'npx vitest run -t "release guard"',
+      'npx vitest run --exclude test/live.test.ts',
+    ];
+    for (const run of gate) {
+      expect(runsReleaseGuardSuite(run), `${run} must be read as a gate run`).toBe(true);
+      const jobs = gateJobs(['  gate:', '    steps:', `      - run: ${run}`]);
+      expect(jobs, `${run} must make the job a gate job`).toEqual(['gate']);
+    }
+
+    // The CONTROL: a run filtered to another file runs that file only, so
+    // it does not reach the release guard and is not a gate job. This is
+    // the spelling `live-e2e.yml` uses, and it must not be forced to
+    // carry the tags.
+    const control = 'npx vitest run test/live.test.ts';
+    expect(runsReleaseGuardSuite(control), `${control} must not be read as a gate run`).toBe(false);
+    expect(gateJobs(['  live:', '    steps:', `      - run: ${control}`])).toEqual([]);
+  });
+
+  it('reads a fetch-depth written as a literal expression', () => {
+    // GitHub evaluates `${{ … }}` before the action reads the input, so
+    // `fetch-depth: ${{ 0 }}` asks for depth 0 exactly as `fetch-depth: 0`
+    // does. Reading the raw text failed a workflow that is correct — the
+    // guard was expression-blind in the unsafe direction, rejecting a
+    // legitimate spelling instead of reading it.
+    const expression = [
+      'jobs:',
+      '  quality:',
+      '    steps:',
+      '      - name: Check out',
+      '        uses: actions/checkout@abc123',
+      '        with:',
+      '          fetch-depth: ${{ 0 }}',
+    ].join('\n');
+    expect(checkoutFetchDepth(expression)).toBe('0');
+
+    // An expression that names something else cannot be read out of the
+    // workflow text, so it is reported as written rather than guessed at.
+    const named = expression.replace('${{ 0 }}', '${{ inputs.depth }}');
+    expect(checkoutFetchDepth(named)).toBe('${{ inputs.depth }}');
   });
 });
 
@@ -1624,4 +2206,118 @@ describe('the per-job gate guard — synthetic job snippets', () => {
     ]);
     expect(workflowGateConsumers(text)).toEqual([]);
   });
+});
+
+describe('the release guard — the packed package must carry what the program reads', () => {
+  it('runs in EVERY job that publishes a tarball', () => {
+    // The npm job is disabled today — its trusted-publishing variable does
+    // not exist — so the tarball people actually download is made by the
+    // GitHub release job. A guard in the disabled job guards nothing.
+    const release = readFileSync(join(WORKFLOWS_DIR, 'release.yml'), 'utf8');
+    const jobs = workflowJobs(release);
+    const githubRelease = jobs.find((job) => job.name === 'github-release');
+    expect(githubRelease?.lines.join('\n')).toContain('verify-packed.mjs');
+    const npmJob = jobs.find((job) => job.name === 'publish-npm');
+    expect(npmJob?.lines.join('\n')).toContain('verify-packed.mjs');
+  });
+
+  it('fails closed when the copy list changes shape', () => {
+    // The asset list is read from the copy script's own text. A change of
+    // shape — a re-quoted entry, a template literal — must STOP the check
+    // rather than quietly shrink it: a list whose targets and sources
+    // disagree has lost an entry, and a check that has lost an entry would
+    // pass a tarball that does not have it.
+    const guard = readFileSync(VERIFIER_PATH, 'utf8');
+    expect(guard).toMatch(/targets\.length !== sources/);
+    expect(guard).toMatch(/process\.exit\(1\)/);
+  });
+
+  it('measures a built package, not an unbuilt checkout', () => {
+    // The test suite runs before the build step in `npm run ci`, so the
+    // checkout has no `dist/` when the guard runs here. A guard that
+    // packed an unbuilt checkout would measure the working tree rather
+    // than the package, and would report every runtime file as missing.
+    const guard = readFileSync(VERIFIER_PATH, 'utf8');
+    expect(guard).toMatch(/'run', 'build'/);
+  });
+
+  it('the pack list still answers when it is reached through a symlink', () => {
+    // `import.meta.url` is the REAL path of the module and `argv[1]` is
+    // whatever the caller typed. Comparing the two without resolving them
+    // meant the script printed NOTHING through a symlink — and a caller
+    // read that as an empty package list.
+    const dir = mkdtempSync(join(tmpdir(), 'cfr-pack-link-'));
+    try {
+      const link = join(dir, 'pack-list.mjs');
+      symlinkSync(join(ROOT, 'scripts', 'pack-list.mjs'), link);
+      const out = execFileSync(process.execPath, [link, ROOT], { encoding: 'utf8' });
+      const paths = JSON.parse(out) as string[];
+      // The assertion is on paths the tarball carries WHETHER OR NOT the
+      // program has been built. `npm pack --dry-run --ignore-scripts` runs
+      // the `prepare` lifecycle script on npm 10 (which builds `dist/`) and
+      // skips it on npm 11 and 12 (which does not) — so asserting a `dist/`
+      // path here made this test answer differently on Node 22 and Node 24,
+      // and it failed on the Node 24 runner in CI. The BUILT package's
+      // contents are asserted by the guard test below, which builds before
+      // it packs.
+      //
+      // The regression this guards is an EMPTY list: the script printing
+      // nothing at all through a symlink.
+      expect(paths.length).toBeGreaterThan(0);
+      expect(paths).toContain('package.json');
+      expect(paths).toContain('README.md');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('reads the package list whichever shape npm printed it in', () => {
+    // `npm pack --json` is not one shape: npm 10 and 11 print an array of
+    // package records, npm 12 prints an object keyed by the package name
+    // (both measured). The payload also arrives with whatever a lifecycle
+    // script printed in front of it, because npm shares stdout with the
+    // scripts it runs — npm runs `prepare` during a pack (npm 10.9.9 does
+    // so even with --ignore-scripts; measured — npm 11 and 12 honour the
+    // flag). The reader must
+    // not depend on any of that.
+    const files = [{ path: 'dist/cli.js' }, { path: 'dist/titan/ui-client.js' }];
+    const expected = ['dist/cli.js', 'dist/titan/ui-client.js'];
+    const payloads = [
+      // npm 10 and 11: an array of package records.
+      JSON.stringify([{ name: 'cfr-free', files }]),
+      // npm 12: an object keyed by the package name.
+      JSON.stringify({ 'cfr-free': { name: 'cfr-free', files } }),
+      // The payload behind what a lifecycle script printed.
+      'copy-assets: src/titan/ui-client.js -> dist/titan/ui-client.js\n' +
+        JSON.stringify([{ name: 'cfr-free', files }]),
+    ];
+    for (const payload of payloads) {
+      expect(readPackedPaths(payload)).toEqual(expected);
+    }
+  });
+
+  it('passes on this repository, names the runtime assets, and measures a clean build', () => {
+    // The guard is run, not only read: a guard that always failed would
+    // satisfy every assertion above.
+    //
+    // The timeout is raised because the guard builds before it packs: the
+    // build is a compiler run, not an instant.
+    const stale = join(ROOT, 'dist', 'stale-artifact.js');
+    mkdirSync(join(ROOT, 'dist'), { recursive: true });
+    writeFileSync(stale, '// left over from a build that no longer makes it\n');
+    try {
+      const out = execFileSync(process.execPath, [VERIFIER_PATH], { encoding: 'utf8' });
+      expect(out).toContain('dist/titan/ui-client.js');
+      expect(out).toContain('dist/titan/ui-client.css');
+      // The whole import CLOSURE, not only the entry point's own imports:
+      // a tarball with the entry point but not the module two levels down
+      // would fail at runtime, in a stranger's terminal.
+      expect(out).toContain('dist/core/store.js');
+      // And a clean build: the build does not clean `dist/`, so a file it
+      // no longer produces would survive it — and be packed.
+      expect(existsSync(stale), 'the guard must not measure a stale build').toBe(false);
+    } finally {
+      rmSync(stale, { force: true });
+    }
+  }, 120_000);
 });
