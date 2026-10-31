@@ -10,6 +10,7 @@ import { formatIssueDiff, runDiffCommand } from './commands/diff.js';
 import { formatSectionRedline, runRedlineCommand } from './commands/redline.js';
 import { formatHistoricalSection, runHistoricalCommand } from './commands/historical.js';
 import { formatSearchResults, runSearchCommand } from './commands/search.js';
+import { SEARCH_QUERY_MAX_LENGTH, SEARCH_QUERY_MIN_LENGTH, ServiceError } from './core/service.js';
 import { CommandError, EXIT } from './exit-codes.js';
 import { createLogger, type Logger } from './logger.js';
 import { VERSION } from './version.js';
@@ -162,13 +163,27 @@ function parseHistoricalArgs(rest: readonly string[]): ParsedCommand {
   return { command: 'historical', atDate, citation };
 }
 
-/** `search <query…>` — the words are the query; a dash-prefixed word is refused. */
+/**
+ * `search <query…>` — the words are the query; a dash-prefixed word is
+ * refused.
+ *
+ * The query is checked HERE, before the index is opened. The service
+ * enforces the same rule, but it runs after `ensureIndex`, which may pull
+ * a 2-3 MB sync — a rejected query must not cost the user a download.
+ */
 function parseSearchArgs(rest: readonly string[]): ParsedCommand {
   const dashed = rest.find((arg) => arg.startsWith('-'));
   if (dashed !== undefined) throw new CliError(`unknown option for search: ${dashed}`);
   const query = rest.join(' ').trim();
   if (query.length === 0)
     throw new CliError('search requires a query (e.g. `cfr-free search PTSD`)');
+  if (query.length < SEARCH_QUERY_MIN_LENGTH)
+    throw new CliError(
+      `the search query needs at least ${SEARCH_QUERY_MIN_LENGTH} characters ` +
+        '(e.g. `cfr-free search PTSD`)',
+    );
+  if (query.length > SEARCH_QUERY_MAX_LENGTH)
+    throw new CliError(`the search query may be at most ${SEARCH_QUERY_MAX_LENGTH} characters`);
   return { command: 'search', query };
 }
 
@@ -232,6 +247,19 @@ async function runProvisionRead(
     return 0;
   }
   return EXIT.ERROR;
+}
+
+/**
+ * The exit code a failure maps to.
+ *
+ * An invalid input is a usage mistake, not a service failure. The README's
+ * exit-code table gives code 2 to usage errors, and a script that retries
+ * on 1 would otherwise retry a typo forever.
+ */
+function exitCodeFor(error: unknown): number {
+  if (error instanceof CommandError) return error.exitCode;
+  if (error instanceof ServiceError && error.code === 'invalid_input') return EXIT.USAGE;
+  return error instanceof ConfigError ? EXIT.USAGE : EXIT.ERROR;
 }
 
 /** CLI entry point. Returns the process exit code. */
@@ -301,8 +329,7 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     io.err(`cfr-free: ${message}\n`);
-    if (error instanceof CommandError) return error.exitCode;
-    return error instanceof ConfigError ? EXIT.USAGE : EXIT.ERROR;
+    return exitCodeFor(error);
   }
 }
 

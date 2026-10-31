@@ -1,5 +1,13 @@
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -34,12 +42,13 @@ import { describe, expect, it } from 'vitest';
  * instead of in a stranger's terminal.
  *
  * The file list is read from the repository root, so this test asserts on
- * the TEXT of seven other files (`package.json`, `src/cli.ts`,
- * `scripts/prepare.mjs`, `Dockerfile`, `ci.yml`, `release.yml`,
- * `live-e2e.yml`) and on the repository's TAG HISTORY (`git tag`, `git show
- * <tag>:package.json`). That is deliberate: each assertion below is about
- * an INTER-FILE contract that no single-file test can see, and each names
- * the file it reads.
+ * the TEXT of eleven other files (`package.json`, `src/cli.ts`,
+ * `scripts/prepare.mjs`, `scripts/copy-assets.mjs`, `src/titan/ui.ts`,
+ * `src/titan/ui-client.js`, `src/titan/ui-client.css`, `Dockerfile`,
+ * `ci.yml`, `release.yml`, `live-e2e.yml`) and on the repository's TAG
+ * HISTORY (`git tag`, `git show <tag>:package.json`). That is deliberate:
+ * each assertion below is about an INTER-FILE contract that no single-file
+ * test can see, and each names the file it reads.
  */
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -379,6 +388,25 @@ describe('the prepare script', () => {
     const manifest = readManifest();
     expect(manifest.scripts?.['build']).toContain('tsconfig.build.json');
     expect(manifest.devDependencies?.['typescript']).toBe('5.9.3');
+  });
+
+  it('keeps stdout clean, so npm can print a machine-readable payload', () => {
+    // npm's stdout is shared with the output of any lifecycle script it
+    // runs: `npm pack --json` writes its payload there, and npm runs
+    // `prepare` during a pack (npm 10.9.9 does so even with
+    // --ignore-scripts; measured — npm 11 and 12 honour the flag), so a line printed here corrupts that
+    // payload — and the release guard cannot tell a broken package from a
+    // broken parser.
+    //
+    // The production path is the one that prints: a production install
+    // skips the build, so it runs in a moment and without a compiler.
+    const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'prepare.mjs')], {
+      env: { ...process.env, npm_config_omit: 'dev' },
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout, 'the prepare script must not write to stdout').toBe('');
+    expect(result.stderr).toContain('production install');
   });
 });
 
@@ -766,6 +794,108 @@ describe('the release workflow', () => {
   });
 });
 
+describe('the build copies the UI assets', () => {
+  it('copies every asset the UI module reads, into dist/', () => {
+    // The UI's page script and stylesheet are real files, so that eslint
+    // and prettier can see them — but `tsc` compiles TypeScript and copies
+    // nothing else. The build copies them into dist/ itself. A package
+    // built without them would serve a 404 for /ui.js, and a package that
+    // shipped the asset in src/ would serve the wrong path at runtime.
+    const build = readManifest().scripts?.['build'] ?? '';
+    expect(build, 'the build must run the asset copy').toContain('copy-assets.mjs');
+
+    const uiModule = readRepoFile('src/titan/ui.ts');
+    // The UI module must read the browser script from a FILE. If the script
+    // were re-inlined into this module as a template literal while
+    // `src/titan/ui-client.js` stayed on disk, the read below would stop
+    // naming the script, the copy-list loop would no longer cover it, and
+    // the linter would keep checking the clean file on disk while the
+    // browser got the inlined one — the whole gate green over a defective
+    // script. The file must still be the source of the served bytes.
+    expect(uiModule, 'the UI module must read the browser script from a file').toContain(
+      "readAsset('ui-client.js')",
+    );
+    const read = [...uiModule.matchAll(/readAsset\('([^']+)'\)/g)].map((match) => match[1] ?? '');
+    expect(
+      read.length,
+      'no asset read by the UI module — this guard passes on nothing',
+    ).toBeGreaterThan(0);
+
+    const copyScript = readRepoFile('scripts/copy-assets.mjs');
+    const copies = [...copyScript.matchAll(/from: '([^']+)', to: '([^']+)'/g)];
+    expect(copies.length, 'the copy script lists no asset').toBeGreaterThan(0);
+    for (const [, from = '', to = ''] of copies) {
+      expect(to, `${from} must land in dist/, beside the module that reads it`).toMatch(/^dist\//);
+      // Exactly beside the module that reads it: `src/titan/x` is read by
+      // `src/titan/ui.ts`, so the built copy is `dist/titan/x`. A target that
+      // merely STARTS with `dist/` — `dist/titan/x.bak`, `dist/x` — would
+      // leave the server reading a file that is not there.
+      expect(to, `${from} must land beside the module that reads it`).toBe(
+        from.replace(/^src\//, 'dist/'),
+      );
+    }
+
+    const sources = copies.map(([, from]) => from);
+    for (const asset of read) {
+      expect(
+        sources,
+        `src/titan/${asset} is read by the UI module but the build does not copy it`,
+      ).toContain(`src/titan/${asset}`);
+    }
+  });
+
+  it('ships the asset copy script, so a git install can build', () => {
+    // `prepare` runs the build for a git install, and the build copies the
+    // assets. A tarball that carried `prepare` without the copy script
+    // would fail to build wherever npm runs it.
+    const files = readManifest().files ?? [];
+    expect(files).toContain('scripts/copy-assets.mjs');
+  });
+
+  it('actually copies the assets where the module that reads them will look', () => {
+    // The assertions above read the copy script's TEXT. This one RUNS it, so
+    // a target path that is wrong in a way the text cannot show — a
+    // directory that is never created, a truncated copy — fails here rather
+    // than as a 404 on /ui.js in the operator's browser.
+    //
+    // The script resolves the repository root from its own path, so a copy
+    // of it under <tmp>/scripts/ copies <tmp>/src/... to <tmp>/dist/....
+    const dir = mkdtempSync(path.join(tmpdir(), 'cfr-assets-'));
+    try {
+      mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+      mkdirSync(path.join(dir, 'src', 'titan'), { recursive: true });
+      copyFileSync(
+        path.join(ROOT, 'scripts', 'copy-assets.mjs'),
+        path.join(dir, 'scripts', 'copy-assets.mjs'),
+      );
+      for (const asset of ['ui-client.js', 'ui-client.css']) {
+        copyFileSync(path.join(ROOT, 'src', 'titan', asset), path.join(dir, 'src', 'titan', asset));
+      }
+
+      const out = execFileSync(process.execPath, [path.join(dir, 'scripts', 'copy-assets.mjs')], {
+        cwd: dir,
+        encoding: 'utf8',
+      });
+      // Nothing on stdout. npm's stdout is shared with the output of any
+      // lifecycle script it runs: `npm pack --json` writes its payload
+      // there, and npm runs `prepare` during a pack (npm 10.9.9 does
+      // so even with --ignore-scripts; measured — npm 11 and 12 honour the flag), so a line
+      // printed here corrupts that payload — and the release guard cannot
+      // tell a broken package from a broken parser.
+      expect(out, 'the copy script must not write to stdout').toBe('');
+
+      for (const asset of ['ui-client.js', 'ui-client.css']) {
+        const copied = path.join(dir, 'dist', 'titan', asset);
+        expect(existsSync(copied), `${asset} was not copied into dist/titan/`).toBe(true);
+        // Byte for byte: a truncated or transformed copy is not the asset.
+        expect(readFileSync(copied)).toEqual(readFileSync(path.join(ROOT, 'src', 'titan', asset)));
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('the release guard', () => {
   it('reads only strict release tags out of a tag list', () => {
     // A tag that is not a release version must not crash the suite: the
@@ -968,13 +1098,15 @@ describe('the packed artifact', () => {
       mkdirSync(path.join(staging, 'scripts'), { recursive: true });
       writeFileSync(path.join(staging, 'scripts', 'prepare.mjs'), '// stub\n');
 
-      const output = execFileSync('npm', ['pack', '--dry-run', '--ignore-scripts', '--json'], {
-        cwd: staging,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
-      const parsed = JSON.parse(output) as Array<{ files?: Array<{ path: string }> }>;
-      const paths = (parsed[0]?.files ?? []).map((file) => file.path);
+      const output = execFileSync(
+        process.execPath,
+        [path.join(ROOT, 'scripts', 'pack-list.mjs'), staging],
+        {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        },
+      );
+      const paths = JSON.parse(output) as string[];
       expect(paths).toContain('dist/cli.js');
       expect(paths).toContain('dist/config.js');
       expect(paths).toContain('scripts/prepare.mjs');
@@ -984,7 +1116,7 @@ describe('the packed artifact', () => {
     } finally {
       rmSync(staging, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 });
 
 /**

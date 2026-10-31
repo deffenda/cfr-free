@@ -42,8 +42,17 @@ export class ServiceError extends Error {
   }
 }
 
+/**
+ * The query length the index accepts. Exported so the CLI can refuse a
+ * query the service would reject BEFORE it opens the index: a rejected
+ * query must not cost a 2-3 MB sync (a rejected input is the user's
+ * mistake, and it must not be billed to the network).
+ */
+export const SEARCH_QUERY_MIN_LENGTH = 3;
+export const SEARCH_QUERY_MAX_LENGTH = 200;
+
 const searchInputSchema = z.object({
-  query: z.string().trim().min(3).max(200),
+  query: z.string().trim().min(SEARCH_QUERY_MIN_LENGTH).max(SEARCH_QUERY_MAX_LENGTH),
   page: z.number().int().min(1).max(10_000).default(1),
   perPage: z.number().int().min(1).max(20).default(10),
   part: z
@@ -256,10 +265,47 @@ function collectPartTitles(node: StructureNode, into: Map<string, string>): void
   for (const child of node.children) collectPartTitles(child, into);
 }
 
-function toServiceError(error: unknown): never {
+/**
+ * Plain-language guidance for the fields `search` accepts.
+ *
+ * The validation library's own phrasing — "Too small: expected string to
+ * have >=3 characters" — is developer-facing. The people reading this tool
+ * are claims practitioners, so a rejected input says what to type instead.
+ */
+const SEARCH_HINTS: Readonly<Record<string, string>> = {
+  query: `the query needs at least ${SEARCH_QUERY_MIN_LENGTH} characters and at most ${SEARCH_QUERY_MAX_LENGTH}`,
+  page: 'the page number must be between 1 and 10000',
+  perPage: 'the number of results per page must be between 1 and 20',
+  part: 'the part must be a number such as 4',
+  kind: 'the kind must be `section` or `appendix`',
+  chapter: 'the chapter must be a Roman numeral such as I, II or IV',
+};
+
+/**
+ * The same, for the fields `browse` accepts. Separate from the search
+ * guidance because the two schemas disagree about `chapter`: browse takes
+ * the hierarchy identifier as it is printed ("I"), search takes a Roman
+ * numeral.
+ */
+const BROWSE_HINTS: Readonly<Record<string, string>> = {
+  chapter: 'the chapter must be the identifier the hierarchy prints, such as I',
+  part: 'the part must be the identifier the hierarchy prints, such as 4',
+  subpart: 'the subpart must be the identifier the hierarchy prints, such as B',
+  subjgrp: 'the subject group must be the identifier the hierarchy prints',
+};
+
+/** Guidance for the citation a section read accepts. */
+const CITATION_HINTS: Readonly<Record<string, string>> = {
+  input: 'the citation must be a provision number such as 4.130',
+};
+
+function toServiceError(error: unknown, hints: Readonly<Record<string, string>>): never {
   if (error instanceof z.ZodError) {
     const details = error.issues
-      .map((issue) => `${issue.path.join('.') || 'input'}: ${issue.message}`)
+      .map((issue) => {
+        const field = issue.path.join('.') || 'input';
+        return hints[field] ?? `${field}: ${issue.message}`;
+      })
       .join('; ');
     throw new ServiceError(`invalid input: ${details}`, 'invalid_input');
   }
@@ -369,7 +415,7 @@ export class CFRService {
 
   search(input: SearchInput): SearchResponse {
     const parsed = searchInputSchema.safeParse(input);
-    if (!parsed.success) toServiceError(parsed.error);
+    if (!parsed.success) toServiceError(parsed.error, SEARCH_HINTS);
     const { query, page, perPage, part, kind, chapter } = parsed.data;
     const outcome = this.store.search({ query, page, perPage, part, kind, chapter });
     const direct = this.directHit(query, { part, kind, chapter });
@@ -501,7 +547,7 @@ export class CFRService {
   /** Fetch one section by citation (`4.125`, `§ 4.125`, `38 CFR 4.125`, …). */
   getSection(citationInput: string): SectionDetail {
     const parsed = citationInputSchema.safeParse(citationInput);
-    if (!parsed.success) toServiceError(parsed.error);
+    if (!parsed.success) toServiceError(parsed.error, CITATION_HINTS);
     const normalized = normalizeCitation(parsed.data);
     if (normalized === null) {
       throw new ServiceError(
@@ -542,7 +588,7 @@ export class CFRService {
   /** Navigate the structure tree; empty query returns the chapters. */
   browse(input: BrowseInput = {}): BrowseResult {
     const parsed = browseInputSchema.safeParse(input);
-    if (!parsed.success) toServiceError(parsed.error);
+    if (!parsed.success) toServiceError(parsed.error, BROWSE_HINTS);
     if (parsed.data.subpart !== undefined && parsed.data.part === undefined) {
       throw new ServiceError("subpart navigation requires 'part'", 'invalid_input');
     }
