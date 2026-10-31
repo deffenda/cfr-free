@@ -214,6 +214,47 @@ describe('CFRService.search', () => {
     });
   });
 
+  it('explains a rejected input in plain language', () => {
+    // The validation library's own phrasing — "Too small: expected string
+    // to have >=3 characters", "Invalid string: must match pattern" — is
+    // developer-facing. The people reading this tool are claims
+    // practitioners, so a rejected input says what to type instead.
+    withService((service) => {
+      expect(() => service.search({ query: 'ab' })).toThrow(
+        /invalid input: the query needs at least 3 characters/,
+      );
+      expect(() => service.search({ query: 'mental disorder', chapter: '4' })).toThrow(
+        /invalid input: the chapter must be a Roman numeral such as I, II or IV/,
+      );
+      expect(() => service.search({ query: 'mental disorder', kind: 'policy' as never })).toThrow(
+        /invalid input: the kind must be `section` or `appendix`/,
+      );
+    });
+  });
+
+  it('names the rule that was broken, not another one', () => {
+    // A hint must answer the question the request actually asked. `page`
+    // can be the wrong type (`?page=1.5` reaches the schema as 1.5) or out
+    // of range (`?page=0`), and a hint that always states the range
+    // answers a question the request did not ask.
+    withService((service) => {
+      expect(() => service.search({ query: 'mental disorder', page: 1.5 })).toThrow(
+        /invalid input: the page number must be a whole number/,
+      );
+      expect(() => service.search({ query: 'mental disorder', page: 0 })).toThrow(
+        /invalid input: the page number starts at 1/,
+      );
+      expect(() => service.search({ query: 'mental disorder', page: 99999 })).toThrow(
+        /invalid input: the page number may be at most 10000/,
+      );
+      // The subject group is the eCFR node id, not a label the hierarchy
+      // prints.
+      expect(() => service.browse({ subjgrp: 'x'.repeat(41) })).toThrow(
+        /invalid input: the subject group may be at most 40 characters/,
+      );
+    });
+  });
+
   it('constrains ranked results by kind and chapter', () => {
     withService((service) => {
       const appendixOnly = service.search({ query: 'rating schedule', kind: 'appendix' });
@@ -1191,12 +1232,15 @@ describe('CFRService.diffBetween (diff facade)', () => {
     }
   });
 
-  it('fails closed with a mapped invalid_input when no eCFR client was injected', async () => {
+  it('fails closed with a mapped unavailable when no eCFR client was injected', async () => {
     const temp = openTempStore();
     try {
       // Plain 2-arg construction (tests, index readers): the facade must not
       // reach into an undefined client — it throws a clean ServiceError the
       // HTTP layer maps through statusFor instead of crashing the handler.
+      // The code is `unavailable`, NOT `invalid_input`: the fault is the
+      // deployment's (no eCFR client was wired in), not the reader's, so it
+      // must not be reported as a usage error.
       const service = new CFRService(temp.store, 7);
       const error = await service.diffBetween(FROM_DATE, TO_DATE).then(
         () => {
@@ -1205,7 +1249,7 @@ describe('CFRService.diffBetween (diff facade)', () => {
         (thrown: unknown) => thrown,
       );
       expect(error).toBeInstanceOf(ServiceError);
-      expect((error as ServiceError).code).toBe('invalid_input');
+      expect((error as ServiceError).code).toBe('unavailable');
       expect((error as ServiceError).message).toBe('diff unavailable — no eCFR client injected');
     } finally {
       temp.cleanup();
