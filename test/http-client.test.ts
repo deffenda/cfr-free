@@ -73,6 +73,52 @@ describe('HttpClient', () => {
     }
   });
 
+  it('says an answer that was not JSON was an answer, not a dead network', async () => {
+    // eCFR answered 200 and the body was a page of HTML — a captive
+    // portal, a proxy, a CDN error page. The upstream spoke, so the failure
+    // must not read as a transport failure: the reader's router is fine.
+    // The status travels with it, because "HTTP 200" and "no status at all"
+    // mean different things to whoever reads the log.
+    let calls = 0;
+    const client = makeClient(async () => {
+      calls += 1;
+      return okResponse('<html><body>Sign in to continue</body></html>');
+    });
+    try {
+      await client.getJson(URL_UNDER_TEST, (raw) => raw);
+      expect.unreachable('the body is not JSON, so getJson must reject');
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpError);
+      if (error instanceof HttpError) {
+        expect(error.kind).toBe('parse');
+        expect(error.status).toBe(200);
+        expect(error.message).toContain('invalid JSON response');
+      }
+    }
+    // The fetch itself succeeded, so the body is not fetched again: the
+    // failure is in what came back, and the same answer would come back.
+    expect(calls).toBe(1);
+  });
+
+  it('says a body over the cap was too large, not a success', async () => {
+    // The cap carries the status of the answer it came with, and a status
+    // alone would report "HTTP 200" — which reads like a success report.
+    const client = makeClient(async () => okResponse('body', { 'content-length': '99' }), {
+      maxBytes: 10,
+    });
+    try {
+      await client.getText(URL_UNDER_TEST);
+      expect.unreachable('the body is over the cap, so getText must reject');
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpError);
+      if (error instanceof HttpError) {
+        expect(error.kind).toBe('size');
+        expect(error.status).toBe(200);
+        expect(error.message).toContain('exceeds 10 bytes');
+      }
+    }
+  });
+
   it('retries network-level TypeErrors', async () => {
     let calls = 0;
     const client = makeClient(async () => {
