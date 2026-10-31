@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { historicalSection, ARCHIVE_FLOOR } from '../src/core/historical.js';
+import { ARCHIVE_FLOOR } from '../src/core/archive.js';
+import { historicalSection } from '../src/core/historical.js';
 import { ServiceError } from '../src/core/service.js';
 import { createTestLogger } from './helpers.js';
 import type { EcfrApi } from '../src/core/ecfr.js';
@@ -88,11 +89,15 @@ describe('historicalSection (M2(c) point-in-time read)', () => {
     expect(requested).toEqual([]);
   });
 
-  it('maps a date outside eCFR archive to a clean not_found', async () => {
+  it('maps a date outside eCFR archive to a usage error, not a service failure', async () => {
+    // A date before the archive is a bad ARGUMENT: the CLI maps
+    // `invalid_input` to exit 2 (usage) and `not_found` to exit 1 (a
+    // service failure), and a script that retries on 1 would retry a date
+    // eCFR will never serve.
     const deps = { ecfr: stubEcfr({}), logger: createTestLogger() };
     const error = await historicalSection(deps, '2015-01-01', '4.130').catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ServiceError);
-    expect((error as ServiceError).code).toBe('not_found');
+    expect((error as ServiceError).code).toBe('invalid_input');
     expect((error as Error).message).toContain(ARCHIVE_FLOOR);
   });
 

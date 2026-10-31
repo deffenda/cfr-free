@@ -1,8 +1,8 @@
 import type { AppConfig } from '../config.js';
 import type { Logger } from '../logger.js';
 import { Store } from '../core/store.js';
-import { syncIndex, type SyncReport } from '../core/sync.js';
-import { createEcfrApi } from './ensure-index.js';
+import type { SyncReport } from '../core/sync.js';
+import { createEcfrApi, syncWithGuidance } from './ensure-index.js';
 
 /** `cfr-free sync` — force a full rebuild of the local index. */
 export async function runSyncCommand(config: AppConfig, logger: Logger): Promise<SyncReport> {
@@ -12,7 +12,10 @@ export async function runSyncCommand(config: AppConfig, logger: Logger): Promise
   // very file it exists to rebuild. Downgrades still fail inside open().
   const store = Store.open(config.indexPath, { allowSchemaUpgrade: true });
   try {
-    return await syncIndex({ ecfr: createEcfrApi(), store, logger });
+    // No next step: the reader IS `cfr-free sync`, so telling them to run
+    // `cfr-free sync` again would be circular. The advice that comes with
+    // the failure says what to do instead.
+    return await syncWithGuidance({ ecfr: createEcfrApi(), store, logger }, logger, '');
   } finally {
     store.close();
   }

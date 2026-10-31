@@ -1,0 +1,199 @@
+:root {
+  color-scheme: light dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0 auto;
+  padding: 1rem;
+  max-width: 52rem;
+  font:
+    16px/1.5 system-ui,
+    sans-serif;
+  color: #1b1b1b;
+  background: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    color: #ededed;
+    background: #171717;
+  }
+
+  a {
+    color: #8ab4f8;
+  }
+
+  .badge {
+    background: #1f3a5f;
+  }
+
+  mark {
+    color: #1b1b1b;
+  }
+}
+
+a {
+  color: #0b57d0;
+}
+
+.site-header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.4rem;
+}
+
+.site-header h1 a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.site-tabs {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: end;
+  margin-bottom: 1rem;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.85rem;
+}
+
+input,
+select,
+button {
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.hits {
+  padding-left: 0;
+  list-style: none;
+}
+
+.hit {
+  margin-bottom: 1.25rem;
+}
+
+.hit h3 {
+  margin: 0 0 0.15rem;
+  font-size: 1.05rem;
+}
+
+.hit-meta {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+}
+
+.hit-snippet {
+  margin: 0;
+}
+
+.badge {
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.3rem;
+  background: #e2edfb;
+  font-size: 0.75rem;
+}
+
+mark {
+  background: #ffe08a;
+  color: #1b1b1b;
+}
+
+.breadcrumb {
+  margin: 0.15rem 0;
+  font-size: 0.85rem;
+}
+
+blockquote {
+  margin: 1rem 0;
+  padding: 0.5rem 1rem;
+  border-left: 4px solid #b9b9b9;
+  white-space: pre-wrap;
+}
+
+#citation-block {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0.5rem 0 1rem;
+  padding: 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+}
+
+.pager-info {
+  margin: 0.5rem 0;
+}
+
+/*
+ * A skip link: the first thing in the tab order, so a keyboard user can
+ * reach the content without walking the header on every view.
+ *
+ * It is hidden until it is focused — a permanently visible "skip to
+ * content" above every page is noise for everyone who did not ask for it.
+ */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  padding: 0.5rem 0.75rem;
+  background: #ffffff;
+  color: #0b57d0;
+  border: 2px solid #0b57d0;
+  z-index: 10;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
+/*
+ * Present to a screen reader, absent to the eye: the view announcer
+ * exists so the change of view is read aloud, not to be looked at twice.
+ *
+ * The view HEADINGS are visible: they are where the keyboard lands on a
+ * route change, and a focus ring on a clipped element cannot be seen. A
+ * focus the reader cannot see is no focus at all.
+ */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The heading a route change moves the keyboard to. */
+h2[tabindex='-1']:focus {
+  outline: 2px solid #0b57d0;
+  outline-offset: 2px;
+}
