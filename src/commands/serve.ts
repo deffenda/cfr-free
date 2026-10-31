@@ -34,10 +34,14 @@ function listenExitCode(error: unknown): number {
 export async function runServeCommand(config: AppConfig, logger: Logger): Promise<number> {
   const store = Store.open(config.indexPath);
   try {
-    const freshness = await ensureIndex(store, config, logger);
-    // The diff facade and /api/v1/diff need a live client; createEcfrApi() is
-    // the same stateless factory serve already uses for the refresh scheduler.
-    const service = new CFRService(store, config.maxAgeDays, createEcfrApi(), logger);
+    // ONE eCFR client serves the whole process — the startup sync, the
+    // diff facade, /api/v1/diff and the background refresh scheduler all
+    // use it — so the document memo and the upstream-fetch semaphore bound
+    // THIS process, not each caller separately. The diff facade and
+    // /api/v1/diff need a live client; it is the same one.
+    const ecfr = createEcfrApi();
+    const freshness = await ensureIndex(store, config, logger, { createEcfr: () => ecfr });
+    const service = new CFRService(store, config.maxAgeDays, ecfr, logger);
 
     // Disk capacity for /health and /metrics (SPEC §13 #22): probed once at
     // boot and re-probed after every refresh attempt — success or failure,
@@ -88,7 +92,7 @@ export async function runServeCommand(config: AppConfig, logger: Logger): Promis
             logger,
             refresh: async () => {
               try {
-                await syncIndex({ ecfr: createEcfrApi(), store, logger });
+                await syncIndex({ ecfr, store, logger });
               } finally {
                 // Re-stat the volume regardless of the sync outcome: capacity
                 // visibility must not hinge on sync success. probeDisk never

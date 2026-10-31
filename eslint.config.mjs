@@ -3,6 +3,31 @@ import globals from 'globals';
 import security from 'eslint-plugin-security';
 import tseslint from 'typescript-eslint';
 
+/**
+ * The rules that catch DEFECTS rather than style. They apply to the
+ * TypeScript sources and to the browser script alike: `src/titan/ui-client.js` is
+ * a real file so that the gate can see it (it used to be a `String.raw`
+ * template literal inside a TypeScript module, where 840 lines of browser
+ * JavaScript reached no linter at all).
+ */
+const CORRECTNESS_RULES = {
+  // General correctness
+  'no-console': ['error', { allow: ['error', 'warn'] }],
+  eqeqeq: ['error', 'always'],
+  complexity: ['error', 15],
+  'no-eval': 'error',
+  'no-implied-eval': 'error',
+  'no-new-func': 'error',
+  'no-var': 'error',
+  'prefer-const': 'error',
+  'no-implicit-coercion': ['error', { boolean: false }],
+  // Security rules (local pre-flight)
+  'security/detect-unsafe-regex': 'error',
+  'security/detect-child-process': 'error',
+  'security/detect-eval-with-expression': 'error',
+  'security/detect-non-literal-require': 'error',
+};
+
 export default tseslint.config(
   {
     ignores: ['dist/**', 'coverage/**', 'node_modules/**', 'data/**'],
@@ -20,29 +45,24 @@ export default tseslint.config(
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
-      // General correctness
-      'no-console': ['error', { allow: ['error', 'warn'] }],
-      eqeqeq: ['error', 'always'],
-      complexity: ['error', 15],
-      'no-eval': 'error',
-      'no-implied-eval': 'error',
-      'no-new-func': 'error',
-      'no-var': 'error',
-      'prefer-const': 'error',
-      'no-implicit-coercion': ['error', { boolean: false }],
-      // Security rules (local pre-flight)
-      'security/detect-unsafe-regex': 'error',
-      'security/detect-child-process': 'error',
-      'security/detect-eval-with-expression': 'error',
-      'security/detect-non-literal-fs-filename': 'warn',
-      'security/detect-non-literal-require': 'error',
+      ...CORRECTNESS_RULES,
       // Redundant with our local quality + review gates:
+      'security/detect-non-literal-fs-filename': 'warn',
       'security/detect-object-injection': 'off',
       'security/detect-possible-timing-attacks': 'off',
     },
   },
   {
-    files: ['**/*.mjs', '**/*.js'],
+    // Node's globals, for the repository's own tooling.
+    //
+    // NOT `**/*.js`: the browser script is a `.js` file too, and flat config
+    // MERGES `languageOptions.globals` across every matching block rather
+    // than replacing them. A `**/*.js` block would therefore leave `process`,
+    // `require`, `module` and `Buffer` DEFINED in the browser script — where
+    // they throw a ReferenceError at runtime, in the operator's browser,
+    // while the gate says nothing. `scripts/**/*.js` covers the repo's own
+    // scripts; the browser script gets its own block below.
+    files: ['**/*.mjs', 'scripts/**/*.js'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'module',
@@ -51,6 +71,22 @@ export default tseslint.config(
     rules: {
       // Developer tooling prints reports to stdout by design.
       'no-console': 'off',
+    },
+  },
+  {
+    // The browser script: a classic script (not a module) that runs in the
+    // operator's browser, not in Node. It gets the same correctness rules
+    // as the server code, with the browser's globals.
+    files: ['src/titan/ui-client.js'],
+    plugins: { security },
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'script',
+      globals: { ...globals.browser },
+    },
+    rules: {
+      ...CORRECTNESS_RULES,
+      'security/detect-non-literal-fs-filename': 'off',
     },
   },
   {
