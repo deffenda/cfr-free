@@ -1,7 +1,9 @@
 import { z } from 'zod';
+import { ServiceError } from './errors.js';
 import { normalizeCitation } from './citations.js';
+import { datedSourceUrlFor, sourceUrlFor } from './urls.js';
 import { extractReferences } from './references.js';
-import type { SyncChanges } from './changes.js';
+import { syncChangesSchema, type SyncChanges } from './changes.js';
 import { diffIssues, type IssueDiff } from './diff.js';
 import { redlineSection, type SectionRedline } from './redline.js';
 import type { EcfrApi } from './ecfr.js';
@@ -29,21 +31,17 @@ import {
  * validation happens here so both surfaces behave identically.
  */
 
-export type ServiceErrorCode = 'invalid_input' | 'not_found';
-
-/** Domain error carrying a machine-readable code and client-safe message. */
-export class ServiceError extends Error {
-  override readonly name = 'ServiceError';
-  readonly code: ServiceErrorCode;
-
-  constructor(message: string, code: ServiceErrorCode) {
-    super(message);
-    this.code = code;
-  }
-}
+/**
+ * The query length the index accepts. Exported so the CLI can refuse a
+ * query the service would reject BEFORE it opens the index: a rejected
+ * query must not cost a 2-3 MB sync (a rejected input is the user's
+ * mistake, and it must not be billed to the network).
+ */
+export const SEARCH_QUERY_MIN_LENGTH = 3;
+export const SEARCH_QUERY_MAX_LENGTH = 200;
 
 const searchInputSchema = z.object({
-  query: z.string().trim().min(3).max(200),
+  query: z.string().trim().min(SEARCH_QUERY_MIN_LENGTH).max(SEARCH_QUERY_MAX_LENGTH),
   page: z.number().int().min(1).max(10_000).default(1),
   perPage: z.number().int().min(1).max(20).default(10),
   part: z
@@ -256,22 +254,113 @@ function collectPartTitles(node: StructureNode, into: Map<string, string>): void
   for (const child of node.children) collectPartTitles(child, into);
 }
 
-function toServiceError(error: unknown): never {
+/**
+ * Plain-language guidance for a rejected input, keyed by the field AND by
+ * the rule that was broken.
+ *
+ * The validation library's own phrasing — "Too small: expected string to
+ * have >=3 characters" — is developer-facing. The people reading this tool
+ * are claims practitioners, so a rejected input says what to type instead.
+ *
+ * The rule matters as much as the field. `page` can be the wrong type
+ * (`?page=1.5`) or out of range (`?page=0`), and a hint that always
+ * states the range answers a question the request did not ask. Each entry
+ * therefore names the rule it explains, and an input that breaks a rule
+ * with no entry keeps the library's own wording.
+ */
+type Hints = Readonly<Record<string, Readonly<Record<string, string>>>>;
+
+const SEARCH_HINTS: Hints = {
+  query: {
+    too_small: `the query needs at least ${SEARCH_QUERY_MIN_LENGTH} characters`,
+    too_big: `the query may be at most ${SEARCH_QUERY_MAX_LENGTH} characters`,
+  },
+  page: {
+    invalid_type: 'the page number must be a whole number',
+    too_small: 'the page number starts at 1',
+    too_big: 'the page number may be at most 10000',
+  },
+  perPage: {
+    invalid_type: 'the number of results per page must be a whole number',
+    too_small: 'the number of results per page starts at 1',
+    too_big: 'the number of results per page may be at most 20',
+  },
+  part: { invalid_format: 'the part must be a number such as 4' },
+  kind: { invalid_value: 'the kind must be `section` or `appendix`' },
+  chapter: {
+    too_small: 'the chapter must be at least one character',
+    too_big: 'the chapter may be at most 8 characters',
+    invalid_format: 'the chapter must be a Roman numeral such as I, II or IV',
+  },
+};
+
+/**
+ * The same, for the fields `browse` accepts. Separate from the search
+ * guidance because the two schemas differ: search's `chapter` must be a
+ * Roman numeral of at most 8 characters, while browse's is the identifier
+ * the hierarchy prints, capped only by length.
+ */
+const BROWSE_HINTS: Hints = {
+  chapter: {
+    too_small: 'the chapter must be at least one character',
+    too_big: 'the chapter may be at most 20 characters — the hierarchy prints it as I or II',
+  },
+  part: {
+    too_small: 'the part must be at least one character',
+    too_big: 'the part may be at most 20 characters — the hierarchy prints it as 4',
+  },
+  subpart: {
+    too_small: 'the subpart must be at least one character',
+    too_big: 'the subpart may be at most 20 characters — the hierarchy prints it as B',
+  },
+  subjgrp: {
+    too_small: 'the subject group must be at least one character',
+    too_big:
+      'the subject group may be at most 40 characters — it is the eCFR node id, such as ECFRd158704dcab040e',
+  },
+};
+
+/**
+ * Guidance for the citation a section read accepts. The schema caps its
+ * length; whether it names a real provision is a separate check with its
+ * own message.
+ */
+const CITATION_HINTS: Hints = {
+  input: {
+    too_small: 'the citation must be at least one character',
+    too_big: 'the citation may be at most 120 characters',
+  },
+};
+
+/**
+ * Validate a search input against the schema the service uses.
+ *
+ * Exported so the CLI can refuse a bad flag BEFORE the index is opened: a
+ * rejected flag is the reader's mistake, and it must not be billed to a
+ * 2-3 MB sync — the same rule the query length follows.
+ *
+ * The errors are the service's plain-language ones, so the CLI and the API
+ * cannot drift in what they say about a rejected search.
+ */
+export function validateSearchInput(input: SearchInput): z.infer<typeof searchInputSchema> {
+  const parsed = searchInputSchema.safeParse(input);
+  if (!parsed.success) toServiceError(parsed.error, SEARCH_HINTS);
+  return parsed.data;
+}
+
+function toServiceError(error: unknown, hints: Hints): never {
   if (error instanceof z.ZodError) {
     const details = error.issues
-      .map((issue) => `${issue.path.join('.') || 'input'}: ${issue.message}`)
+      .map((issue) => {
+        const field = issue.path.join('.') || 'input';
+        // The hint must state the rule that was broken — a field can break
+        // more than one — so the lookup is by rule as well as by field.
+        return hints[field]?.[issue.code] ?? `${field}: ${issue.message}`;
+      })
       .join('; ');
     throw new ServiceError(`invalid input: ${details}`, 'invalid_input');
   }
   throw error;
-}
-
-/** Permalink to the section on ecfr.gov (verified redirect pattern). */
-function sourceUrlFor(kind: 'section' | 'appendix', citation: string): string {
-  if (kind === 'appendix') {
-    return `https://www.ecfr.gov/search?searchTerm=${encodeURIComponent(citation)}&titles=38`;
-  }
-  return `https://www.ecfr.gov/current/title-38/section-${encodeURIComponent(citation)}`;
 }
 
 /**
@@ -287,15 +376,10 @@ function sourceUrlFor(kind: 'section' | 'appendix', citation: string): string {
  * answers 404):
  *   /on/2026-10-16/title-38/appendix-Appendix%20A%20to%20Part%204
  *     -> /on/2026-10-16/title-38/chapter-I/part-4/appendix-Appendix%20A%20to%20Part%204
+ *
+ * The URL shapes themselves live in `src/core/urls.ts` (CR-16), shared with
+ * the point-in-time read in `src/core/historical.ts`.
  */
-function datedSourceUrlFor(
-  kind: 'section' | 'appendix',
-  citation: string,
-  issueDate: string,
-): string {
-  const kindSegment = kind === 'appendix' ? 'appendix' : 'section';
-  return `https://www.ecfr.gov/on/${issueDate}/title-38/${kindSegment}-${encodeURIComponent(citation)}`;
-}
 
 /** Sections are numeric citations; everything else is an appendix name. */
 function kindForCitation(citation: string): 'section' | 'appendix' {
@@ -368,9 +452,7 @@ export class CFRService {
   }
 
   search(input: SearchInput): SearchResponse {
-    const parsed = searchInputSchema.safeParse(input);
-    if (!parsed.success) toServiceError(parsed.error);
-    const { query, page, perPage, part, kind, chapter } = parsed.data;
+    const { query, page, perPage, part, kind, chapter } = validateSearchInput(input);
     const outcome = this.store.search({ query, page, perPage, part, kind, chapter });
     const direct = this.directHit(query, { part, kind, chapter });
 
@@ -468,8 +550,8 @@ export class CFRService {
     return {
       ...rest,
       citationDisplay: displayCitation(kind, hit.citation),
-      sourceUrl: sourceUrlFor(kind, hit.citation),
-      sourceUrlAtIndexDate: datedSourceUrlFor(kind, hit.citation, issueDate),
+      sourceUrl: sourceUrlFor(hit.citation, kind),
+      sourceUrlAtIndexDate: datedSourceUrlFor(hit.citation, kind, issueDate),
       direct,
       inResults,
       partTitle: partTitleValue,
@@ -493,7 +575,7 @@ export class CFRService {
     const base =
       `no indexed content for citation ${citation} — it may be reserved, removed, ` +
       'or outside Title 38 as of the local issue date';
-    const verify = `verify it on eCFR: ${sourceUrlFor(kindForCitation(citation), citation)}`;
+    const verify = `verify it on eCFR: ${sourceUrlFor(citation, kindForCitation(citation))}`;
     if (mentions.length === 0) return `${base}; ${verify}`;
     return `${base}; ${verify}. Indexed sections that mention it: ${mentions.join(', ')}`;
   }
@@ -501,7 +583,7 @@ export class CFRService {
   /** Fetch one section by citation (`4.125`, `§ 4.125`, `38 CFR 4.125`, …). */
   getSection(citationInput: string): SectionDetail {
     const parsed = citationInputSchema.safeParse(citationInput);
-    if (!parsed.success) toServiceError(parsed.error);
+    if (!parsed.success) toServiceError(parsed.error, CITATION_HINTS);
     const normalized = normalizeCitation(parsed.data);
     if (normalized === null) {
       throw new ServiceError(
@@ -525,8 +607,8 @@ export class CFRService {
       issueDate: row.issueDate,
       markdown: row.markdown,
       text: row.text,
-      sourceUrl: sourceUrlFor(row.kind, row.citation),
-      sourceUrlAtIndexDate: datedSourceUrlFor(row.kind, row.citation, row.issueDate),
+      sourceUrl: sourceUrlFor(row.citation, row.kind),
+      sourceUrlAtIndexDate: datedSourceUrlFor(row.citation, row.kind, row.issueDate),
       references: extractReferences(row.text).map((citation) => ({
         citation,
         available: this.store.hasSection(citation),
@@ -542,7 +624,7 @@ export class CFRService {
   /** Navigate the structure tree; empty query returns the chapters. */
   browse(input: BrowseInput = {}): BrowseResult {
     const parsed = browseInputSchema.safeParse(input);
-    if (!parsed.success) toServiceError(parsed.error);
+    if (!parsed.success) toServiceError(parsed.error, BROWSE_HINTS);
     if (parsed.data.subpart !== undefined && parsed.data.part === undefined) {
       throw new ServiceError("subpart navigation requires 'part'", 'invalid_input');
     }
@@ -593,11 +675,16 @@ export class CFRService {
   private lastChanges(): SyncChanges | null {
     const raw = this.store.getMeta('last_changes');
     if (raw === null) return null;
+    let parsed: unknown;
     try {
-      return JSON.parse(raw) as SyncChanges;
+      parsed = JSON.parse(raw);
     } catch {
       return null;
     }
+    // A syntactically valid record is not necessarily a VALID one: the
+    // schema is what makes the doc comment true (CR-20).
+    const result = syncChangesSchema.safeParse(parsed);
+    return result.success ? (result.data as SyncChanges) : null;
   }
 
   /**
@@ -675,22 +762,26 @@ export class CFRService {
    * facade over `diffIssues` so the HTTP surface shares the core's exact
    * validation and error semantics. BOTH dates are required — no default-to
    * resolution happens here (the store's `issue_date` lookup is the CLI's
-   * convenience, deliberately not threaded behind this facade). Stateless by
-   * design: every call fetches both dates' full-title XML from eCFR — no
-   * prefetch, no cache.
+   * convenience, deliberately not threaded behind this facade). Nothing is
+   * prefetched: each call fetches both dates' full-title XML from eCFR,
+   * through the client's own per-process document memo (see `ecfr.ts` —
+   * short-lived, in memory, shared by concurrent readers of the same date).
    *
    * Every `serve`/`mcp` entrypoint injects the client and logger together;
    * the guard fails closed for test-constructed services without the diff
    * stack, so the route answers a clean mapped error instead of a crash.
    *
-   * @throws {ServiceError} (`invalid_input`) when no eCFR client was
-   *   injected, or when a date is malformed/impossible or the two dates are
-   *   identical; upstream fetch failures surface as `HttpError`.
+   * @throws {ServiceError} (`unavailable`) when no eCFR client was
+   *   injected — a deployment fault, not the reader's argument;
+   *   (`invalid_input`) when a date is malformed/impossible or the two dates
+   *   are identical; upstream fetch failures surface as `HttpError`, or as
+   *   `SemaphoreOverflowError` when the upstream fetch queue is full (the
+   *   HTTP layer maps that to `503 upstream_busy`).
    */
   async diffBetween(fromDate: string, toDate: string): Promise<IssueDiff> {
     const { ecfr, logger } = this;
     if (ecfr === undefined || logger === undefined) {
-      throw new ServiceError('diff unavailable — no eCFR client injected', 'invalid_input');
+      throw new ServiceError('diff unavailable — no eCFR client injected', 'unavailable');
     }
     return diffIssues({ ecfr, logger }, fromDate, toDate);
   }
@@ -701,19 +792,24 @@ export class CFRService {
    * the core otherwise. BOTH dates are required on the wire (no default-to
    * resolution); the core owns every validation (malformed/impossible/identical
    * dates, non-citation) and the `not_found` tripwire for a citation missing
-   * from BOTH dates. Stateless by design: every call fetches both dates'
-   * full-title XML from eCFR — no prefetch, no cache.
+   * from BOTH dates. Nothing is prefetched: each call fetches both dates'
+   * full-title XML from eCFR, through the client's own per-process document
+   * memo (see `ecfr.ts` — short-lived, in memory, shared by concurrent
+   * readers of the same date).
    *
    * Every `serve`/`mcp` entrypoint injects the client and logger together;
    * the guard fails closed for test-constructed services without the redline
    * stack, so both wire surfaces answer a clean mapped error instead of a
    * crash.
    *
-   * @throws {ServiceError} (`invalid_input`) when no eCFR client was
-   *   injected, or when a date is malformed/impossible, the two dates are
-   *   identical, or the citation is not recognizable; (`not_found`) when the
-   *   citation is missing from BOTH dates' parse results; upstream fetch
-   *   failures surface as `HttpError`.
+   * @throws {ServiceError} (`unavailable`) when no eCFR client was
+   *   injected — a deployment fault, not the reader's argument;
+   *   (`invalid_input`) when a date is malformed/impossible, the two dates
+   *   are identical, or the citation is not recognizable; (`not_found`) when
+   *   the citation is missing from BOTH dates' parse results; upstream fetch
+   *   failures surface as `HttpError`, or as `SemaphoreOverflowError` when
+   *   the upstream fetch queue is full (the HTTP layer maps that to
+   *   `503 upstream_busy`).
    */
   async redlineBetween(
     fromDate: string,
@@ -722,7 +818,7 @@ export class CFRService {
   ): Promise<SectionRedline> {
     const { ecfr, logger } = this;
     if (ecfr === undefined || logger === undefined) {
-      throw new ServiceError('redline unavailable — no eCFR client injected', 'invalid_input');
+      throw new ServiceError('redline unavailable — no eCFR client injected', 'unavailable');
     }
     return redlineSection({ ecfr, logger }, fromDate, toDate, citation);
   }

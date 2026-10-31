@@ -1,18 +1,21 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import { CHANGE_LIST_CAP } from '../core/changes.js';
-import { ServiceError, type CFRService } from '../core/service.js';
-import { StructureError } from '../core/structure.js';
+import type { CFRService } from '../core/service.js';
+import { ServiceError, StructureError, UpstreamFormatError } from '../core/errors.js';
+import { SemaphoreOverflowError } from '../core/semaphore.js';
 import type { Logger } from '../logger.js';
 import { RateLimiter } from './rate-limit.js';
 import { UI_CSP, UI_CSS, UI_HTML, UI_JS } from './ui.js';
+import { VERSION } from '../version.js';
 
 /**
  * Titan HTTP API: a tiny GET-only JSON surface over the local index, plus
- * the stateless `/api/v1/diff` and `/api/v1/redline` point-in-time
- * comparisons (two issue dates fetched from eCFR per call — see
- * handleDiff/handleRedline), plus the read-only web UI at the serve root
- * (`/`, `/ui.js`, `/ui.css` — see ui.ts) that consumes the same surface.
+ * the `/api/v1/diff` and `/api/v1/redline` point-in-time comparisons (two
+ * issue dates fetched from eCFR — see handleDiff/handleRedline), plus the
+ * read-only web UI at the serve root (`/`, `/ui.js`, `/ui.css` — see
+ * ui.ts) that consumes the same surface.
  *
  * Deliberately dependency-free (`node:http`) and hardened by construction:
  * no request bodies, no templating, no dynamic SQL, validated query strings,
@@ -24,7 +27,18 @@ const TEXT_HEADER = 'text/plain; version=0.0.4; charset=utf-8';
 const HTML_HEADER = 'text/html; charset=utf-8';
 const JS_HEADER = 'text/javascript; charset=utf-8';
 const CSS_HEADER = 'text/css; charset=utf-8';
+const YAML_HEADER = 'application/yaml; charset=utf-8';
 const NOSNIFF = 'X-Content-Type-Options';
+
+/**
+ * `Referrer-Policy: no-referrer` on every response.
+ *
+ * The API answers with paths and queries that can carry a search term, so
+ * a client that follows a link from a response must not leak the URL it
+ * was reading to the next site. The UI document says the same thing with a
+ * `<meta>` tag; the header is the one that also covers the API routes.
+ */
+const REFERRER_POLICY = 'referrer-policy';
 const SEARCH_PREFIX = '/api/v1/search';
 const SECTIONS_PREFIX = '/api/v1/sections/';
 const BROWSE_PATH = '/api/v1/browse';
@@ -35,6 +49,8 @@ const METRICS_PATH = '/metrics';
 const UI_PATH = '/';
 const UI_JS_PATH = '/ui.js';
 const UI_CSS_PATH = '/ui.css';
+const API_INDEX_PATH = '/api/v1';
+const OPENAPI_PATH = '/openapi.yaml';
 
 // Router-level request-size caps, enforced before validation: zod already
 // bounds `q` to 200 chars (≤ 800 UTF-8 bytes) and `part` to 3 digits, so
@@ -184,6 +200,7 @@ function sendJson(
     'content-type': JSON_HEADER,
     'content-length': Buffer.byteLength(payload, 'utf8'),
     [NOSNIFF]: 'nosniff',
+    [REFERRER_POLICY]: 'no-referrer',
   };
   if (cacheControl !== undefined) headers['cache-control'] = cacheControl;
   if (etag !== undefined) headers['etag'] = etag;
@@ -204,6 +221,7 @@ function sendText(
     'content-type': TEXT_HEADER,
     'content-length': Buffer.byteLength(body, 'utf8'),
     [NOSNIFF]: 'nosniff',
+    [REFERRER_POLICY]: 'no-referrer',
   };
   if (cacheControl !== undefined) headers['cache-control'] = cacheControl;
   res.setHeader('cross-origin-resource-policy', 'same-origin');
@@ -232,6 +250,7 @@ function sendStatic(
     [NOSNIFF]: 'nosniff',
     'cache-control': 'no-store',
     'cross-origin-resource-policy': 'same-origin',
+    [REFERRER_POLICY]: 'no-referrer',
   };
   if (csp !== undefined) headers['content-security-policy'] = csp;
   res.writeHead(200, headers);
@@ -328,8 +347,10 @@ function handleBrowse(
  *
  * The `await` rejects into the same catch every sync handler uses:
  * `ServiceError` maps through `statusFor` (400/404 + client-safe message),
- * anything else (`HttpError` from an upstream fetch, `SyncError`) falls to
- * the generic 500 path with the detail logged server-side only.
+ * a full upstream queue (`SemaphoreOverflowError`) answers 503
+ * `upstream_busy`, and anything else (`HttpError` from an upstream fetch,
+ * `SyncError`) falls to the generic 500 path with the detail logged
+ * server-side only.
  */
 async function handleDiff(
   service: CFRService,
@@ -382,9 +403,10 @@ async function handleDiff(
  *
  * The `await` rejects into the same catch every sync handler uses:
  * `ServiceError` maps through `statusFor` (invalid_input → 400, not_found →
- * 404 — a citation missing from BOTH dates), anything else (`HttpError` from
- * an upstream fetch, `SyncError`) falls to the generic 500 path with the
- * detail logged server-side only.
+ * 404 — a citation missing from BOTH dates), a full upstream queue
+ * (`SemaphoreOverflowError`) answers 503 `upstream_busy`, and anything else
+ * (`HttpError` from an upstream fetch, `SyncError`) falls to the generic 500
+ * path with the detail logged server-side only.
  */
 async function handleRedline(
   service: CFRService,
@@ -418,15 +440,15 @@ async function handleRedline(
   // Pure function of two fixed dates + one citation: cacheable like the diff
   // route. 5 min (not 3600) because a redline spans two upstream fetches and
   // the from/to window is only rarely an identical document; errors below carry
-  // no cache-control (matching handleDiff's shape).
+  // no Cache-Control header (matching handleDiff's shape).
   sendJson(req, res, 200, { ...redline }, 'public, max-age=300');
 }
 
 function statusFor(error: ServiceError | StructureError): { status: number; code: string } {
   if (error instanceof StructureError) return { status: 404, code: 'not_found' };
-  return error.code === 'not_found'
-    ? { status: 404, code: 'not_found' }
-    : { status: 400, code: 'invalid_input' };
+  if (error.code === 'unavailable') return { status: 500, code: 'internal_error' };
+  if (error.code === 'not_found') return { status: 404, code: 'not_found' };
+  return { status: 400, code: 'invalid_input' };
 }
 
 function gauge(name: string, help: string, value: number): string {
@@ -491,6 +513,113 @@ function renderMetrics(service: CFRService, disk?: () => DiskSnapshot | null): s
   return out;
 }
 
+/**
+ * The API index: what this instance serves, and what each route needs.
+ *
+ * A self-hosted service has to be discoverable on its own. Without this,
+ * a developer or an agent probing the instance finds a bare 404, and the
+ * contract — `docs/openapi.yaml` — is only reachable in the repository.
+ *
+ * The conformance suite checks this list against the spec, so the two
+ * cannot drift.
+ */
+const ROUTE_INDEX: JsonBody = {
+  service: 'cfr-free',
+  version: VERSION,
+  openapi: OPENAPI_PATH,
+  routes: [
+    {
+      method: 'GET',
+      path: '/api/v1',
+      summary: 'This index — the routes below.',
+      required: [],
+    },
+    {
+      method: 'GET',
+      path: '/api/v1/search',
+      summary: 'Ranked provisions for a query.',
+      required: ['q'],
+    },
+    {
+      method: 'GET',
+      path: '/api/v1/sections/{citation}',
+      summary: 'One provision by citation.',
+      required: ['citation'],
+    },
+    {
+      method: 'GET',
+      path: '/api/v1/browse',
+      summary: 'The hierarchy, from its root or from a node.',
+      required: [],
+    },
+    {
+      method: 'GET',
+      path: '/api/v1/diff',
+      summary: 'Changes between two issue dates.',
+      required: ['from', 'to'],
+    },
+    {
+      method: 'GET',
+      path: '/api/v1/redline',
+      summary: 'Line-level redline of one provision.',
+      required: ['from', 'to', 'citation'],
+    },
+    { method: 'GET', path: '/health', summary: 'Freshness and status.', required: [] },
+    { method: 'GET', path: '/metrics', summary: 'Prometheus exposition text.', required: [] },
+  ],
+};
+
+/**
+ * The OpenAPI document, read from the package and cached.
+ *
+ * `../../docs/openapi.yaml` is the repository's copy in development
+ * (`src/titan/`) and the package's copy in a build (`dist/titan/`). It is
+ * read lazily and cached: a deployment without the file must still serve
+ * every other route, and the route that needs it should say so.
+ */
+let openApiDocument: string | null = null;
+
+function readOpenApiDocument(): string | null {
+  if (openApiDocument !== null) return openApiDocument;
+  try {
+    openApiDocument = readFileSync(new URL('../../docs/openapi.yaml', import.meta.url), 'utf8');
+  } catch {
+    return null;
+  }
+  return openApiDocument;
+}
+
+/**
+ * The discovery routes: the API index and the OpenAPI document.
+ *
+ * Returns whether it answered the request, so the router can carry on.
+ */
+function handleDiscovery(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  pathname: string,
+): boolean {
+  if (pathname === API_INDEX_PATH) {
+    sendJson(req, res, 200, ROUTE_INDEX, 'no-store');
+    return true;
+  }
+  if (pathname === OPENAPI_PATH) {
+    const document = readOpenApiDocument();
+    if (document === null) {
+      sendJson(
+        req,
+        res,
+        500,
+        errorBody('internal_error', 'the OpenAPI document is not available in this installation'),
+      );
+      return true;
+    }
+    sendStatic(req, res, YAML_HEADER, document, undefined);
+    return true;
+  }
+  return false;
+}
+
 async function dispatch(
   service: CFRService,
   req: http.IncomingMessage,
@@ -542,6 +671,7 @@ async function dispatch(
     await handleRedline(service, req, res, url);
     return;
   }
+  if (handleDiscovery(req, res, pathname)) return;
   if (pathname === UI_PATH) {
     sendStatic(req, res, HTML_HEADER, UI_HTML, UI_CSP);
     return;
@@ -582,6 +712,44 @@ export interface DiskSnapshot {
   readonly totalBytes: number;
 }
 
+/** The request's URL, or null when it does not parse. */
+function parseRequestUrl(raw: string | undefined): URL | null {
+  try {
+    return new URL(raw ?? '/', 'http://localhost');
+  } catch {
+    return null;
+  }
+}
+
+/** The token cost of a route that pulls the whole upstream document. */
+export const EXPENSIVE_ROUTE_COST = 10;
+
+/**
+ * What a request costs the server, in rate-limit tokens.
+ *
+ * The index routes read the LOCAL index: one token each. The diff and
+ * redline routes fetch the complete Title 38 document from eCFR — ~2 MB on
+ * the wire, ~16 MB parsed — so they charge a route a peer cannot buy with
+ * a single token. One token per request meant the published image's budget
+ * (60 burst, 10 a second) bought ten whole upstream documents a second —
+ * twenty of them, counting the two documents a diff or a redline pulls.
+ */
+function requestCost(pathname: string): number {
+  if (pathname === DIFF_PATH || pathname === REDLINE_PATH) return EXPENSIVE_ROUTE_COST;
+  return 1;
+}
+
+/**
+ * The cost of a request the router will REFUSE (a bad method, an
+ * oversized URL): one token.
+ *
+ * The request does no work, so it does not cost what a routed request
+ * costs — but it is still a request, and an uncharged one is free to
+ * repeat. The budget bounds how much traffic the server will look at,
+ * not only how much work it will do.
+ */
+const REFUSED_REQUEST_COST = 1;
+
 /**
  * Method, rate, and size gates that run before routing. Returns the parsed
  * URL, or null when the request was already answered with an error.
@@ -591,20 +759,31 @@ function precheck(
   res: http.ServerResponse,
   limiter: RateLimiter | null,
 ): URL | null {
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
-    res.setHeader('allow', 'GET, HEAD');
-    sendJson(req, res, 405, errorBody('method_not_allowed', 'only GET and HEAD are supported'));
-    return null;
-  }
+  const methodRefused = req.method !== 'GET' && req.method !== 'HEAD';
+  const urlTooLong = Buffer.byteLength(req.url ?? '/', 'utf8') > MAX_URL_BYTES;
+  // The URL is parsed before the limiter, because the cost of a request
+  // depends on the route it will take.
+  const url = parseRequestUrl(req.url);
   if (limiter !== null) {
-    const verdict = limiter.consume(req.socket.remoteAddress ?? 'unknown');
+    // Every request is charged, including the ones the gates below
+    // refuse: a refused request is still a request, and leaving the
+    // refusal free would let a peer send unlimited 2 KB URLs (or
+    // unlimited POSTs) without ever touching the budget.
+    const refused = methodRefused || urlTooLong || url === null;
+    const cost = refused ? REFUSED_REQUEST_COST : requestCost(url.pathname);
+    const verdict = limiter.consume(req.socket.remoteAddress ?? 'unknown', cost);
     if (!verdict.allowed) {
       res.setHeader('retry-after', String(Math.max(1, Math.ceil(verdict.retryAfterSec))));
       sendJson(req, res, 429, errorBody('rate_limited', 'too many requests — retry shortly'));
       return null;
     }
   }
-  if (Buffer.byteLength(req.url ?? '/', 'utf8') > MAX_URL_BYTES) {
+  if (methodRefused) {
+    res.setHeader('allow', 'GET, HEAD');
+    sendJson(req, res, 405, errorBody('method_not_allowed', 'only GET and HEAD are supported'));
+    return null;
+  }
+  if (urlTooLong) {
     sendJson(
       req,
       res,
@@ -613,10 +792,7 @@ function precheck(
     );
     return null;
   }
-  let url: URL;
-  try {
-    url = new URL(req.url ?? '/', 'http://localhost');
-  } catch {
+  if (url === null) {
     sendJson(req, res, 400, errorBody('invalid_input', 'malformed request URL'));
     return null;
   }
@@ -642,7 +818,7 @@ export function createHttpServer(
     // answers its own errors synchronously and never throws), then `await
     // dispatch` puts async rejections in front of the SAME catch the sync
     // handlers have always used — ServiceError/StructureError → statusFor
-    // (400/404 + client-safe message), anything else → logged + generic 500.
+    // (400/404/500 + client-safe message), anything else → logged + generic 500.
     void (async () => {
       const url = precheck(req, res, limiter);
       if (url === null) return;
@@ -661,6 +837,37 @@ export function createHttpServer(
           );
           return;
         }
+        // An upstream-DATA fault: eCFR answered, and what it sent is not what
+        // the contract allows. That is a bad gateway, not an internal error —
+        // and it must not be collapsed into a generic 500, or the most
+        // actionable messages in the codebase are swallowed (CR-21).
+        if (error instanceof UpstreamFormatError) {
+          logger.error('upstream data fault', {
+            path: url.pathname,
+            message: error.message,
+          });
+          if (!res.headersSent) {
+            sendJson(req, res, 502, errorBody('upstream_error', 'upstream data was not usable'));
+          } else {
+            res.end();
+          }
+          return;
+        }
+        if (error instanceof SemaphoreOverflowError) {
+          // The upstream queue is full: the request could not be parked
+          // behind the fetches already in flight. A fast, explicit
+          // refusal beats a request that waits minutes for a permit.
+          logger.warn('http request refused — upstream queue full', {
+            path: url.pathname,
+          });
+          sendJson(
+            req,
+            res,
+            503,
+            errorBody('upstream_busy', 'too many requests in flight — retry shortly'),
+          );
+          return;
+        }
         logger.error('http request failed', {
           path: url.pathname,
           message: error instanceof Error ? error.message : String(error),
@@ -676,5 +883,13 @@ export function createHttpServer(
   // Bound how long a client may take to complete a request (SPEC §12 #16);
   // the header timeout already defaults to 60 s.
   server.requestTimeout = 60_000;
+  // The rate limiter runs inside `precheck`, which is reached only after
+  // the request line and the headers are complete — so a client that
+  // dribbles its headers holds a socket without spending a token. The
+  // header timeout bounds that wait, and the connection cap bounds the
+  // sockets themselves.
+  server.headersTimeout = 10_000;
+  server.keepAliveTimeout = 5_000;
+  server.maxConnections = 256;
   return server;
 }
