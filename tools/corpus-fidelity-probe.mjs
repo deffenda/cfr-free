@@ -119,7 +119,7 @@ async function resolveIssueDate() {
  * close tag, so the "fragment" is a span that exists nowhere in the rendered
  * output and the provision is reported as `lost` — a measurement artifact
  * that reads exactly like lost content. Hence the tag name is followed by
- * `(?:\s[^>]*)?`: whitespace-and-attributes, or the closing ">" — never a
+ * `(?=\s|>)`: whitespace-and-attributes, or the closing ">" — never a
  * hyphen, a digit or any other continuation of the name.
  *
  * A LITERAL pattern per element name — not built from a variable (that trips
@@ -128,14 +128,14 @@ async function resolveIssueDate() {
  * closes on the first matching close tag and can truncate).
  */
 export const ELEMENT_PATTERNS = {
-  FP: /<FP(?:\s[^>]*)?>([\s\S]*?)<\/FP>/gi,
-  NOTE: /<NOTE(?:\s[^>]*)?>([\s\S]*?)<\/NOTE>/gi,
-  EDNOTE: /<EDNOTE(?:\s[^>]*)?>([\s\S]*?)<\/EDNOTE>/gi,
-  HD2: /<HD2(?:\s[^>]*)?>([\s\S]*?)<\/HD2>/gi,
-  EXTRACT: /<EXTRACT(?:\s[^>]*)?>([\s\S]*?)<\/EXTRACT>/gi,
-  CITA: /<CITA(?:\s[^>]*)?>([\s\S]*?)<\/CITA>/gi,
-  SECAUTH: /<SECAUTH(?:\s[^>]*)?>([\s\S]*?)<\/SECAUTH>/gi,
-  TFOOT: /<TFOOT(?:\s[^>]*)?>([\s\S]*?)<\/TFOOT>/gi,
+  FP: /<FP(?=\s|>)[^>]*>([\s\S]*?)<\/FP>/gi,
+  NOTE: /<NOTE(?=\s|>)[^>]*>([\s\S]*?)<\/NOTE>/gi,
+  EDNOTE: /<EDNOTE(?=\s|>)[^>]*>([\s\S]*?)<\/EDNOTE>/gi,
+  HD2: /<HD2(?=\s|>)[^>]*>([\s\S]*?)<\/HD2>/gi,
+  EXTRACT: /<EXTRACT(?=\s|>)[^>]*>([\s\S]*?)<\/EXTRACT>/gi,
+  CITA: /<CITA(?=\s|>)[^>]*>([\s\S]*?)<\/CITA>/gi,
+  SECAUTH: /<SECAUTH(?=\s|>)[^>]*>([\s\S]*?)<\/SECAUTH>/gi,
+  TFOOT: /<TFOOT(?=\s|>)[^>]*>([\s\S]*?)<\/TFOOT>/gi,
 };
 
 /**
@@ -179,7 +179,7 @@ export function elementText(block, tag) {
  */
 function countTag(xml, tag) {
   let count = 0;
-  for (const match of xml.matchAll(/<([A-Za-z][\w-]*)(?:\s[^>]*)?>/g)) {
+  for (const match of xml.matchAll(/<([A-Za-z][\w-]*)(?=\s|>)[^>]*>/g)) {
     if (match[1] === tag) count += 1;
   }
   return count;
@@ -229,7 +229,7 @@ async function main() {
       // "contains <img" test would also fire on a sibling like "<img-1>".
       const fragments =
         entry.key === 'IMG'
-          ? /<img(?:\s[^>]*)?>/.test(block)
+          ? /<img(?=\s|>)[^>]*>/.test(block)
             ? ['[image content not included:']
             : []
           : entry.tags.flatMap((tag) => elementText(block, tag));

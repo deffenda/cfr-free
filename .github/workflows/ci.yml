@@ -31,6 +31,12 @@ jobs:
         node: ${{ github.event_name == 'pull_request' && fromJSON('[22, 24]') || fromJSON('[22]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history AND tags: the release guard (test/install-paths.test.ts)
+          # reads `git tag` and the tree a tag was cut from. The default
+          # checkout is --depth 1 with no tags, which made that guard VACUOUS
+          # in CI — it asserted nothing at all (measured 2026-10-29).
+          fetch-depth: 0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
@@ -49,13 +55,15 @@ jobs:
       - name: lint (eslint)
         run: npm run lint
       # The runner ships no actionlint binary; this is the same pinned
-      # install the `actionlint` job uses, and GITHUB_PATH puts it on
+      # install the `actionlint` job uses — pinned to the COMMIT, not to
+      # the tag, because a retagged release would otherwise run in CI
+      # with the runner's credentials — and GITHUB_PATH puts it on
       # PATH for the `npm run lint:actions` step below. Without it the
       # step would fail with `actionlint: command not found` on every
       # pull request.
       - name: Install actionlint
         run: |
-          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          go install github.com/rhysd/actionlint/cmd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: lint (actionlint, workflows)
         run: npm run lint:actions
@@ -100,7 +108,7 @@ jobs:
       # v1.7.12 is the version AGENTS.md blesses for `npm run lint:actions`:
       # the local gate and this job must lint the same way.
       - name: Install actionlint
-        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
       # Silent failure this prevents: a workflow that is valid YAML but
       # invalid to GitHub's expression parser — a job-level `if` reading the
       # `matrix` context, for instance — yields a failed run with zero jobs,
@@ -110,6 +118,66 @@ jobs:
       # out of the run and keep a GOPATH containing spaces one path.
       - name: actionlint (workflow lint)
         run: '"$(go env GOPATH)/bin/actionlint"'
+
+  trivy:
+    name: trivy
+    runs-on: ubuntu-latest
+    # NOT a required check, deliberately: the vulnerability database this
+    # scanner reads is a moving target, so a database update can turn a
+    # green pull request red without a line of this repository changing.
+    # It runs on every pull request, so a finding is VISIBLE where it used
+    # to be invisible — the finding was that a container or dependency
+    # problem surfaced only on a developer machine that happened to have
+    # the scanner installed. Promoting this job to required is the
+    # operator's call, and it changes the merge floor.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: trivy (vulns, secrets, misconfig)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          # The same scan the local `npm run scan` runs: the working tree
+          # for dependencies, secrets and misconfiguration (the Dockerfile
+          # among them).
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+  semgrep:
+    name: semgrep
+    runs-on: ubuntu-latest
+    # NOT a required check, for the same reason as the trivy job above,
+    # and one more: `--config auto` reads semgrep's rule registry, which is
+    # upstream-mutable. A merge floor that depends on a rule set the
+    # repository does not pin is a floor that can move under it.
+    #
+    # The scanner runs from the PUBLISHED CONTAINER IMAGE, pinned by
+    # digest — the same scanner the local sweep in `tools/security-scan.sh`
+    # runs, in the job shape semgrep documents for CI.
+    #
+    # `semgrep/semgrep` is the CLI's repository, not an action: it
+    # publishes no action manifest, so `uses: semgrep/semgrep@<sha>` did
+    # not name an action. It was RUNNABLE all the same — GitHub builds a
+    # repository's root Dockerfile when there is no action.yml — and that
+    # Dockerfile's `CMD` is `semgrep --help`, which exits 0 without
+    # scanning anything. The job reported green over a scan that never
+    # happened (verified 2026-10-30).
+    #
+    # The container is JOB-level: GitHub's workflow schema has no
+    # step-level `container` key (`actionlint` rejects one), so the whole
+    # job runs in the image — the checkout included, which is why the image
+    # needs git. The image is Alpine, and GitHub's runner supports
+    # JavaScript actions in an Alpine container only on an x64 runner, so
+    # the job runs on one.
+    container:
+      image: semgrep/semgrep@sha256:2e45517a85e13a9cca14a2a00df6bb48affd66b8ebfae1b0991cd57578362fb0 # 1.183.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: semgrep (general static analysis)
+        # The same invocation the local sweep runs, so CI and `npm run
+        # scan` say the same thing about the same tree.
+        run: semgrep scan --config auto --error --quiet
 
   docker:
     name: docker
@@ -137,3 +205,30 @@ jobs:
           echo "$out"
           test "$code" -eq 3
           echo "$out" | grep -F 'cfr-free sync'
+      # The BUILT IMAGE, scanned for the base image's OS packages — the half
+      # of CR-35 the filesystem scan cannot reach. The docker job is the only
+      # job that has the image, so the image is scanned here.
+      #
+      # `vuln-type: os`, and not the action's default `os,library`, because
+      # the runtime image carries `package.json` but NOT `package-lock.json`:
+      # a whole-image scan then resolves the manifest's devDependencies
+      # against the registry and reports them as shipped. On the image built
+      # from this tree that is ten HIGH findings, and not one of them is in
+      # the image — `brace-expansion`, `pacote`, `picomatch` and `sigstore`
+      # are pruned from it, and the `ip-address` it reports (10.1.0) is not
+      # the version it carries (10.7.4). Measured 2026-10-30.
+      #
+      # What covers the image's Node layer instead: the committed lockfile,
+      # which `npm audit --audit-level=high` and the `trivy` job's
+      # filesystem scan both read — the image's dependency tree is that
+      # lockfile's production subset. The Dockerfile itself is covered by
+      # the `trivy` job's `misconfig` scanner.
+      - name: trivy (image, base OS packages)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: cfr-free:ci
+          vuln-type: os
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          exit-code: '1'

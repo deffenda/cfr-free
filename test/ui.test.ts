@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { runInNewContext } from 'node:vm';
 import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
-import { UI_JS } from '../src/titan/ui.js';
+import { UI_HTML, UI_JS } from '../src/titan/ui.js';
 
 /**
  * Behavioural harness for the served UI script (review finding P1-02).
@@ -19,6 +21,37 @@ import { UI_JS } from '../src/titan/ui.js';
  * into a tree the user has left.
  */
 
+/** The tags a browser lets take the focus without a `tabindex`. */
+const FOCUSABLE_TAGS = new Set(['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON']);
+
+/**
+ * The elements the served shell declares, with the tag and the attributes
+ * that decide whether each can take the focus.
+ *
+ * The harness must not invent the DOM. A stub that creates any element it
+ * is asked for cannot tell a missing heading from a present one, and a stub
+ * that always accepts the focus reports a focus move that a real browser
+ * would refuse — a bare `<h2>` is not focusable, so `focus()` on it does
+ * nothing at all. So the shell's own markup is read, and the elements the
+ * script asks for are built from it.
+ */
+function shellElements(): Map<string, { tag: string; focusable: boolean }> {
+  const found = new Map<string, { tag: string; focusable: boolean }>();
+  for (const match of UI_HTML.matchAll(/<([a-zA-Z][a-zA-Z0-9]*)[^>]*>/g)) {
+    const tag = (match[1] ?? '').toUpperCase();
+    const element = match[0];
+    const id = /\bid="([^"]*)"/.exec(element)?.[1];
+    if (id === undefined) continue;
+    const hasTabIndex = /\btabindex="[^"]*"/.test(element);
+    const href = /\bhref="([^"]*)"/.exec(element)?.[1] ?? '';
+    found.set(id, {
+      tag,
+      focusable: FOCUSABLE_TAGS.has(tag) || hasTabIndex || (tag === 'A' && href !== ''),
+    });
+  }
+  return found;
+}
+
 /** Minimal DOM node: the surface the served script actually uses. */
 class StubNode {
   nodeType = 1;
@@ -32,10 +65,28 @@ class StubNode {
   disabled = false;
   textContent = '';
   childNodes: StubNode[] = [];
+  /** True once this node has taken the keyboard focus. */
+  tookFocus = false;
+  /** True when the browser would let this element take the focus. */
+  focusable = false;
+  /** Called when the node takes the keyboard focus. */
+  onFocus: ((node: StubNode) => void) | null = null;
   private handlers = new Map<string, Array<(event: unknown) => void>>();
 
   constructor(tagName: string) {
     this.tagName = tagName.toUpperCase();
+  }
+
+  /** The keyboard moving here — what `tabindex="-1"` + `focus()` does. */
+  focus(): void {
+    // A real `focus()` on an element that cannot take the focus does
+    // nothing. Only form controls, links with an href, and anything with a
+    // `tabindex` are focusable. A stub that always focuses reports a focus
+    // move that never happens — which is how a heading without a
+    // `tabindex` shipped green.
+    if (!this.focusable) return;
+    this.tookFocus = true;
+    if (this.onFocus !== null) this.onFocus(this);
   }
 
   get firstChild(): StubNode | null {
@@ -66,7 +117,17 @@ class StubNode {
   setAttribute(name: string, value: string): void {
     if (name === 'href') this.href = value;
     else if (name === 'class') this.className = value;
+    else if (name === 'tabindex') this.focusable = true;
     else (this as unknown as Record<string, string>)[name] = value;
+  }
+
+  removeAttribute(name: string): void {
+    delete (this as unknown as Record<string, string>)[name];
+  }
+
+  getAttribute(name: string): string | null {
+    const value = (this as unknown as Record<string, string | undefined>)[name];
+    return value === undefined ? null : value;
   }
 
   /** All text under this node (the script never reads it back; tests do). */
@@ -96,6 +157,8 @@ interface Harness {
   /** Make the next clipboard write reject (blocked-permission path). */
   setClipboardRejects(value: boolean): void;
   readonly element: (id: string) => StubNode;
+  /** The node that currently holds the keyboard focus, if any. */
+  readonly focused: () => StubNode | null;
   readonly calls: PendingCall[];
   navigate(hash: string): Promise<void>;
   flush(): Promise<void>;
@@ -105,12 +168,19 @@ function makeHarness(): Harness {
   const elements = new Map<string, StubNode>();
   const calls: PendingCall[] = [];
   const hashListeners: Array<() => void> = [];
+  let lastFocused: StubNode | null = null;
+  const shell = shellElements();
 
   const element = (id: string): StubNode => {
     let node = elements.get(id);
     if (node === undefined) {
-      node = new StubNode('div');
+      const declared = shell.get(id);
+      node = new StubNode(declared?.tag ?? 'div');
+      node.focusable = declared?.focusable ?? false;
       node.id = id;
+      node.onFocus = (focused) => {
+        lastFocused = focused;
+      };
       elements.set(id, node);
     }
     return node;
@@ -212,6 +282,7 @@ function makeHarness(): Harness {
 
   return {
     element,
+    focused: () => lastFocused,
     calls,
     navigate,
     flush,
@@ -285,6 +356,76 @@ function searchBody(citation: string, heading: string): Record<string, unknown> 
     ],
   };
 }
+
+describe('UI view state for assistive technology', () => {
+  it('names every view the shell offers, in the README', () => {
+    // The README described the UI as "search + section reader with
+    // chapter/part browse" — two views — while the shell offers three
+    // tabs, and the SPEC named the third. A user looking for the redline
+    // VIEW in the browser did not learn it exists: the endpoint was in
+    // the route table, the view was not mentioned anywhere.
+    const readme = readFileSync(fileURLToPath(new URL('../README.md', import.meta.url)), 'utf8');
+    const paragraph = readme.split('\n\n').find((block) => block.includes('read-only web UI'));
+    expect(paragraph, 'README.md must describe the web UI').toBeDefined();
+    for (const view of ['search', 'browse', 'redline']) {
+      expect(paragraph?.toLowerCase(), `README.md must name the ${view} view`).toContain(view);
+    }
+  });
+
+  it('ships the tab ids the script marks, in the served HTML', () => {
+    // The script finds the tabs by id. If the shell and the script ever
+    // disagree about those ids the marking silently stops working — the
+    // script asks for a tab the document does not have — so the contract
+    // is checked here, not left to the eye.
+    for (const id of ['tab-search', 'tab-browse', 'tab-redline']) {
+      expect(UI_HTML, `the served HTML must carry id="${id}"`).toContain(`id="${id}"`);
+    }
+  });
+
+  it('marks the current tab with aria-current, and only that one', async () => {
+    // The tabs are links, and `aria-current="page"` is what tells a
+    // screen-reader user which view they are looking at. Without it the
+    // nav says which views exist and never which one is current.
+    const harness = makeHarness();
+    await harness.navigate('#/browse');
+    expect(harness.element('tab-browse').getAttribute('aria-current')).toBe('page');
+    expect(harness.element('tab-search').getAttribute('aria-current')).toBe(null);
+    expect(harness.element('tab-redline').getAttribute('aria-current')).toBe(null);
+
+    await harness.navigate('#/search?q=alpha');
+    expect(harness.element('tab-search').getAttribute('aria-current')).toBe('page');
+    expect(harness.element('tab-browse').getAttribute('aria-current')).toBe(null);
+
+    await harness.navigate('#/redline');
+    expect(harness.element('tab-redline').getAttribute('aria-current')).toBe('page');
+    expect(harness.element('tab-search').getAttribute('aria-current')).toBe(null);
+  });
+
+  it('keeps the section reader on the Search tab', async () => {
+    // A section is reached FROM a search hit, so the search tab is the
+    // current view there — not a fourth tab, and not no tab at all.
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.16');
+    expect(harness.element('tab-search').getAttribute('aria-current')).toBe('page');
+    expect(harness.element('tab-browse').getAttribute('aria-current')).toBe(null);
+  });
+
+  it('heads a search result with h2, so the outline does not skip a level', async () => {
+    // The page starts at h1 and the search view's own heading is h2, so a
+    // result heading at h3 was an h1 -> h3 jump: assistive technology
+    // reports the search results as a subsection of nothing.
+    const harness = makeHarness();
+    await harness.navigate('#/search?q=alpha');
+    harness.calls[0]?.respond(true, searchBody('4.16', 'Heading 4.16'));
+    await harness.flush();
+
+    const hits = harness.element('search-hits');
+    const item = hits.childNodes[0];
+    expect(item?.tagName).toBe('LI');
+    const heading = item?.childNodes[0];
+    expect(heading?.tagName).toBe('H2');
+  });
+});
 
 describe('UI search grounding', () => {
   it('warns about the terms the results did not answer, without claiming coverage', async () => {
@@ -360,8 +501,8 @@ describe('UI route ownership (P1-02)', () => {
 
     const heading = harness.element('section-heading').textContent;
     expect(heading).toBe('Heading 4.130');
-    expect(harness.element('section-text').textContent).toBe('Body 4.130.');
-    expect(harness.element('section-text').textContent).not.toContain('4.125');
+    expect(harness.element('section-text').allText).toBe('Body 4.130.');
+    expect(harness.element('section-text').allText).not.toContain('4.125');
   });
 
   it('does not let a late section error paint over the current view', async () => {
@@ -391,7 +532,7 @@ describe('UI route ownership (P1-02)', () => {
     await harness.flush();
 
     expect(harness.element('section-heading').textContent).toBe('Heading 4.130');
-    expect(harness.element('section-text').textContent).toBe('Body 4.130.');
+    expect(harness.element('section-text').allText).toBe('Body 4.130.');
   });
 
   it('does not let a late search response overwrite a newer search', async () => {
@@ -711,7 +852,10 @@ describe('UI redline view (M5 slice 2)', () => {
     await submitRedline(harness);
     harness.calls[0]?.respond(false, { error: 'not_found', message: '4.999 is not in Title 38' });
     await harness.flush();
-    expect(harness.element('redline-error').textContent).toContain('not_found');
+    // The message names what is true; the API's label for it is for a
+    // program, not for a reader.
+    expect(harness.element('redline-error').textContent).toContain('4.999 is not in Title 38');
+    expect(harness.element('redline-error').textContent).not.toContain('not_found');
     expect(harness.element('redline-output').textContent).toBe('');
   });
 
@@ -1008,5 +1152,284 @@ describe('browse race reachability (P1-20261021-07 — the race is NOT reachable
     // section painted. If this assertion FAILS, the late response DID land.
     expect(harness.element('browse-list').allText).not.toContain('3.1');
     expect(harness.element('browse-crumbs').allText).not.toContain('Part 3');
+  });
+});
+
+describe('UI usability (CR-08, CR-09, CR-24)', () => {
+  it('shows the reader the rule that was broken, not the machine code', async () => {
+    // The service's message already names the rule ("the chapter must be a
+    // Roman numeral such as I, II or IV"). What a claims practitioner must
+    // not be shown is the API's label for it.
+    const harness = makeHarness();
+    harness.element('q').value = 'disorders';
+    harness.element('chapter').value = 'iv';
+    harness.element('search-form').dispatch('submit');
+    await harness.flush();
+    harness.calls[0]?.respond(false, {
+      error: 'invalid_input',
+      message: 'invalid input: the chapter must be a Roman numeral such as I, II or IV',
+    });
+    await harness.flush();
+    const status = harness.element('search-status').textContent;
+    expect(status).toContain('the chapter must be a Roman numeral');
+    expect(status).not.toContain('invalid_input');
+    expect(status).not.toContain('invalid input:');
+  });
+
+  it('moves the keyboard to the view that opened, and says so', async () => {
+    // After clicking a search hit, the focused element was inside the view
+    // that was just hidden, so focus fell back to the body: a keyboard or
+    // screen-reader user was dumped at the top of the document with no
+    // announcement of the new view.
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.125');
+    harness.calls[0]?.respond(true, sectionBody('4.125', 'Diagnosis of mental disorders.'));
+    await harness.flush();
+    expect(harness.focused()?.id).toBe('section-heading');
+    expect(harness.element('view-announcer').textContent).toBe('Provision.');
+  });
+
+  it('does not steal the keyboard on the first render', () => {
+    // The first render is not a navigation. Taking the focus there would
+    // take it from the browser's own chrome for no reason.
+    const harness = makeHarness();
+    expect(harness.focused()).toBeNull();
+  });
+
+  it('does not move the keyboard when the view has not changed', async () => {
+    // A second search on the same view updates in place; moving the
+    // keyboard would take it away from the field being typed in.
+    const harness = makeHarness();
+    await harness.navigate('#/search?q=one');
+    expect(harness.focused()).toBeNull();
+  });
+
+  it('moves the keyboard into the search view too, not only out of it', async () => {
+    // The search view's heading was the only one without a `tabindex`, so
+    // the focus stayed on the heading of the view that was just hidden. The
+    // stub used to report a focus move whatever the element was, so this
+    // passed while the browser did nothing at all.
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.125');
+    harness.calls[0]?.respond(true, sectionBody('4.125', 'Diagnosis of mental disorders.'));
+    await harness.flush();
+    expect(harness.focused()?.id).toBe('section-heading');
+
+    await harness.navigate('#/search?q=disorders');
+    expect(harness.focused()?.id).toBe('search-heading');
+  });
+
+  it('the skip link reaches the content without throwing the view away', async () => {
+    // The link points at `#main`, and a router that reads every fragment as
+    // a route would throw away the view the reader was in — and the query
+    // they had typed — to show them the search form again. The skip link is
+    // the FIRST tab stop on every page, so this is what a keyboard user
+    // does first.
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.125');
+    harness.calls[0]?.respond(true, sectionBody('4.125', 'Diagnosis of mental disorders.'));
+    await harness.flush();
+
+    let prevented = false;
+    harness.element('skip-link').dispatch('click', {
+      preventDefault: () => {
+        prevented = true;
+      },
+    });
+
+    // The fragment navigation is refused…
+    expect(prevented).toBe(true);
+    // …and the focus lands on the content the link names.
+    expect(harness.focused()?.id).toBe('main');
+    // The view is still the one the reader was on.
+    expect(harness.element('section-view').hidden).toBe(false);
+  });
+
+  it('a fragment that is not a route leaves the view standing', async () => {
+    // Any other fragment — an anchor, something typed into the address
+    // bar — is a fragment, not a destination. The router must not treat it
+    // as a route and wipe what the reader was looking at.
+    const harness = makeHarness();
+    await harness.navigate('#/search?q=disorders');
+    await harness.navigate('#main');
+    expect(harness.element('search-view').hidden).toBe(false);
+    expect(harness.element('q').value).toBe('disorders');
+  });
+
+  it('sends the part the form carries, and keeps it in the route', async () => {
+    // The form omitted `part` although the API has always accepted it.
+    const harness = makeHarness();
+    harness.element('q').value = 'disorders';
+    harness.element('part').value = '4';
+    harness.element('chapter').value = 'IV';
+    harness.element('search-form').dispatch('submit');
+    await harness.flush();
+    const url = harness.calls[0]?.url ?? '';
+    expect(url).toContain('part=4');
+    expect(url).toContain('chapter=IV');
+  });
+});
+
+describe('UI provision rendering (CR-23 — the rating tables keep their structure)', () => {
+  const TABLE_MARKDOWN = [
+    'The rating schedule is set out below.',
+    '',
+    '| General rating | Mental disorders |',
+    '| --- | --- |',
+    '| 100 | 60 |',
+    '| 70 | 30 |',
+  ].join('\n');
+
+  /** Serve one provision with the given markdown body. */
+  async function serveMarkdown(harness: Harness, markdown: string): Promise<StubNode> {
+    await harness.navigate('#/section/4.130');
+    harness.calls[0]?.respond(true, {
+      ...sectionBody('4.130', 'Evaluation of residual functional capacity.'),
+      markdown,
+    });
+    await harness.flush();
+    return harness.element('section-text');
+  }
+
+  it('renders a rating table as a table, not a run-on block', async () => {
+    // § 4.130 is the most-read provision for this audience, and its rating
+    // table used to come out as pipe-joined rows that wrapped
+    // unpredictably on a narrow screen.
+    const harness = makeHarness();
+    const body = await serveMarkdown(harness, TABLE_MARKDOWN);
+    const table = body.childNodes.find((node) => node.tagName === 'TABLE');
+    expect(table, 'the rating table must be a real table').toBeDefined();
+    const headCells = table?.childNodes[0]?.childNodes[0]?.childNodes ?? [];
+    expect(headCells.map((cell) => cell.textContent)).toEqual([
+      'General rating',
+      'Mental disorders',
+    ]);
+    const bodyRows = table?.childNodes[1]?.childNodes ?? [];
+    expect(bodyRows.length).toBe(2);
+    expect(bodyRows[0]?.childNodes.map((cell) => cell.textContent)).toEqual(['100', '60']);
+    expect(bodyRows[1]?.childNodes.map((cell) => cell.textContent)).toEqual(['70', '30']);
+  });
+
+  it('gives the table the elements a table needs', async () => {
+    // The cell ELEMENTS, not only their text: a header row of ordinary
+    // cells would still show the words, and would tell a screen reader
+    // nothing about which column a cell belongs to.
+    const harness = makeHarness();
+    const body = await serveMarkdown(harness, TABLE_MARKDOWN);
+    const table = body.childNodes.find((node) => node.tagName === 'TABLE');
+    expect(table?.childNodes[0]?.tagName).toBe('THEAD');
+    expect(table?.childNodes[1]?.tagName).toBe('TBODY');
+    const headCells = table?.childNodes[0]?.childNodes[0]?.childNodes ?? [];
+    expect(headCells.map((cell) => cell.tagName)).toEqual(['TH', 'TH']);
+    const bodyRows = table?.childNodes[1]?.childNodes ?? [];
+    expect(bodyRows[0]?.tagName).toBe('TR');
+    expect(bodyRows[0]?.childNodes.map((cell) => cell.tagName)).toEqual(['TD', 'TD']);
+  });
+
+  /** Serve one provision without any markdown, and return its body. */
+  async function serveWithoutMarkdown(markdown?: string): Promise<StubNode> {
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.130');
+    const payload = sectionBody('4.130', 'Evaluation of residual functional capacity.');
+    harness.calls[0]?.respond(true, { ...payload, markdown });
+    await harness.flush();
+    return harness.element('section-text');
+  }
+
+  it('falls back to the plain text when the payload carries no markdown', async () => {
+    // The SPEC promises the plain text remains the fallback. Nothing
+    // pinned it: a build that dropped the fallback, or rendered it wrongly,
+    // left the suite green.
+    const payload = sectionBody('4.130', 'Evaluation of residual functional capacity.');
+    const body = await serveWithoutMarkdown(undefined);
+    expect(body.childNodes.map((node) => node.tagName)).toEqual(['P']);
+    expect(body.childNodes[0]?.textContent).toBe(payload.text);
+  });
+
+  it('falls back to the plain text when the markdown is only whitespace', async () => {
+    // A markdown body that is only whitespace carries nothing either, and
+    // the text is what the reader should see.
+    const payload = sectionBody('4.130', 'Evaluation of residual functional capacity.');
+    const body = await serveWithoutMarkdown('   \n\t\n  ');
+    expect(body.childNodes.map((node) => node.tagName)).toEqual(['P']);
+    expect(body.childNodes[0]?.textContent).toBe(payload.text);
+  });
+
+  it('reads a line that merely starts with a pipe as a paragraph', async () => {
+    // A table is a header row and a separator row. A paragraph that
+    // happens to begin with a pipe is not a table, and rendering it as one
+    // shows a table with no body and hides what the line said.
+    const harness = makeHarness();
+    const body = await serveMarkdown(harness, '| not a table |');
+    expect(body.childNodes.map((node) => node.tagName)).toEqual(['P']);
+    expect(body.childNodes[0]?.textContent).toBe('| not a table |');
+  });
+
+  it("reads the alignment colons the repository's own table dialect allows", async () => {
+    // The server-side table parser accepts `| :--- | ---: |`, so the
+    // renderer does too: a separator row it did not recognise would be
+    // rendered as a visible row of dashes.
+    const harness = makeHarness();
+    const body = await serveMarkdown(
+      harness,
+      ['| A | B |', '| :--- | ---: |', '| 1 | 2 |'].join('\n'),
+    );
+    const table = body.childNodes.find((node) => node.tagName === 'TABLE');
+    expect(table).toBeDefined();
+    const bodyRows = table?.childNodes[1]?.childNodes ?? [];
+    expect(bodyRows.length).toBe(1);
+    expect(bodyRows[0]?.childNodes.map((cell) => cell.textContent)).toEqual(['1', '2']);
+  });
+
+  it('reads CRLF line endings as one break, not two', async () => {
+    // A carriage left at the end of a heading is a character the reader
+    // sees, and the stylesheet preserves whitespace.
+    const harness = makeHarness();
+    const body = await serveMarkdown(harness, '### Heading\r\nBody\r\n');
+    expect(body.childNodes.map((node) => node.tagName)).toEqual(['H3', 'P']);
+    expect(body.childNodes[0]?.textContent).toBe('Heading');
+    expect(body.childNodes[1]?.textContent).toBe('Body');
+  });
+
+  it('renders the prose around the table as paragraphs', async () => {
+    const harness = makeHarness();
+    const body = await serveMarkdown(harness, TABLE_MARKDOWN);
+    const paragraphs = body.childNodes.filter((node) => node.tagName === 'P');
+    expect(paragraphs.length).toBe(1);
+    expect(paragraphs[0]?.textContent).toBe('The rating schedule is set out below.');
+  });
+
+  it('keeps a pipe that belongs to the cell inside that cell', async () => {
+    const harness = makeHarness();
+    const body = await serveMarkdown(
+      harness,
+      ['| A | B |', '| --- | --- |', '| x \\| y | z |'].join('\n'),
+    );
+    const table = body.childNodes.find((node) => node.tagName === 'TABLE');
+    const cell = table?.childNodes[1]?.childNodes[0]?.childNodes[0];
+    expect(cell?.textContent).toBe('x | y');
+  });
+
+  it('does not swallow the image marker that follows a table', async () => {
+    // The parser may leave the marker after the table, on its own line. It
+    // is not a row, and it must not become one.
+    const harness = makeHarness();
+    const body = await serveMarkdown(
+      harness,
+      ['| A | B |', '| --- | --- |', '| 1 | 2 |', '[image content not included: /img/x.png]'].join(
+        '\n',
+      ),
+    );
+    const table = body.childNodes.find((node) => node.tagName === 'TABLE');
+    const bodyRows = table?.childNodes[1]?.childNodes ?? [];
+    expect(bodyRows.length).toBe(1);
+    expect(body.allText).toContain('[image content not included');
+  });
+
+  it('renders a heading as a heading', async () => {
+    const harness = makeHarness();
+    const body = await serveMarkdown(harness, '### Schedule of ratings');
+    const heading = body.childNodes.find((node) => node.tagName === 'H3');
+    expect(heading?.textContent).toBe('Schedule of ratings');
   });
 });

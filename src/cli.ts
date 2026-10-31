@@ -9,7 +9,18 @@ import { runExportCommand } from './commands/export.js';
 import { formatIssueDiff, runDiffCommand } from './commands/diff.js';
 import { formatSectionRedline, runRedlineCommand } from './commands/redline.js';
 import { formatHistoricalSection, runHistoricalCommand } from './commands/historical.js';
-import { formatSearchResults, runSearchCommand } from './commands/search.js';
+import {
+  formatSearchResults,
+  formatSearchResultsJson,
+  runSearchCommand,
+} from './commands/search.js';
+import { upstreamFailure } from './commands/upstream-guidance.js';
+import {
+  SEARCH_QUERY_MAX_LENGTH,
+  SEARCH_QUERY_MIN_LENGTH,
+  validateSearchInput,
+} from './core/service.js';
+import { ServiceError } from './core/errors.js';
 import { CommandError, EXIT } from './exit-codes.js';
 import { createLogger, type Logger } from './logger.js';
 import { VERSION } from './version.js';
@@ -26,7 +37,9 @@ Usage:
                                            two eCFR issue dates
   cfr-free historical <at> <citation>  One provision as it stood at a date (eCFR's
                                      point-in-time archive, 2017 onward)
-  cfr-free search <query>  Ranked provisions from the local index (top 10)
+  cfr-free search <query>  Ranked provisions from the local index
+                             Options: --json, --page N, --per-page N,
+                             --part P, --kind section|appendix, --chapter C
   cfr-free serve          Start the Titan HTTP API (default http://127.0.0.1:8787)
   cfr-free export <path> [jsonl|md]  Snapshot the index (sqlite default;
                                      jsonl/md for pipeline ingestion)
@@ -45,6 +58,95 @@ Environment:
 Exit codes:
   0 success   1 error   2 usage/config   3 index unavailable   4 port in use   5 export refused
 `;
+
+/**
+ * The sections of the usage text: a heading and the lines under it.
+ *
+ * The usage text is one block, and the per-command help is DERIVED from it
+ * rather than written out a second time — so the two can never disagree
+ * about a synopsis, and a change to the block reaches every command's help.
+ */
+function usageSections(): readonly {
+  readonly heading: string;
+  readonly lines: readonly string[];
+}[] {
+  const sections: { heading: string; lines: string[] }[] = [];
+  let current: { heading: string; lines: string[] } | null = null;
+  for (const line of USAGE.split('\n')) {
+    if (line !== '' && !line.startsWith(' ')) {
+      current = { heading: line, lines: [] };
+      sections.push(current);
+      continue;
+    }
+    if (current !== null) current.lines.push(line);
+  }
+  return sections;
+}
+
+/**
+ * The usage entry for one command: its line, and the continuation lines
+ * that belong to it (they are indented deeper than the entry itself).
+ */
+function usageEntry(lines: readonly string[], wanted: string): readonly string[] {
+  const entry: string[] = [];
+  let collecting = false;
+  for (const line of lines) {
+    if (line.trim() === '') break;
+    if (line.startsWith(`  ${wanted}`)) {
+      collecting = true;
+      entry.push(line);
+      continue;
+    }
+    if (!collecting) continue;
+    if (!line.startsWith('   ')) break;
+    entry.push(line);
+  }
+  return entry;
+}
+
+/**
+ * The usage text for one command: its own entry, plus the sections every
+ * command shares (the environment variables and the exit codes).
+ *
+ * `cfr-free search --help` used to be an error ("unknown option for
+ * search: --help"): the only usage text was the global block, so the one
+ * thing a user asks for when they have got a command wrong was the one
+ * thing the tool refused to say.
+ */
+export function commandUsage(command: string): string {
+  const wanted = command === 'mcp' ? 'cfr-free [mcp]' : `cfr-free ${command}`;
+  const picked: string[] = [];
+  for (const section of usageSections()) {
+    if (section.heading === 'Usage:') {
+      const entry = usageEntry(section.lines, wanted);
+      if (entry.length > 0) picked.push('Usage:', ...entry);
+      continue;
+    }
+    if (section.heading === 'Environment:' || section.heading === 'Exit codes:') {
+      picked.push('', section.heading, ...section.lines.filter((line) => line.trim() !== ''));
+    }
+  }
+  return `${picked.join('\n')}\n`;
+}
+
+/** `--help` or `-h` among the arguments: the user is asking about the command. */
+function asksForHelp(args: readonly string[]): boolean {
+  return args.some((arg) => arg === '--help' || arg === '-h');
+}
+
+/** The commands that have their own usage text. */
+const KNOWN_COMMANDS = new Set([
+  'mcp',
+  'sync',
+  'diff',
+  'redline',
+  'historical',
+  'search',
+  'serve',
+  'export',
+  'help',
+  'version',
+]);
 
 /** Raised for bad CLI usage (exit code 2). */
 export class CliError extends CommandError {
@@ -81,8 +183,24 @@ export type ParsedCommand =
       readonly toDate: string;
       readonly citation: string;
     }
-  | { readonly command: 'search'; readonly query: string }
-  | { readonly command: Exclude<Command, 'export' | 'diff' | 'redline' | 'historical' | 'search'> };
+  | {
+      readonly command: 'search';
+      readonly query: string;
+      /** Emit the response as JSON, for a script to read. */
+      readonly json: boolean;
+      readonly page?: number | undefined;
+      readonly perPage?: number | undefined;
+      readonly part?: string | undefined;
+      readonly kind?: 'section' | 'appendix' | undefined;
+      readonly chapter?: string | undefined;
+    }
+  | { readonly command: 'help'; readonly topic?: string }
+  | {
+      readonly command: Exclude<
+        Command,
+        'export' | 'diff' | 'redline' | 'historical' | 'search' | 'help'
+      >;
+    };
 
 /** Validate `export`'s required target path and optional output format. */
 function parseExportTarget(rest: readonly string[]): ParsedCommand {
@@ -162,15 +280,164 @@ function parseHistoricalArgs(rest: readonly string[]): ParsedCommand {
   return { command: 'historical', atDate, citation };
 }
 
-/** `search <query…>` — the words are the query; a dash-prefixed word is refused. */
-function parseSearchArgs(rest: readonly string[]): ParsedCommand {
-  const dashed = rest.find((arg) => arg.startsWith('-'));
-  if (dashed !== undefined) throw new CliError(`unknown option for search: ${dashed}`);
-  const query = rest.join(' ').trim();
-  if (query.length === 0)
-    throw new CliError('search requires a query (e.g. `cfr-free search PTSD`)');
-  return { command: 'search', query };
+/**
+ * The `search` flags, and whether each takes a value.
+ *
+ * The names mirror the HTTP query parameters, so the CLI and the API cannot
+ * drift: `--per-page` is `per_page`, `--kind` is `kind`.
+ */
+const SEARCH_FLAGS: Readonly<Record<string, boolean>> = {
+  '--json': false,
+  '--page': true,
+  '--per-page': true,
+  '--part': true,
+  '--kind': true,
+  '--chapter': true,
+};
+
+/** The search arguments, split into query words, value flags and switches. */
+interface SearchArgs {
+  readonly words: readonly string[];
+  /** The flags that take a value, by name. */
+  readonly values: Readonly<Record<string, string>>;
+  /** The flags that take no value, by name. */
+  readonly switches: ReadonlySet<string>;
 }
+
+/**
+ * Split the search arguments into query words and flags.
+ *
+ * A flag may carry its value with `=` or take the next argument, and a flag
+ * may sit before or after the query words. An unknown option is refused
+ * rather than ignored: a typo that silently searched for the wrong thing
+ * is worse than a refusal.
+ */
+function splitSearchArgs(rest: readonly string[]): SearchArgs {
+  const words: string[] = [];
+  const values: Record<string, string> = {};
+  const switches = new Set<string>();
+  let index = 0;
+  while (index < rest.length) {
+    const arg = rest[index] as string;
+    if (!arg.startsWith('-')) {
+      words.push(arg);
+      index += 1;
+      continue;
+    }
+    const equals = arg.indexOf('=');
+    const name = equals === -1 ? arg : arg.slice(0, equals);
+    const attached = equals === -1 ? undefined : arg.slice(equals + 1);
+    const takesValue = SEARCH_FLAGS[name];
+    if (takesValue === undefined) throw new CliError(`unknown option for search: ${name}`);
+    if (!takesValue) {
+      if (attached !== undefined) throw new CliError(`${name} takes no value`);
+      switches.add(name);
+      index += 1;
+      continue;
+    }
+    const value = attached ?? rest[index + 1];
+    if (value === undefined) throw new CliError(`${name} needs a value`);
+    values[name] = value;
+    index += attached === undefined ? 2 : 1;
+  }
+  return { words, values, switches };
+}
+
+/**
+ * A page number or a page size, as a number.
+ *
+ * The schema owns the RANGE; the CLI owns the TYPE, because a value that is
+ * not a number at all cannot be handed to the schema, and the schema's range
+ * hint would then answer a question nobody asked.
+ */
+function wholeNumber(name: string, raw: string): number {
+  if (!/^\d+$/.test(raw)) throw new CliError(`${name} must be a whole number, got: ${raw}`);
+  return Number(raw);
+}
+
+/**
+ * `search <query…>` — the words are the query, the flags are the HTTP
+ * query parameters.
+ *
+ * The query is checked HERE, before the index is opened. The service
+ * enforces the same rule, but it runs after `ensureIndex`, which may pull
+ * a 2-3 MB sync — a rejected query must not cost the user a download.
+ *
+ * The flags are checked here for the same reason: a rejected flag is the
+ * reader's mistake, and it must not cost a download either. The service's
+ * own validator owns the wording, so the CLI and the API cannot drift in
+ * what they say about a rejected search.
+ */
+function parseSearchArgs(rest: readonly string[]): ParsedCommand {
+  const { words, values, switches } = splitSearchArgs(rest);
+  const query = words.join(' ').trim();
+  if (query.length === 0) {
+    // A flag that takes a value swallows the word after it, so
+    // `--page PTSD` leaves no query behind. The usual advice then
+    // reproduces the command that just failed and points at the wrong
+    // thing, so it says what happened instead.
+    const takers = Object.keys(values);
+    throw new CliError(
+      takers.length === 0
+        ? 'search requires a query (e.g. `cfr-free search PTSD`)'
+        : `search requires a query — ${takers.join(' and ')} took the word; ` +
+            'put the query first, or write the flag as --flag=value',
+    );
+  }
+  if (query.length < SEARCH_QUERY_MIN_LENGTH)
+    throw new CliError(
+      `the search query needs at least ${SEARCH_QUERY_MIN_LENGTH} characters ` +
+        '(e.g. `cfr-free search PTSD`)',
+    );
+  if (query.length > SEARCH_QUERY_MAX_LENGTH)
+    throw new CliError(`the search query may be at most ${SEARCH_QUERY_MAX_LENGTH} characters`);
+
+  const page = values['--page'];
+  const perPage = values['--per-page'];
+  const part = values['--part'];
+  const chapter = values['--chapter'];
+  const kind = values['--kind'];
+
+  const input = validateSearchInput({
+    query,
+    ...(page === undefined ? {} : { page: wholeNumber('--page', page) }),
+    ...(perPage === undefined ? {} : { perPage: wholeNumber('--per-page', perPage) }),
+    ...(part === undefined ? {} : { part }),
+    // The kind is handed over as it was typed. The SERVICE owns the rule
+    // and the wording — it rejects what it does not accept, and says so in
+    // its own words — so the cast only says "this is the shape the service
+    // checks", and the service is what decides.
+    ...(kind === undefined ? {} : { kind: kind as 'section' | 'appendix' }),
+    ...(chapter === undefined ? {} : { chapter }),
+  });
+
+  return {
+    command: 'search',
+    query: input.query,
+    json: switches.has('--json'),
+    page: input.page,
+    perPage: input.perPage,
+    part: input.part,
+    kind: input.kind,
+    chapter: input.chapter,
+  };
+}
+
+/**
+ * The words and flags that select a command on their own.
+ *
+ * A Map, not a plain object: `parseArgs(['toString'])` must still fall
+ * through to "unknown command" — object literals inherit prototype keys,
+ * Maps don't.
+ */
+const GLOBAL_COMMANDS = new Map<string, ParsedCommand>([
+  ['help', { command: 'help' }],
+  ['-h', { command: 'help' }],
+  ['--help', { command: 'help' }],
+  ['version', { command: 'version' }],
+  ['-v', { command: 'version' }],
+  ['--version', { command: 'version' }],
+]);
 
 /**
  * Commands that carry positional arguments, mapped to their parser. A Map
@@ -189,8 +456,14 @@ const ARG_PARSERS = new Map<string, (rest: readonly string[]) => ParsedCommand>(
 export function parseArgs(argv: readonly string[]): ParsedCommand {
   const [first, ...rest] = argv;
   if (first === undefined) return { command: 'mcp' };
-  if (first === '-h' || first === '--help' || first === 'help') return { command: 'help' };
-  if (first === '-v' || first === '--version' || first === 'version') return { command: 'version' };
+  const global = GLOBAL_COMMANDS.get(first);
+  if (global !== undefined) return { ...global };
+  // A help flag among the arguments is a request for the command's usage,
+  // and it is answered BEFORE the command's own parser: a command that
+  // takes arguments used to refuse to explain itself ("unknown option for
+  // search: --help"), which is the one thing a user asks for when they have
+  // got a command wrong.
+  if (asksForHelp(rest) && KNOWN_COMMANDS.has(first)) return { command: 'help', topic: first };
   const parseArgv = ARG_PARSERS.get(first);
   if (parseArgv !== undefined) return parseArgv(rest);
   if (first === 'mcp' || first === 'sync' || first === 'serve') {
@@ -206,6 +479,20 @@ export interface MainIO {
   out(chunk: string): void;
   err(chunk: string): void;
   env: NodeJS.ProcessEnv;
+  /**
+   * Where the structured log goes.
+   *
+   * Defaults to stderr (the CLI's own log sink). Tests inject a capture so
+   * they can assert that a failure's developer-facing detail reaches the
+   * log without letting it near the user's line.
+   */
+  logger?: Logger;
+  /**
+   * Stops a long-running command. `serve` waits for a process signal by
+   * default; a caller that is not a process (a test, an embedder) aborts
+   * this instead.
+   */
+  stop?: AbortSignal;
 }
 
 /** Commands that read one provision across eCFR revisions (`historical`, `redline`). */
@@ -234,22 +521,80 @@ async function runProvisionRead(
   return EXIT.ERROR;
 }
 
+/**
+ * What a failure says to the user.
+ *
+ * An upstream failure is rewritten: the raw message names the endpoint
+ * that failed, which no user action depends on, and the advice names the
+ * thing the user can fix. The detail stays in the structured log.
+ *
+ * The advice is status-aware: eCFR answering at all means the request got
+ * through, so a status-bearing failure is never blamed on the reader's
+ * network.
+ */
+export function failureMessage(error: unknown): string {
+  const failure = upstreamFailure(error);
+  if (failure !== null) {
+    return failure.advice === '' ? failure.reason : `${failure.reason} — ${failure.advice}`;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The exit code a failure maps to.
+ *
+ * An invalid input is a usage mistake, not a service failure. The README's
+ * exit-code table gives code 2 to usage errors, and a script that retries
+ * on 1 would otherwise retry a typo forever.
+ *
+ * Only `invalid_input` is a usage mistake. `unavailable` is a DEPLOYMENT
+ * fault — the service was wired without the client it needs — so it exits 1
+ * with every other service failure: a script must not retry a misconfigured
+ * server as if the reader had made a typo.
+ *
+ * Exported so the mapping can be pinned on its own; `main()` only reaches
+ * it through a throw.
+ */
+export function exitCodeFor(error: unknown): number {
+  if (error instanceof CommandError) return error.exitCode;
+  if (error instanceof ServiceError && error.code === 'invalid_input') return EXIT.USAGE;
+  return error instanceof ConfigError ? EXIT.USAGE : EXIT.ERROR;
+}
+
+/**
+ * The answer a USAGE command gives: the general usage, the usage of one
+ * command, or the version. Undefined for every other command.
+ *
+ * It is its own function so the entry point keeps room for the commands
+ * that DO work: the complexity limit is the repo's own, and a command
+ * dispatch that answers `--help` inline spends the budget it needs for
+ * the commands that read the index.
+ */
+function usageAnswer(parsed: ParsedCommand): string | undefined {
+  if (parsed.command === 'help') {
+    return parsed.topic === undefined ? USAGE : commandUsage(parsed.topic);
+  }
+  if (parsed.command === 'version') return `${VERSION}\n`;
+  return undefined;
+}
+
 /** CLI entry point. Returns the process exit code. */
 export async function main(argv: readonly string[], io: MainIO): Promise<number> {
+  // The logger is created from the config, which is loaded inside the try: a
+  // config error must still reach the catch with its own exit code. The
+  // handle is hoisted so the catch can record an upstream failure's detail.
+  let logger = io.logger;
   try {
     const parsed = parseArgs(argv);
     const command = parsed.command;
-    if (command === 'help') {
-      io.out(USAGE);
-      return 0;
-    }
-    if (command === 'version') {
-      io.out(`${VERSION}\n`);
+    const usage = usageAnswer(parsed);
+    if (usage !== undefined) {
+      io.out(usage);
       return 0;
     }
 
     const config = loadConfig(io.env);
-    const logger = createLogger(config.logLevel);
+    logger ??= createLogger(config.logLevel);
 
     if (command === 'sync') {
       const report = await runSyncCommand(config, logger);
@@ -288,22 +633,54 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
       return 0;
     }
     if (command === 'search') {
-      const result = await runSearchCommand(config, logger, parsed.query);
-      io.out(formatSearchResults(result));
+      const result = await runSearchCommand(config, logger, parsed.query, {
+        page: parsed.page,
+        perPage: parsed.perPage,
+        part: parsed.part,
+        kind: parsed.kind,
+        chapter: parsed.chapter,
+      });
+      io.out(parsed.json ? formatSearchResultsJson(result) : formatSearchResults(result));
       return 0;
     }
     if (PROVISION_READ_COMMANDS.has(command)) {
       return await runProvisionRead(parsed, logger, io);
     }
-    if (command === 'serve') return await runServeCommand(config, logger);
+    if (command === 'serve') {
+      // The URL in plain language: the structured log carries it too, but a
+      // log line is not what a human reads to find out where the server is.
+      return await runServeCommand(config, logger, {
+        onListening: (url) => io.out(`Serving on ${url}\n`),
+        ...(io.stop === undefined ? {} : { stop: io.stop }),
+      });
+    }
     await runMcpCommand(config, logger);
     return 0;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    io.err(`cfr-free: ${message}\n`);
-    if (error instanceof CommandError) return error.exitCode;
-    return error instanceof ConfigError ? EXIT.USAGE : EXIT.ERROR;
+    return reportFailure(error, logger, io);
   }
+}
+
+/**
+ * Report a failure: to the reader, to the log, and as an exit code.
+ *
+ * An upstream failure carries the endpoint and the status: both are
+ * developer-facing, so neither belongs on the reader's line, but neither may
+ * vanish either — the structured log is where they belong. Without that
+ * record the raw detail the reader used to see is simply gone.
+ */
+function reportFailure(error: unknown, logger: Logger | undefined, io: MainIO): number {
+  const failure = upstreamFailure(error);
+  if (failure !== null) {
+    (logger ?? createLogger('error')).error('eCFR request failed', {
+      url: failure.url,
+      status: failure.status ?? null,
+      kind: failure.kind,
+      message: failure.detail,
+    });
+  }
+  io.err(`cfr-free: ${failureMessage(error)}\n`);
+  return exitCodeFor(error);
 }
 
 function isMainModule(): boolean {

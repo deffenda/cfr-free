@@ -1,5 +1,13 @@
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -34,10 +42,13 @@ import { describe, expect, it } from 'vitest';
  * instead of in a stranger's terminal.
  *
  * The file list is read from the repository root, so this test asserts on
- * the TEXT of four other files (`package.json`, `src/cli.ts`, `Dockerfile`,
- * `scripts/prepare.mjs`). That is deliberate: each assertion below is about
- * an INTER-FILE contract that no single-file test can see, and each names
- * the file it reads.
+ * the TEXT of eleven other files (`package.json`, `src/cli.ts`,
+ * `scripts/prepare.mjs`, `scripts/copy-assets.mjs`, `src/titan/ui.ts`,
+ * `src/titan/ui-client.js`, `src/titan/ui-client.css`, `Dockerfile`,
+ * `ci.yml`, `release.yml`, `live-e2e.yml`) and on the repository's TAG
+ * HISTORY (`git tag`, `git show <tag>:package.json`). That is deliberate:
+ * each assertion below is about an INTER-FILE contract that no single-file
+ * test can see, and each names the file it reads.
  */
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -57,6 +68,214 @@ function readManifest(): PackageManifest {
 
 function readRepoFile(relativePath: string): string {
   return readFileSync(path.join(ROOT, relativePath), 'utf8');
+}
+
+/** A semantic version as a comparable triple; the `v` prefix is optional. */
+type VersionTriple = readonly [number, number, number];
+
+// A strict three-part version, with no leading zeros — `v01.2.3` and
+// `v1.2.3` would otherwise be the same version to `Number()`, and two tags
+// would claim it. A pre-release part (`-rc.1`) is part of the version's
+// shape: the release workflow's own `test "$TAG" = "$PKG"` accepts it as
+// long as the manifest declares the very same version.
+const VERSION_PATTERN = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+|)$/;
+/** A release tag: `v` plus a strict three-part version. */
+const RELEASE_TAG_PATTERN = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+/**
+ * A pre-release tag: `v` plus a strict three-part version and a
+ * pre-release part. It is not a release — it claims no version — but it
+ * is a thing a repository can legitimately have.
+ */
+const PRE_RELEASE_TAG_PATTERN = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-[0-9A-Za-z.-]+$/;
+/** A manifest version: three parts, no leading zeros, no `v` prefix. */
+const MANIFEST_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+|)$/;
+
+function parseVersion(raw: string): VersionTriple {
+  const match = VERSION_PATTERN.exec(raw);
+  if (match === null) {
+    throw new Error(`not a vX.Y.Z version: ${raw}`);
+  }
+  return [Number(match[1] ?? '0'), Number(match[2] ?? '0'), Number(match[3] ?? '0')];
+}
+
+function compareVersions(a: VersionTriple, b: VersionTriple): number {
+  for (let index = 0; index < 3; index += 1) {
+    const left = a[index] ?? 0;
+    const right = b[index] ?? 0;
+    if (left !== right) return left < right ? -1 : 1;
+  }
+  return 0;
+}
+
+function git(...args: string[]): string {
+  return execFileSync('git', args, { encoding: 'utf8' });
+}
+
+interface VersionTag {
+  readonly tag: string;
+  readonly version: VersionTriple;
+}
+
+/**
+ * The release tags in a tag list, parsed.
+ *
+ * Only strict `vX.Y.Z` tags count. A pre-release tag (`v0.3.0-rc.1`) is
+ * not a release — it does not claim the version, so it cannot make the
+ * manifest's version untag-able — and it is excluded rather than allowed
+ * to crash the suite. A tag that is not a version at all (`vnext`) is
+ * ignored for the same reason, and a version with a leading zero
+ * (`v01.2.3`) is not a version a release could carry.
+ */
+function parseReleaseTags(tags: readonly string[]): VersionTag[] {
+  return tags
+    .map((tag) => tag.trim())
+    .filter((tag) => RELEASE_TAG_PATTERN.test(tag))
+    .map((tag) => ({ tag, version: parseVersion(tag) }));
+}
+
+/** Every release tag in the checkout. */
+function versionTags(): VersionTag[] {
+  return parseReleaseTags(git('tag').split('\n'));
+}
+
+/** The version the manifest declared at the given tag's commit. */
+function manifestVersionAt(tag: string): string {
+  const parsed = JSON.parse(git('show', `${tag}:package.json`)) as { version?: unknown };
+  return typeof parsed.version === 'string' ? parsed.version : '';
+}
+
+/**
+ * What the guard requires of the tag a release run is on, given the
+ * version the manifest declares: the findings, empty when they agree.
+ *
+ * A RELEASE tag (`vX.Y.Z`) claims the version — the manifest must be
+ * exactly it, the invariant `release.yml` enforces — so a disagreement is
+ * a finding. A PRE-RELEASE tag (`vX.Y.Z-rc.N`) is legitimate and claims
+ * no version (the rule `parseReleaseTags` already applies to the tag
+ * list), so it is no finding whatever the manifest declares. A tag that
+ * is not a version at all — `vnext`, or `v01.2.3` with its leading zero
+ * — is a finding.
+ */
+function releasingTagFindings(tag: string, version: string): string[] {
+  if (RELEASE_TAG_PATTERN.test(tag)) {
+    return tag.slice(1) === version
+      ? []
+      : [`the releasing tag ${tag} and the manifest version ${version} disagree`];
+  }
+  if (PRE_RELEASE_TAG_PATTERN.test(tag)) return [];
+  return [
+    `${tag} is not a release version — a release tag is vX.Y.Z, optionally with a pre-release part (vX.Y.Z-rc.N)`,
+  ];
+}
+
+/** The facts the release guard's decision reads. */
+interface VersionVerdictInput {
+  /** The version the manifest declares. */
+  readonly current: string;
+  /** The newest released tag, e.g. `v0.2.1`. */
+  readonly newestTag: string;
+  /** The version that tag claims, e.g. `0.2.1`. */
+  readonly newestVersion: string;
+  /** The version the tag's OWN tree declared. */
+  readonly atTag: string;
+  /** The commit this tree is at (HEAD). */
+  readonly head: string;
+  /** The commit the tag was cut from. */
+  readonly tagCommit: string;
+}
+
+/**
+ * What the release guard requires of the manifest's version against the
+ * newest released tag: the findings, empty when the tree holds.
+ *
+ * The decision is a PURE function of its inputs, so every branch is
+ * exercised by a test instead of only by the incidental state of the
+ * working tree. That matters because the branches were DEAD CODE: at the
+ * head of this branch the manifest sat at 0.2.2 and the newest tag at
+ * v0.2.1, so the `relation === 0` branch never ran — and both branches
+ * could be deleted with the whole suite still green. A branch no test
+ * reaches is a branch no test can catch being broken, and the branch that
+ * mattered most (the tree must still be the commit the release was cut
+ * from) was reachable only through the working tree's own version.
+ *
+ * The findings, in the order the guard reports them:
+ *  - a version BEHIND the newest release cannot be published again;
+ *  - a version EQUAL to the newest release's is legitimate only on the
+ *    commit that release was cut from, and only when that tag's own tree
+ *    declared the same version.
+ */
+function versionVerdict(input: VersionVerdictInput): string[] {
+  const findings: string[] = [];
+  const relation = compareVersions(parseVersion(input.current), parseVersion(input.newestVersion));
+  if (relation < 0) {
+    findings.push(
+      `package.json ${input.current} is BEHIND the released tag ${input.newestTag} — the version ` +
+        'must move forward; a release cannot reuse or rewind a published version.',
+    );
+  }
+  if (relation === 0) {
+    // The manifest declares the newest release's version. That is
+    // legitimate only on the tree the release was cut from.
+    if (input.atTag !== input.current) {
+      findings.push(
+        `tag ${input.newestTag} was cut from a tree whose package.json says ${input.atTag}, not ` +
+          `${input.current} — the release names a version this manifest does not declare.`,
+      );
+    } else if (input.head !== input.tagCommit) {
+      findings.push(
+        `package.json ${input.current} is the version of the released tag ${input.newestTag}, but ` +
+          'this tree is not the commit that release was cut from — bump package.json to ' +
+          `a version above ${input.newestTag.slice(1)} before publishing again.`,
+      );
+    }
+  }
+  return findings;
+}
+
+/**
+ * The guard's FAILURE STEP: the findings, when there are any, fail the run.
+ *
+ * The verdict itself is a pure function, so a unit test reaches every
+ * branch of it. What no unit test could reach was the step that turns a
+ * finding into a failure — and that step is where CR-01's state could
+ * hide: replacing the `throw` with a `console.error` computes the finding
+ * and discards it, which is lint-clean and leaves the suite green. So the
+ * step is a function of its own, and a test drives a finding through it.
+ */
+function assertNoFindings(findings: readonly string[]): void {
+  if (findings.length > 0) {
+    throw new Error(findings.join('\n'));
+  }
+}
+
+/**
+ * The facts the release guard reads from THIS checkout, and the verdict it
+ * reaches on them: the findings, empty when the tree holds.
+ *
+ * The guard and the test that pins it read the facts through this one
+ * function, so the two cannot drift apart: a guard that judged different
+ * facts than its test checked would assert nothing.
+ */
+function releaseGuardFindings(): string[] {
+  const tags = versionTags();
+  if (tags.length === 0) {
+    throw new Error(
+      'no release tag (vX.Y.Z) found in this checkout — the release guard cannot run. ' +
+        'A checkout without tags (actions/checkout defaults to --depth 1) makes every ' +
+        'check vacuous, so the suite fails instead of passing silently. CI must check ' +
+        'out with fetch-depth: 0; a shallow local clone needs `git fetch --tags`.',
+    );
+  }
+  const newest = tags.reduce((a, b) => (compareVersions(b.version, a.version) > 0 ? b : a));
+  const manifest = readManifest();
+  return versionVerdict({
+    current: manifest.version ?? '',
+    newestTag: newest.tag,
+    newestVersion: newest.tag.slice(1),
+    atTag: manifestVersionAt(newest.tag),
+    head: git('rev-parse', 'HEAD').trim(),
+    tagCommit: git('rev-parse', `${newest.tag}^{commit}`).trim(),
+  });
 }
 
 describe('the npm manifest', () => {
@@ -85,6 +304,27 @@ describe('the npm manifest', () => {
     // json's outDir) and the manifest's bin must live inside it.
     const bin = readManifest().bin?.['cfr-free'];
     expect(bin).toBe('dist/cli.js');
+  });
+
+  it('declares every package the test suite imports', () => {
+    // The OpenAPI suite imports `ajv`, `ajv-formats` and `yaml`. They are
+    // DECLARED devDependencies — but a declaration nothing checks is a
+    // declaration that can be dropped: `ajv` and `ajv-formats` are also
+    // dependencies of `@modelcontextprotocol/sdk`, so they stay resolvable
+    // at the top of `node_modules` after they are undeclared, and the
+    // suite keeps passing on a transitive hoist a later release of the SDK
+    // can take away. (`yaml` fails differently — it is an optional peer of
+    // `vite`, so undeclaring it prunes it from the lockfile and the suite
+    // fails loudly on a missing module.) The declaration is therefore
+    // asserted here, where the manifest is read: the suite must depend on
+    // what this repository declares, not on what it happens to hoist.
+    const manifest = readManifest();
+    for (const dep of ['ajv', 'ajv-formats', 'yaml']) {
+      expect(
+        manifest.devDependencies?.[dep],
+        `${dep} must be a declared devDependency`,
+      ).toBeDefined();
+    }
   });
 });
 
@@ -122,6 +362,39 @@ describe('the prepare script', () => {
     expect(script).toContain('--include=dev');
   });
 
+  it('prefers the locked install, and audits what it installs', () => {
+    // The fallback install runs at INSTALL time, on the network, with every
+    // dependency's lifecycle scripts — so it is the one place in the package
+    // where a version nobody reviewed could be fetched. `npm ci` installs
+    // exactly what the committed lockfile pins, and the install audits what
+    // it fetched: `--no-audit` would suppress the audit of the very
+    // install that could carry the vulnerability.
+    expect(script).toContain("'ci'");
+    expect(script).toContain('--include=dev');
+    // The flag as an ARGUMENT: the script's prose may name the flag it no
+    // longer passes.
+    expect(script, 'the install must not suppress its own audit').not.toMatch(/'--no-audit'/);
+  });
+
+  it('selects the locked install at the call site, not only in the prose', () => {
+    // The claim the previous test made was about a PREFERENCE: the locked
+    // install is the one the script picks. Checking that the token `'ci'`
+    // appears somewhere in the file does not check that — the token is in
+    // the prose, and the preference is in a conditional. Inverting the
+    // conditional (`locked ? runInstall(env) : runLockedInstall(env)`), or
+    // replacing the locked call outright, left the old assertion green
+    // while the code did the opposite of what it claimed.
+    //
+    // So the assertion is against the CALL SITE: the conditional that
+    // selects the locked install, and the locked install's own command.
+    expect(script, 'the locked install must be the one the preference selects').toMatch(
+      /locked\s*\?\s*runLockedInstall\(env\)\s*:\s*runInstall\(env\)/,
+    );
+    // The locked install is `npm ci`, as an ARGUMENT: the prose may name
+    // any command it likes.
+    expect(script, 'the locked install must be `npm ci`').toMatch(/run\('npm', \['ci',/);
+  });
+
   it('guards against the fallback install recursing into itself', () => {
     // npm runs `prepare` on every install, so the fallback's own
     // `npm install` would run this script again, which would start another
@@ -148,6 +421,25 @@ describe('the prepare script', () => {
     const manifest = readManifest();
     expect(manifest.scripts?.['build']).toContain('tsconfig.build.json');
     expect(manifest.devDependencies?.['typescript']).toBe('5.9.3');
+  });
+
+  it('keeps stdout clean, so npm can print a machine-readable payload', () => {
+    // npm's stdout is shared with the output of any lifecycle script it
+    // runs: `npm pack --json` writes its payload there, and npm runs
+    // `prepare` during a pack (npm 10.9.9 does so even with
+    // --ignore-scripts; measured — npm 11 and 12 honour the flag), so a line printed here corrupts that
+    // payload — and the release guard cannot tell a broken package from a
+    // broken parser.
+    //
+    // The production path is the one that prints: a production install
+    // skips the build, so it runs in a moment and without a compiler.
+    const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'prepare.mjs')], {
+      env: { ...process.env, npm_config_omit: 'dev' },
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout, 'the prepare script must not write to stdout').toBe('');
+    expect(result.stderr).toContain('production install');
   });
 });
 
@@ -535,51 +827,279 @@ describe('the release workflow', () => {
   });
 });
 
+describe('the build copies the UI assets', () => {
+  it('copies every asset the UI module reads, into dist/', () => {
+    // The UI's page script and stylesheet are real files, so that eslint
+    // and prettier can see them — but `tsc` compiles TypeScript and copies
+    // nothing else. The build copies them into dist/ itself. A package
+    // built without them would serve a 404 for /ui.js, and a package that
+    // shipped the asset in src/ would serve the wrong path at runtime.
+    const build = readManifest().scripts?.['build'] ?? '';
+    expect(build, 'the build must run the asset copy').toContain('copy-assets.mjs');
+
+    const uiModule = readRepoFile('src/titan/ui.ts');
+    // The UI module must read the browser script from a FILE. If the script
+    // were re-inlined into this module as a template literal while
+    // `src/titan/ui-client.js` stayed on disk, the read below would stop
+    // naming the script, the copy-list loop would no longer cover it, and
+    // the linter would keep checking the clean file on disk while the
+    // browser got the inlined one — the whole gate green over a defective
+    // script. The file must still be the source of the served bytes.
+    expect(uiModule, 'the UI module must read the browser script from a file').toContain(
+      "readAsset('ui-client.js')",
+    );
+    const read = [...uiModule.matchAll(/readAsset\('([^']+)'\)/g)].map((match) => match[1] ?? '');
+    expect(
+      read.length,
+      'no asset read by the UI module — this guard passes on nothing',
+    ).toBeGreaterThan(0);
+
+    const copyScript = readRepoFile('scripts/copy-assets.mjs');
+    const copies = [...copyScript.matchAll(/from: '([^']+)', to: '([^']+)'/g)];
+    expect(copies.length, 'the copy script lists no asset').toBeGreaterThan(0);
+    for (const [, from = '', to = ''] of copies) {
+      expect(to, `${from} must land in dist/, beside the module that reads it`).toMatch(/^dist\//);
+      // Exactly beside the module that reads it: `src/titan/x` is read by
+      // `src/titan/ui.ts`, so the built copy is `dist/titan/x`. A target that
+      // merely STARTS with `dist/` — `dist/titan/x.bak`, `dist/x` — would
+      // leave the server reading a file that is not there.
+      expect(to, `${from} must land beside the module that reads it`).toBe(
+        from.replace(/^src\//, 'dist/'),
+      );
+    }
+
+    const sources = copies.map(([, from]) => from);
+    for (const asset of read) {
+      expect(
+        sources,
+        `src/titan/${asset} is read by the UI module but the build does not copy it`,
+      ).toContain(`src/titan/${asset}`);
+    }
+  });
+
+  it('ships the asset copy script, so a git install can build', () => {
+    // `prepare` runs the build for a git install, and the build copies the
+    // assets. A tarball that carried `prepare` without the copy script
+    // would fail to build wherever npm runs it.
+    const files = readManifest().files ?? [];
+    expect(files).toContain('scripts/copy-assets.mjs');
+  });
+
+  it('actually copies the assets where the module that reads them will look', () => {
+    // The assertions above read the copy script's TEXT. This one RUNS it, so
+    // a target path that is wrong in a way the text cannot show — a
+    // directory that is never created, a truncated copy — fails here rather
+    // than as a 404 on /ui.js in the operator's browser.
+    //
+    // The script resolves the repository root from its own path, so a copy
+    // of it under <tmp>/scripts/ copies <tmp>/src/... to <tmp>/dist/....
+    const dir = mkdtempSync(path.join(tmpdir(), 'cfr-assets-'));
+    try {
+      mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+      mkdirSync(path.join(dir, 'src', 'titan'), { recursive: true });
+      copyFileSync(
+        path.join(ROOT, 'scripts', 'copy-assets.mjs'),
+        path.join(dir, 'scripts', 'copy-assets.mjs'),
+      );
+      for (const asset of ['ui-client.js', 'ui-client.css']) {
+        copyFileSync(path.join(ROOT, 'src', 'titan', asset), path.join(dir, 'src', 'titan', asset));
+      }
+
+      const out = execFileSync(process.execPath, [path.join(dir, 'scripts', 'copy-assets.mjs')], {
+        cwd: dir,
+        encoding: 'utf8',
+      });
+      // Nothing on stdout. npm's stdout is shared with the output of any
+      // lifecycle script it runs: `npm pack --json` writes its payload
+      // there, and npm runs `prepare` during a pack (npm 10.9.9 does
+      // so even with --ignore-scripts; measured — npm 11 and 12 honour the flag), so a line
+      // printed here corrupts that payload — and the release guard cannot
+      // tell a broken package from a broken parser.
+      expect(out, 'the copy script must not write to stdout').toBe('');
+
+      for (const asset of ['ui-client.js', 'ui-client.css']) {
+        const copied = path.join(dir, 'dist', 'titan', asset);
+        expect(existsSync(copied), `${asset} was not copied into dist/titan/`).toBe(true);
+        // Byte for byte: a truncated or transformed copy is not the asset.
+        expect(readFileSync(copied)).toEqual(readFileSync(path.join(ROOT, 'src', 'titan', asset)));
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('the release guard', () => {
-  it('declares a version that is not already taken by a tag', () => {
+  it('reads only strict release tags out of a tag list', () => {
+    // A tag that is not a release version must not crash the suite: the
+    // guard runs on every commit, and a pre-release tag (`v0.3.0-rc.1`) or
+    // a non-version tag (`vnext`) is a thing a repository can legitimately
+    // have. A leading zero is not a version a release could carry, and
+    // `Number('01')` is `1`, so `v01.2.3` would collide with `v1.2.3`.
+    expect(parseReleaseTags(['v0.3.0-rc.1', 'vnext', 'v1.0', 'v1.0.0+build', 'v01.2.3'])).toEqual(
+      [],
+    );
+    expect(parseReleaseTags(['v0.2.1', 'v0.3.0']).map((tag) => tag.tag)).toEqual([
+      'v0.2.1',
+      'v0.3.0',
+    ]);
+    expect(parseReleaseTags(['v0.2.1'])[0]?.version).toEqual([0, 2, 1]);
+  });
+
+  it('judges the releasing tag by the same version rule as the tag list', () => {
+    // A RELEASE tag claims the version, so the manifest must be exactly
+    // it; a PRE-RELEASE tag is legitimate and claims no version, so it is
+    // no finding whatever the manifest declares; a tag that is not a
+    // version at all is a finding. The two patterns used to disagree — the
+    // releasing tag was matched against a looser `/^v\d+\.\d+\.\d+$/`, so
+    // `v01.2.3` passed a check the rest of the guard rejects.
+    expect(releasingTagFindings('v0.2.2', '0.2.2')).toEqual([]);
+    expect(releasingTagFindings('v0.2.2', '0.2.3').join(' ')).toContain('disagree');
+    expect(releasingTagFindings('v0.3.0-rc.1', '0.3.0-rc.1')).toEqual([]);
+    expect(releasingTagFindings('v0.3.0-rc.1', '0.3.0')).toEqual([]);
+    // The message matters, not only its count: a tag with a leading zero
+    // is refused as NOT a version, which is a different finding from a
+    // tag that is a version the manifest does not declare.
+    expect(releasingTagFindings('v01.2.3', '0.1.3').join(' ')).toContain('not a release version');
+    expect(releasingTagFindings('vnext', '0.1.0').join(' ')).toContain('not a release version');
+  });
+
+  it('accepts a pre-release version in the manifest, and nothing looser', () => {
+    // A pre-release release publishes the tag `v0.3.0-rc.1` only when the
+    // manifest declares that very version, so a manifest that cannot hold
+    // one would fail here before such a release could run at all. A `v`
+    // prefix and a leading zero stay refused: npm rejects them, and
+    // `Number('01')` is `1`, so `01.2.3` would collide with `1.2.3`.
+    expect('0.3.0-rc.1').toMatch(MANIFEST_VERSION_PATTERN);
+    expect('v0.3.0').not.toMatch(MANIFEST_VERSION_PATTERN);
+    expect('01.2.3').not.toMatch(MANIFEST_VERSION_PATTERN);
+    expect('0.3.0').toMatch(MANIFEST_VERSION_PATTERN);
+    // The comparable triple of a pre-release version is the release part:
+    // `0.3.0-rc.1` is compared as `0.3.0`.
+    expect(parseVersion('0.3.0-rc.1')).toEqual([0, 3, 0]);
+  });
+
+  it('judges the version against the newest release, branch by branch', () => {
+    // The decision the guard makes, exercised directly. It used to live
+    // INSIDE the guard, where its branches ran only when the working
+    // tree happened to hold the state they judged — and the tree held
+    // `relation > 0` (manifest 0.2.2, newest tag v0.2.1), so the
+    // `relation === 0` branch NEVER RAN. Both branches could then be
+    // deleted with the whole suite green, and the manifest could be put
+    // back to 0.2.1 — main's exact pre-pull-request state — with the
+    // suite green as well. Every branch below is pinned here instead, so
+    // each one is reached whether or not the tree is in that state.
+    const base = {
+      current: '0.2.1',
+      newestTag: 'v0.2.1',
+      newestVersion: '0.2.1',
+      atTag: '0.2.1',
+      head: 'abc1234',
+      tagCommit: 'abc1234',
+    };
+
+    // Past the newest release: the ordinary state of `main` between
+    // releases. No finding.
+    expect(versionVerdict({ ...base, current: '0.2.2' })).toEqual([]);
+
+    // Behind the newest release: a published version cannot be reused or
+    // rewound.
+    const behind = versionVerdict({ ...base, current: '0.2.0' });
+    expect(behind).toHaveLength(1);
+    expect(behind.join(' ')).toContain('is BEHIND the released tag v0.2.1');
+
+    // Equal to the newest release's version, on the commit the release
+    // was cut from: the legitimate form, and no finding.
+    expect(versionVerdict(base)).toEqual([]);
+
+    // Equal to the newest release's version, on a DIFFERENT commit: the
+    // version must move forward again. This is the branch that carried
+    // CR-01's headline state, and it is checked here rather than by the
+    // working tree's own version.
+    const otherCommit = versionVerdict({ ...base, tagCommit: 'def5678' });
+    expect(otherCommit).toHaveLength(1);
+    expect(otherCommit.join(' ')).toContain('not the commit that release was cut from');
+
+    // Equal to the newest release's version, but the tag's own tree
+    // declared another version: the tag names a release this manifest
+    // does not describe (the historical v0.2.0 shape).
+    const inconsistentTag = versionVerdict({ ...base, atTag: '0.1.0' });
+    expect(inconsistentTag).toHaveLength(1);
+    expect(inconsistentTag.join(' ')).toContain(
+      'the release names a version this manifest does not declare',
+    );
+  });
+
+  it('has the tags it needs to judge the version', () => {
+    // Every check below reads the tag list, so an EMPTY tag list makes them
+    // vacuous — they would all pass while asserting nothing. That is not a
+    // hypothetical: `actions/checkout` clones with `--depth 1` by default and
+    // fetches no tags, so in CI this guard never ran (verified against the
+    // public repository on 2026-10-29: a depth-1 clone reports zero tags).
+    // The gate must therefore FAIL on an empty tag list rather than pass
+    // silently; the workflows that run it check out with `fetch-depth: 0`.
+    const tags = versionTags();
+    expect(
+      tags.length,
+      'no release tag (vX.Y.Z) found in this checkout — the release guard cannot ' +
+        'run. A checkout without tags (actions/checkout defaults to --depth 1) makes ' +
+        'every check below vacuous, so the suite fails instead of passing silently. ' +
+        'CI must check out with fetch-depth: 0; a shallow local clone needs ' +
+        '`git fetch --tags`.',
+    ).toBeGreaterThan(0);
+  });
+
+  it('declares a version past every released tag', () => {
     // The release workflow refuses to publish when the tag and package.json
     // disagree: `test "$TAG" = "$PKG"`. A version that an existing tag
     // already uses cannot be re-tagged, so the next release would have to
     // fail the guard. This happened: the tag v0.2.0 was cut while
     // package.json still said 0.1.0, so the tree at that tag says 0.1.0
     // while `main` says 0.2.0 — and the next tag could satisfy neither.
-    // The version must therefore move PAST every existing tag.
+    // The version must therefore move PAST every released tag.
     //
-    // The one run where this version legitimately equals a tag is the
-    // tag-triggered release itself: the workflow checks out the pushed tag
-    // and requires tag == package.json, so without an exemption the guard
-    // would fail every release by construction (observed on v0.2.1,
-    // 2026-10-29 UTC). Only the tag the runner reports as being released
-    // is exempt — GITHUB_REF_TYPE is "tag" solely on tag-triggered runs,
-    // and GitHub does not let a workflow overwrite that default — so
-    // branch and PR runs ("branch", or unset locally) still cover every
-    // tag. The exemption is an env-var signal, not a verification that
-    // refs/tags/$GITHUB_REF_NAME is HEAD; the workflow's own
-    // `test "$TAG" = "$PKG"` checks, which run in jobs needing this one,
-    // carry that burden. When the exemption applies, the vacuous
-    // "not equal to any tag" loop below is replaced by a positive
-    // assertion that the checked-out version IS the released tag.
+    // The invariant is stated against the NEWEST release, not against every
+    // tag. An earlier form — "the version must differ from every tag" —
+    // contradicted the release workflow: release.yml requires
+    // `tag == package.json` at the moment of release and a release changes
+    // no file, so `main` is guaranteed to hold `version == latest tag`
+    // between releases, exactly the state that form forbade. The gate was
+    // therefore red locally (0.2.1 against tag v0.2.1) and green in CI
+    // (where it never ran at all).
+    //
+    // What the version may equal, then, is the newest release's version —
+    // on ONE tree: the commit that release was cut from. The release itself
+    // (a tag push) checks out exactly that commit, so the release run and
+    // the tree it published agree; once anything else lands on `main`, the
+    // version must move past it again. The tag must also be self-consistent
+    // — its tree must have declared the same version — or the release that
+    // tag names is not the release this manifest describes (the v0.2.0
+    // failure above).
     const manifest = readManifest();
     const version = manifest.version ?? '';
-    expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+    // A pre-release version is allowed: the release workflow publishes a
+    // pre-release tag (`v0.3.0-rc.1`) only when the manifest declares
+    // that very version, and a manifest that cannot hold it would make
+    // every pre-release release fail here first.
+    expect(version).toMatch(MANIFEST_VERSION_PATTERN);
 
     const releasingTag =
       process.env.GITHUB_REF_TYPE === 'tag' ? (process.env.GITHUB_REF_NAME ?? '') : '';
     if (releasingTag) {
-      // On the release run itself, replace the vacuous loop below with the
-      // invariant the workflow enforces: the checked-out manifest must be
-      // exactly the tag being released.
-      expect(releasingTag).toMatch(/^v\d+\.\d+\.\d+$/);
-      expect(version).toBe(releasingTag.slice(1));
+      // On the release run itself the manifest must be exactly the tag being
+      // released — the invariant the workflow enforces — unless the tag is
+      // a pre-release, which claims no version.
+      expect(
+        releasingTagFindings(releasingTag, version),
+        'the releasing tag and the manifest must agree',
+      ).toEqual([]);
     }
-    const tags = execFileSync('git', ['tag'], { encoding: 'utf8' })
-      .split('\n')
-      .map((tag) => tag.trim())
-      .filter((tag) => tag.startsWith('v') && tag !== releasingTag);
-    for (const tag of tags) {
-      const tagged = tag.slice(1);
-      expect(version, `package.json ${version} is already used by tag ${tag}`).not.toBe(tagged);
-    }
+
+    const findings = releaseGuardFindings();
+    // A finding must FAIL the run, not be computed and discarded: the step
+    // that raises it is `assertNoFindings`, and a test drives a finding
+    // through that very step.
+    assertNoFindings(findings);
   });
 });
 
@@ -611,13 +1131,15 @@ describe('the packed artifact', () => {
       mkdirSync(path.join(staging, 'scripts'), { recursive: true });
       writeFileSync(path.join(staging, 'scripts', 'prepare.mjs'), '// stub\n');
 
-      const output = execFileSync('npm', ['pack', '--dry-run', '--ignore-scripts', '--json'], {
-        cwd: staging,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
-      const parsed = JSON.parse(output) as Array<{ files?: Array<{ path: string }> }>;
-      const paths = (parsed[0]?.files ?? []).map((file) => file.path);
+      const output = execFileSync(
+        process.execPath,
+        [path.join(ROOT, 'scripts', 'pack-list.mjs'), staging],
+        {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        },
+      );
+      const paths = JSON.parse(output) as string[];
       expect(paths).toContain('dist/cli.js');
       expect(paths).toContain('dist/config.js');
       expect(paths).toContain('scripts/prepare.mjs');
@@ -627,5 +1149,44 @@ describe('the packed artifact', () => {
     } finally {
       rmSync(staging, { recursive: true, force: true });
     }
+  }, 60_000);
+});
+
+/**
+ * The release guard's WIRING: the step that turns a finding into a failure,
+ * and the facts it reads in this checkout.
+ *
+ * The verdict is unit-tested branch by branch, and the guard's own state
+ * exercises it only when the tree happens to hold a state the verdict
+ * finds. The two steps between them — GATHER the facts, RAISE the
+ * finding — are what a one-line edit can break without any test
+ * noticing, so each is pinned here.
+ */
+describe('the release guard — the wiring from verdict to failure', () => {
+  it('fails the run when the verdict has a finding', () => {
+    // The step the guard's own state cannot reach: this tree holds, so the
+    // guard finds nothing and the failure step never runs. Swapping the
+    // `throw` for a `console.error` would compute the finding and discard
+    // it — lint-clean, and green. So the step is driven here with a
+    // finding it cannot ignore.
+    expect(() =>
+      assertNoFindings(['package.json 0.2.1 is BEHIND the released tag v0.2.1']),
+    ).toThrow('package.json 0.2.1 is BEHIND the released tag v0.2.1');
+
+    // And a run with nothing to report must NOT fail: the step is not a
+    // blanket failure, and the guard's green state depends on it.
+    expect(() => assertNoFindings([])).not.toThrow();
+  });
+
+  it('finds no violation in this checkout', () => {
+    // The live facts, as an assertion rather than a thrown error: when the
+    // tree is in CR-01's state — the manifest back at the released
+    // version, on a tree that is not the commit the release was cut from
+    // — this fails WHATEVER the failure step does. The guard's own test
+    // reads the same facts through the same function.
+    expect(
+      releaseGuardFindings(),
+      'the release guard must find no violation in this checkout',
+    ).toEqual([]);
   });
 });

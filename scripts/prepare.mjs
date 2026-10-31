@@ -43,7 +43,9 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 
@@ -63,9 +65,23 @@ function localTypeScript() {
   }
 }
 
-/** Run a command, returning its exit status. */
+/**
+ * Run a command, returning its exit status.
+ *
+ * The child's stdout goes to THIS script's stderr. npm's stdout is not
+ * the program's alone: `npm pack --json` writes its payload there, and
+ * whatever a lifecycle script prints joins it in the same stream. npm
+ * runs `prepare` during `npm pack` — npm 10.9.9 does so even
+ * with --ignore-scripts (measured; npm 11 and 12 honour the flag) — so a line printed to stdout during
+ * a pack corrupts that payload, and the release guard cannot tell a
+ * broken package from a broken parser. The scripts npm runs therefore
+ * write to stderr and leave stdout alone.
+ */
 function run(command, args, env) {
-  const result = spawnSync(command, args, { stdio: 'inherit', ...(env ? { env } : {}) });
+  const result = spawnSync(command, args, {
+    stdio: ['inherit', process.stderr, 'inherit'],
+    ...(env ? { env } : {}),
+  });
   if (result.error !== undefined) {
     console.error(`prepare: could not run ${command}: ${result.error.message}`);
     return 1;
@@ -93,22 +109,39 @@ function run(command, args, env) {
  * the package's own.
  */
 function installDevDependencies() {
-  console.log('prepare: no local TypeScript found — installing the dev dependencies to build with');
+  console.error(
+    'prepare: no local TypeScript found — installing the dev dependencies to build with',
+  );
   const env = { ...process.env, CFR_FREE_PREPARING: '1' };
-  const status = run(
+  // The LOCKED install is preferred. `npm ci` installs exactly the versions
+  // the committed lockfile pins and refuses to run when package.json and
+  // the lockfile disagree, so the build cannot be fed a version nobody
+  // reviewed — and it audits what it installed, which the `--no-audit`
+  // install did not: an install that suppressed its own audit cannot
+  // report the vulnerability it just fetched.
+  const locked = existsSync(fileURLToPath(new URL('../package-lock.json', import.meta.url)));
+  const status = locked ? runLockedInstall(env) : runInstall(env);
+  if (status === 0) return localTypeScript() !== null;
+  if (!locked) return false;
+  // `npm ci` refuses to run when the lockfile is out of step with
+  // package.json. The install still has to work, so the unlocked install
+  // is the fallback — audited, but not locked.
+  console.error('prepare: the locked install failed — retrying with an unlocked install');
+  return runInstall(env) === 0 && localTypeScript() !== null;
+}
+
+/** The locked install: `npm ci` against the committed lockfile. */
+function runLockedInstall(env) {
+  return run('npm', ['ci', '--include=dev', '--no-fund', '--global=false'], env);
+}
+
+/** The unlocked install, for a tree with no lockfile to install from. */
+function runInstall(env) {
+  return run(
     'npm',
-    [
-      'install',
-      '--include=dev',
-      '--no-save',
-      '--no-package-lock',
-      '--no-audit',
-      '--no-fund',
-      '--global=false',
-    ],
+    ['install', '--include=dev', '--no-save', '--no-package-lock', '--no-fund', '--global=false'],
     env,
   );
-  return status === 0 && localTypeScript() !== null;
 }
 
 function main() {
@@ -123,7 +156,7 @@ function main() {
     // A production install consumes the prebuilt `dist/` in the published
     // tarball. Compiling here would demand a toolchain the install
     // deliberately excluded.
-    console.log(
+    console.error(
       'prepare: production install — the published tarball ships dist/, skipping the build',
     );
     return;
@@ -148,7 +181,16 @@ function main() {
     return;
   }
 
-  process.exitCode = run(process.execPath, [compiler, '-p', 'tsconfig.build.json']);
+  const status = run(process.execPath, [compiler, '-p', 'tsconfig.build.json']);
+  if (status !== 0) {
+    process.exitCode = status;
+    return;
+  }
+  // The browser assets are not TypeScript sources, so tsc copies them
+  // nowhere: the build copies them into dist/ itself, and a package built
+  // without them would serve a 404 for /ui.js.
+  const copyAssets = fileURLToPath(new URL('./copy-assets.mjs', import.meta.url));
+  process.exitCode = run(process.execPath, [copyAssets]);
 }
 
 main();

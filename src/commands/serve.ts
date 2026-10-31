@@ -31,15 +31,30 @@ function listenExitCode(error: unknown): number {
  *
  * @returns the process exit code to use after shutdown completes.
  */
-export async function runServeCommand(config: AppConfig, logger: Logger): Promise<number> {
+export interface ServeOptions {
+  /** Called with the URL once the server is listening. */
+  readonly onListening?: (url: string) => void;
+  /** Stops the server when the signal aborts; the process signals are the default. */
+  readonly stop?: AbortSignal;
+}
+
+export async function runServeCommand(
+  config: AppConfig,
+  logger: Logger,
+  options: ServeOptions = {},
+): Promise<number> {
   const store = Store.open(config.indexPath);
   try {
-    const freshness = await ensureIndex(store, config, logger);
-    // The diff facade and /api/v1/diff need a live client; createEcfrApi() is
-    // the same stateless factory serve already uses for the refresh scheduler.
-    const service = new CFRService(store, config.maxAgeDays, createEcfrApi(), logger);
+    // ONE eCFR client serves the whole process — the startup sync, the
+    // diff facade, /api/v1/diff and the background refresh scheduler all
+    // use it — so the document memo and the upstream-fetch semaphore bound
+    // THIS process, not each caller separately. The diff facade and
+    // /api/v1/diff need a live client; it is the same one.
+    const ecfr = createEcfrApi();
+    const freshness = await ensureIndex(store, config, logger, { createEcfr: () => ecfr });
+    const service = new CFRService(store, config.maxAgeDays, ecfr, logger);
 
-    // Disk capacity for /health and /metrics (SPEC §13 #22): probed once at
+    // Disk capacity for /health and /metrics (delivery log §13 #22): probed once at
     // boot and re-probed after every refresh attempt — success or failure,
     // because the capacity signal must not depend on sync health. The HTTP
     // layer reads this cell per request through an accessor, so it never
@@ -77,7 +92,11 @@ export async function runServeCommand(config: AppConfig, logger: Logger): Promis
         resolve();
       });
     });
-    logger.info('http api listening', { url: `http://${config.host}:${config.port}`, freshness });
+    const url = `http://${config.host}:${config.port}`;
+    logger.info('http api listening', { url, freshness });
+    // The plain-language line: where the server actually ended up, for the
+    // person who started it.
+    options.onListening?.(url);
 
     // Opt-in background refresh (CFR_REFRESH_HOURS): armed only after a
     // successful bind, so a failed listen exits with no timer left behind.
@@ -88,7 +107,7 @@ export async function runServeCommand(config: AppConfig, logger: Logger): Promis
             logger,
             refresh: async () => {
               try {
-                await syncIndex({ ecfr: createEcfrApi(), store, logger });
+                await syncIndex({ ecfr, store, logger });
               } finally {
                 // Re-stat the volume regardless of the sync outcome: capacity
                 // visibility must not hinge on sync success. probeDisk never
@@ -100,21 +119,25 @@ export async function runServeCommand(config: AppConfig, logger: Logger): Promis
         : null;
     scheduler?.schedule();
 
+    const cleanup = async (): Promise<void> => {
+      scheduler?.dispose();
+      await new Promise<void>((done) => {
+        server.close(() => {
+          store.close();
+          done();
+        });
+        server.closeAllConnections();
+      });
+    };
+
     return await new Promise<number>((resolve) => {
-      const shutdown = createShutdownController(
-        () =>
-          new Promise<void>((done) => {
-            scheduler?.dispose();
-            server.close(() => {
-              store.close();
-              done();
-            });
-            server.closeAllConnections();
-          }),
-        { exit: (code) => resolve(code), logger },
-      );
+      const shutdown = createShutdownController(cleanup, { exit: (code) => resolve(code), logger });
       process.once('SIGINT', () => void shutdown.handle('SIGINT'));
       process.once('SIGTERM', () => void shutdown.handle('SIGTERM'));
+      // An abort is a shutdown reason of its own: it is how a caller that
+      // is not a process (a test, an embedder) stops the server without
+      // raising a signal at the whole process group.
+      options.stop?.addEventListener('abort', () => void shutdown.handle('abort'));
     });
   } catch (error) {
     store.close();

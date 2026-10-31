@@ -1,5 +1,4 @@
-import { ServiceError } from '../core/service.js';
-import { StructureError } from '../core/structure.js';
+import { ServiceError, StructureError } from '../core/errors.js';
 
 /**
  * Client-safe error text for the MCP surface — the parity fix for SPEC §7
@@ -23,7 +22,7 @@ import { StructureError } from '../core/structure.js';
  * (`error instanceof Error ? error.message : String(error)`, mirroring
  * http-server.ts), so sanitization applies to the wire only.
  */
-export function isClientSafe(error: unknown): error is ServiceError | StructureError {
+function isClientSafe(error: unknown): error is ServiceError | StructureError {
   return error instanceof ServiceError || error instanceof StructureError;
 }
 
