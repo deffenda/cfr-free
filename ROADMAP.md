@@ -241,6 +241,10 @@ packets; the third is the queued E2 item):
   revision in force on a date without reporting which issue date that
   was); a date outside the archive (2017-01-01 floor, measured) is a
   clean not_found; the date and citation are validated before any fetch.
+  **Amended (2026-10-30):** a date outside the archive is a USAGE error
+  (`invalid_input`: exit 2 on the CLI, HTTP 400 on the API), not a
+  `not_found` — the reader's date is the wrong thing, and a script must not
+  retry it forever.
   Verdict: APPROVE 0/0/0.
 
 **Decisions taken, with the evidence:**
