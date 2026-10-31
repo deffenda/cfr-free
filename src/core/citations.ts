@@ -42,3 +42,42 @@ export function normalizeCitation(input: string): ParsedCitation | null {
   if (!SECTION_RE.test(candidate)) return null;
   return { kind: 'section', citation: candidate.toLowerCase() };
 }
+
+/**
+ * The one provision in a parsed document that a citation names.
+ *
+ * CR-17 found two functions named `findProvision` with the same intent and
+ * DIFFERENT matching rules: the point-in-time read folded both sides to
+ * lower case, while the redline folded both sides for an appendix but
+ * compared a section against `target.citation` alone — relying on an
+ * invariant (`normalizeCitation` already lower-cases) that is invisible at
+ * the call site and easy to break. A future change to one would not have
+ * reached the other.
+ *
+ * The rule now lives in one place:
+ *
+ * - both sides are compared case-INSENSITIVELY. The corpus stores section
+ *   citations lower-cased (`4.124A` is `4.124a`), and the store is this
+ *   repo's citation-identity authority — `Store.getSection` resolves
+ *   appendix citations with COLLATE NOCASE, so 'appendix a to part 4' hits
+ *   the same row 'Appendix A to Part 4' does;
+ * - the kind must match exactly.
+ *
+ * The REPORTED citation stays the row's verbatim XML `N` (the corpus form);
+ * only the MATCH folds case.
+ *
+ * @param sections The provisions parsed from a document.
+ * @param kind The kind of provision wanted.
+ * @param citation The citation wanted, in any case.
+ * @returns The matching provision, or `undefined` when there is none.
+ */
+export function findProvision<T extends { readonly kind: string; readonly citation: string }>(
+  sections: readonly T[],
+  kind: 'section' | 'appendix',
+  citation: string,
+): T | undefined {
+  const wanted = citation.toLowerCase();
+  return sections.find(
+    (section) => section.kind === kind && section.citation.toLowerCase() === wanted,
+  );
+}

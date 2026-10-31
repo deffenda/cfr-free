@@ -1,21 +1,13 @@
 import type { Logger } from '../logger.js';
+import { fetchFullTitleXml } from './archive.js';
 import { hashText } from './changes.js';
-import { normalizeCitation, type ParsedCitation } from './citations.js';
+import { findProvision, normalizeCitation, type ParsedCitation } from './citations.js';
 import { assertIssueDate } from './diff.js';
 import type { EcfrApi } from './ecfr.js';
 import { POINT_IN_TIME_NOTICE } from './point-in-time.js';
-import { ServiceError } from './service.js';
+import { ServiceError } from './errors.js';
 import { SyncError } from './sync.js';
 import { parseTitleXml, type RawSection } from './xml.js';
-
-/**
- * Per-provision line redline: "what lines changed in 38 CFR 4.125 between
- * issue date A and B?". Both dates' full-title XML is fetched through the
- * SAME document endpoint `diff` uses (no new eCFR URL shape = no new failure
- * modes), the one requested provision is extracted from each parse, and its
- * text is diffed line by line. A provision absent on one date is reported as
- * added/removed; one absent from BOTH dates is `not_found` after the fetches.
- */
 
 /** Above this many lines on EITHER side, the LCS is replaced by coarse blocks. */
 export const MAX_REDLINE_LINES = 2_000;
@@ -75,32 +67,18 @@ export function splitRedlineLines(text: string): string[] {
 }
 
 /**
- * Find the provision in one date's parse. Citation identity follows
- * normalizeCitation's output and the XML row's raw `N` attribute:
+ * Find the provision in one date's parse.
  *
- * - sections compare case-INSENSITIVELY — normalizeCitation lowercases the
- *   input (probe: `4.125`, `38 CFR 4.125`, `§ 4.125` all → `4.125`) while
- *   the XML `N` may carry different casing (probe: a row parses as
- *   `4.124A`), so both sides fold to lower case — plain equality would miss
- *   such a provision;
- * - appendices compare case-INSENSITIVELY too — the store is this repo's
- *   citation-identity authority and `Store.getSection` resolves appendix
- *   citations with COLLATE NOCASE (src/core/store.ts), so 'appendix a to
- *   part 4' hits the same row 'Appendix A to Part 4' does. The REPORTED
- *   citation stays the row's verbatim XML `N` (the corpus form), while the
- *   MATCH folds both sides to lower case.
+ * Citation identity follows `normalizeCitation`'s output and the XML row's
+ * raw `N` attribute, and the MATCHING RULE lives in one place —
+ * `findProvision` in `src/core/citations.ts`, shared with the point-in-time
+ * read in `src/core/historical.ts` (CR-17). Both sides fold to lower case,
+ * because the XML `N` may carry different casing than `normalizeCitation`
+ * produces (a row parses as `4.124A`), and because the store resolves
+ * appendix citations with COLLATE NOCASE.
+ *
+ * The REPORTED citation stays the row's verbatim XML `N` (the corpus form).
  */
-function findProvision(
-  sections: readonly RawSection[],
-  target: ParsedCitation,
-): RawSection | undefined {
-  return sections.find((section) =>
-    target.kind === 'appendix'
-      ? section.kind === 'appendix' &&
-        section.citation.toLowerCase() === target.citation.toLowerCase()
-      : section.kind === 'section' && section.citation.toLowerCase() === target.citation,
-  );
-}
 
 /** parseTitleXml plus the zero-section tripwire diffIssues applies per date. */
 function parseDated(xml: string, issueDate: string): RawSection[] {
@@ -218,18 +196,18 @@ function presenceHunks(lines: readonly string[], presentSide: 'from' | 'to'): Hu
 }
 
 /**
- * Derive status + hunks from the two parses: existence first (added/removed,
- * neither → not_found), then text equality via hashText (unchanged before any
- * line work — a large identical provision never reaches the LCS), then the
- * capped line diff itself.
- */
-/**
  * The redline WITHOUT the notice, so the notice is attached once, at the
  * single place the redline leaves the core, and cannot be missing from one
  * status.
  */
 type RedlineBody = Omit<SectionRedline, 'notice'>;
 
+/**
+ * Derive status + hunks from the two parses: existence first (added/removed,
+ * neither → not_found), then text equality via hashText (unchanged before any
+ * line work — a large identical provision never reaches the LCS), then the
+ * capped line diff itself.
+ */
 function deriveRedline(
   fromSections: readonly RawSection[],
   toSections: readonly RawSection[],
@@ -237,8 +215,8 @@ function deriveRedline(
   fromDate: string,
   toDate: string,
 ): RedlineBody {
-  const fromRow = findProvision(fromSections, target);
-  const toRow = findProvision(toSections, target);
+  const fromRow = findProvision(fromSections, target.kind, target.citation);
+  const toRow = findProvision(toSections, target.kind, target.citation);
 
   if (fromRow === undefined) {
     if (toRow === undefined) {
@@ -297,11 +275,17 @@ function deriveRedline(
 }
 
 /**
- * Redline one eCFR provision across two issue dates.
+ * Redline one eCFR provision across two issue dates: "what lines changed in
+ * 38 CFR 4.125 between issue date A and B?".
  *
  * Pure function of the two dates + citation: no store interaction and no
  * structure fetch — same stance as {@link diffIssues} (a textual diff of two
  * parsed documents does not need the index).
+ *
+ * Both dates' full-title XML is fetched through the SAME document endpoint
+ * `diff` uses (no new eCFR URL shape = no new failure modes); the one
+ * requested provision is extracted from each parse, and its text is diffed
+ * line by line. A provision absent on one date is reported as added/removed.
  *
  * @throws {ServiceError} (`invalid_input`) for malformed, impossible
  *   (out-of-range month/day), or identical dates, and for a non-citation —
@@ -331,14 +315,16 @@ export async function redlineSection(
   }
   const { ecfr, logger } = deps;
 
-  // Two independent GETs on a stateless HttpClient (http-client.ts keeps all
-  // request state function-local), so the fetches run in parallel — the same
-  // ~4.7 s two-document cost family as `diff`.
+  // Two parallel GETs on an HttpClient that keeps all request state
+  // function-local (http-client.ts), so the fetches run in parallel — the
+  // same ~4.7 s two-document cost family as `diff`. The client's own
+  // short-lived memo may serve either document from memory, or share an
+  // in-flight fetch with another reader of the same date.
   logger.info('fetching full title XML', { issueDate: fromDate });
   logger.info('fetching full title XML', { issueDate: toDate });
   const [fromXml, toXml] = await Promise.all([
-    ecfr.getFullTitleXml(fromDate),
-    ecfr.getFullTitleXml(toDate),
+    fetchFullTitleXml(ecfr, fromDate),
+    fetchFullTitleXml(ecfr, toDate),
   ]);
 
   logger.info('parsing and diffing provision text', {
