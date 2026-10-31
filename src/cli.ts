@@ -10,6 +10,7 @@ import { formatIssueDiff, runDiffCommand } from './commands/diff.js';
 import { formatSectionRedline, runRedlineCommand } from './commands/redline.js';
 import { formatHistoricalSection, runHistoricalCommand } from './commands/historical.js';
 import { formatSearchResults, runSearchCommand } from './commands/search.js';
+import { upstreamFailure } from './commands/upstream-guidance.js';
 import { SEARCH_QUERY_MAX_LENGTH, SEARCH_QUERY_MIN_LENGTH, ServiceError } from './core/service.js';
 import { CommandError, EXIT } from './exit-codes.js';
 import { createLogger, type Logger } from './logger.js';
@@ -221,6 +222,14 @@ export interface MainIO {
   out(chunk: string): void;
   err(chunk: string): void;
   env: NodeJS.ProcessEnv;
+  /**
+   * Where the structured log goes.
+   *
+   * Defaults to stderr (the CLI's own log sink). Tests inject a capture so
+   * they can assert that a failure's developer-facing detail reaches the
+   * log without letting it near the user's line.
+   */
+  logger?: Logger;
 }
 
 /** Commands that read one provision across eCFR revisions (`historical`, `redline`). */
@@ -250,13 +259,40 @@ async function runProvisionRead(
 }
 
 /**
+ * What a failure says to the user.
+ *
+ * An upstream failure is rewritten: the raw message names the endpoint
+ * that failed, which no user action depends on, and the advice names the
+ * thing the user can fix. The detail stays in the structured log.
+ *
+ * The advice is status-aware: eCFR answering at all means the request got
+ * through, so a status-bearing failure is never blamed on the reader's
+ * network.
+ */
+export function failureMessage(error: unknown): string {
+  const failure = upstreamFailure(error);
+  if (failure !== null) {
+    return failure.advice === '' ? failure.reason : `${failure.reason} — ${failure.advice}`;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
  * The exit code a failure maps to.
  *
  * An invalid input is a usage mistake, not a service failure. The README's
  * exit-code table gives code 2 to usage errors, and a script that retries
  * on 1 would otherwise retry a typo forever.
+ *
+ * Only `invalid_input` is a usage mistake. `unavailable` is a DEPLOYMENT
+ * fault — the service was wired without the client it needs — so it exits 1
+ * with every other service failure: a script must not retry a misconfigured
+ * server as if the reader had made a typo.
+ *
+ * Exported so the mapping can be pinned on its own; `main()` only reaches
+ * it through a throw.
  */
-function exitCodeFor(error: unknown): number {
+export function exitCodeFor(error: unknown): number {
   if (error instanceof CommandError) return error.exitCode;
   if (error instanceof ServiceError && error.code === 'invalid_input') return EXIT.USAGE;
   return error instanceof ConfigError ? EXIT.USAGE : EXIT.ERROR;
@@ -264,6 +300,10 @@ function exitCodeFor(error: unknown): number {
 
 /** CLI entry point. Returns the process exit code. */
 export async function main(argv: readonly string[], io: MainIO): Promise<number> {
+  // The logger is created from the config, which is loaded inside the try: a
+  // config error must still reach the catch with its own exit code. The
+  // handle is hoisted so the catch can record an upstream failure's detail.
+  let logger = io.logger;
   try {
     const parsed = parseArgs(argv);
     const command = parsed.command;
@@ -277,7 +317,7 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
     }
 
     const config = loadConfig(io.env);
-    const logger = createLogger(config.logLevel);
+    logger ??= createLogger(config.logLevel);
 
     if (command === 'sync') {
       const report = await runSyncCommand(config, logger);
@@ -327,10 +367,30 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
     await runMcpCommand(config, logger);
     return 0;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    io.err(`cfr-free: ${message}\n`);
-    return exitCodeFor(error);
+    return reportFailure(error, logger, io);
   }
+}
+
+/**
+ * Report a failure: to the reader, to the log, and as an exit code.
+ *
+ * An upstream failure carries the endpoint and the status: both are
+ * developer-facing, so neither belongs on the reader's line, but neither may
+ * vanish either — the structured log is where they belong. Without that
+ * record the raw detail the reader used to see is simply gone.
+ */
+function reportFailure(error: unknown, logger: Logger | undefined, io: MainIO): number {
+  const failure = upstreamFailure(error);
+  if (failure !== null) {
+    (logger ?? createLogger('error')).error('eCFR request failed', {
+      url: failure.url,
+      status: failure.status ?? null,
+      kind: failure.kind,
+      message: failure.detail,
+    });
+  }
+  io.err(`cfr-free: ${failureMessage(error)}\n`);
+  return exitCodeFor(error);
 }
 
 function isMainModule(): boolean {
