@@ -19,6 +19,9 @@
   "engines": {
     "node": ">=22.5"
   },
+  "overrides": {
+    "minimatch": "^11.0.1"
+  },
   "bin": {
     "cfr-free": "dist/cli.js"
   },
