@@ -41,7 +41,7 @@ Python interpreter or PyYAML is involved.
    ```
 
 5. Open a pull request using the template. CI must be green
-   (`quality (22)`, `quality (24)`, `security`).
+   (`quality (22)`, `quality (24)`, `security`, `actionlint`).
 6. Squash-merged PRs only; keep commit messages meaningful in the squash
    title.
 

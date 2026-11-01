@@ -20,8 +20,8 @@ import { describe, expect, it } from 'vitest';
  * Three facts are load-bearing, and all three fail silently:
  *
  *  1. Branch protection on `main` requires the checks `quality (22)`,
- *     `quality (24)` and `security` (read from
- *     `repos/deffenda/cfr-free/branches/main/protection` on 2026-10-22).
+ *     `quality (24)`, `security` and `actionlint` (read from
+ *     `repos/deffenda/cfr-free/branches/main/protection` on 2026-11-01).
  *     A renamed job or a matrix that no longer contains a named version
  *     removes a required check, and GitHub then waits forever for a check
  *     that will never report: the pull request can never go green.
@@ -94,7 +94,7 @@ function readPackedPaths(payload: string): string[] {
 }
 
 /** The checks branch protection on `main` requires. Keep in step with it. */
-const REQUIRED_CHECKS = ['quality (22)', 'quality (24)', 'security'] as const;
+const REQUIRED_CHECKS = ['quality (22)', 'quality (24)', 'security', 'actionlint'] as const;
 
 const workflow = readFileSync(WORKFLOW_PATH, 'utf8');
 const manifest = JSON.parse(readFileSync(PACKAGE_PATH, 'utf8')) as {
@@ -1290,13 +1290,17 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
 
   it('still produces every check branch protection requires', () => {
     // The matrix legs become the check names, so the matrix has to contain
-    // the versions branch protection names.
+    // the versions branch protection names. A job without a matrix reports
+    // under its own `name:`, so those spellings have to match too.
     expect(workflow).toMatch(/^ {2}security:$/m);
     expect(workflow).toMatch(/^ {4}name: security$/m);
+    expect(workflow).toMatch(/^ {2}actionlint:$/m);
+    expect(workflow).toMatch(/^ {4}name: actionlint$/m);
     expect(workflow).toMatch(/name: quality \(\$\{\{ matrix\.node \}\}\)$/m);
     const produced = new Set([
       ...pullRequestNodes(workflow).map((node) => `quality (${node})`),
       'security',
+      'actionlint',
     ]);
     for (const required of REQUIRED_CHECKS) {
       expect(produced, `required check "${required}" would never report`).toContain(required);
