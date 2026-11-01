@@ -143,6 +143,15 @@ navigation (it is the "what does it say today" link), and the HTTP and MCP
 surfaces carry both. The same rule governs the section view's copy block,
 which prints the dated form as its verification link.
 
+The first line of each search hit also carries the part context after the
+heading, using the same convention as the UI's hit meta line: when `part` is
+neither `null` nor `undefined`, append ` — part <part>`; when `partTitle` is
+also neither `null` nor `undefined` and its string value is non-empty, append
+`: <partTitle>`. For example, the suffix is ` — part 9: Servicemembers' Group
+Life Insurance and Veterans' Group Life Insurance` for that titled part. A
+null or empty title stops at ` — part 9` with no colon; a missing part leaves
+the first line unchanged and suppresses any part title.
+
 Verified 2026-10-20 against the live site: both forms answer 302 to a
 canonical path that preserves the date. **Retention limit (also measured
 2026-10-20):** eCFR serves the point-in-time archive only from 2017

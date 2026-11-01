@@ -34,8 +34,15 @@ export async function runSearchCommand(
  * the pilot protocol's F1 task asks the participant to state.
  */
 function formatHit(hit: PresentedHit, rank: number): string {
+  let part = '';
+  if (hit.part !== null && hit.part !== undefined) {
+    part = ' — part ' + String(hit.part);
+    if (hit.partTitle !== null && hit.partTitle !== undefined && String(hit.partTitle) !== '') {
+      part = part + ': ' + String(hit.partTitle);
+    }
+  }
   return [
-    `${rank}. ${hit.citationDisplay} — ${hit.heading}`,
+    `${rank}. ${hit.citationDisplay} — ${hit.heading}${part}`,
     `   ${hit.sourceUrlAtIndexDate}`,
     `   ${hit.snippet}`,
   ].join('\n');
