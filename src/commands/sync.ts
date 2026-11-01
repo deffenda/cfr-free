@@ -12,7 +12,10 @@ export async function runSyncCommand(config: AppConfig, logger: Logger): Promise
   // very file it exists to rebuild. Downgrades still fail inside open().
   const store = Store.open(config.indexPath, { allowSchemaUpgrade: true });
   try {
-    return await syncWithGuidance({ ecfr: createEcfrApi(), store, logger }, logger);
+    // No next step: the reader IS `cfr-free sync`, so telling them to run
+    // `cfr-free sync` again would be circular. The advice that comes with
+    // the failure says what to do instead.
+    return await syncWithGuidance({ ecfr: createEcfrApi(), store, logger }, logger, '');
   } finally {
     store.close();
   }

@@ -1,4 +1,5 @@
 import type { Logger } from '../logger.js';
+import { fetchFullTitleXml } from './archive.js';
 import { hashText } from './changes.js';
 import { normalizeCitation, type ParsedCitation } from './citations.js';
 import { assertIssueDate } from './diff.js';
@@ -337,8 +338,8 @@ export async function redlineSection(
   logger.info('fetching full title XML', { issueDate: fromDate });
   logger.info('fetching full title XML', { issueDate: toDate });
   const [fromXml, toXml] = await Promise.all([
-    ecfr.getFullTitleXml(fromDate),
-    ecfr.getFullTitleXml(toDate),
+    fetchFullTitleXml(ecfr, fromDate),
+    fetchFullTitleXml(ecfr, toDate),
   ]);
 
   logger.info('parsing and diffing provision text', {

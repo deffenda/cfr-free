@@ -1,4 +1,5 @@
 import type { Logger } from '../logger.js';
+import { upstreamFailure } from './upstream-guidance.js';
 
 /**
  * Opt-in periodic index refresh for long-running `serve`/`mcp` processes
@@ -117,10 +118,17 @@ export function startRefreshScheduler(deps: RefreshSchedulerDeps): RefreshSchedu
         });
       } catch (error) {
         failures += 1;
+        // An upstream failure carries the kind with it: a background
+        // refresh that could not reach eCFR and one eCFR answered badly
+        // are different problems, and the record says which.
+        const failure = upstreamFailure(error);
         logger.warn('background refresh attempt', {
           attempt,
           result: 'failed',
           elapsedMs: now() - startedAt,
+          ...(failure === null
+            ? {}
+            : { url: failure.url, status: failure.status ?? null, kind: failure.kind }),
           message: error instanceof Error ? error.message : String(error),
         });
       } finally {
