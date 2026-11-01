@@ -54,8 +54,9 @@ import { describe, expect, it } from 'vitest';
  * can. `actionlint` does: it validates expressions and contexts (a
  * job-level `if` on `matrix` among them), and it runs inside the gate
  * itself (`npm run ci` → `npm run lint:actions`) in every workflow leg
- * that runs the gate, on the version `ACTIONLINT_VERSION` pins below;
- * CONTRIBUTING.md names how to install it.
+ * that runs the gate, on the version `ACTIONLINT_VERSION` names and the
+ * commit `ACTIONLINT_COMMIT` pins below; CONTRIBUTING.md names how to
+ * install it.
  */
 
 const WORKFLOW_PATH = fileURLToPath(new URL('../.github/workflows/ci.yml', import.meta.url));
@@ -483,28 +484,117 @@ function resolveFetchDepth(value: string): string {
 }
 
 /**
- * The actionlint version every WORKFLOW install pins. One version across
- * the workflows — ci.yml's quality job, ci.yml's `actionlint` job and
- * release's `ci` job — or a change is green on one leg and red on
+ * The actionlint version every WORKFLOW install RECORDS. One version
+ * across the workflows — ci.yml's quality job, ci.yml's `actionlint` job
+ * and release's `ci` job — or a change is green on one leg and red on
  * another. The local leg names its own copy of the version in AGENTS.md
  * and CONTRIBUTING.md; this test reads the workflow files and
  * package.json only, so a version mentioned only in prose is unguarded
- * BY CHOICE — every workflow install must equal the constant below.
+ * BY CHOICE — every workflow install must RECORD the version below in
+ * its trailing comment.
  */
 const ACTIONLINT_VERSION = 'v1.7.12';
 
+/**
+ * The COMMIT every WORKFLOW install pins: the release commit of the
+ * version above, read live on 2026-11-01 with
+ * `git ls-remote https://github.com/rhysd/actionlint.git refs/tags/v1.7.12`
+ * (the tag is lightweight, so the ref names the commit itself).
+ *
+ * A tag is a pointer somebody else can move: whoever controls the
+ * upstream repository can retag the release, and CI would then build
+ * different code, with the runner's default credentials, while every
+ * workflow still read as pinned. Every other action in these workflows
+ * is pinned to a commit SHA with its version in a trailing comment; this
+ * install was the one fetch that was not, so it is pinned the same way.
+ */
+const ACTIONLINT_COMMIT = '914e7df21a07ef503a81201c76d2b11c789d3fca';
+
 /** The pinned install a gate-running job must carry, in an earlier step. */
-const ACTIONLINT_INSTALL = `go install github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}`;
+const ACTIONLINT_INSTALL = `go install github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_COMMIT}`;
 
 /**
- * A line running the actionlint install AS A COMMAND, capturing its
- * version. Anchored at the command position (indent, optional `- `, an
- * optional `run: ` prefix), so an echo PRINTING the install line or a
- * comment quoting it is not an install — only this spelling builds the
- * binary the gate shells out to.
+ * A line running the actionlint install AS A COMMAND, capturing the
+ * reference it pins. Anchored at the command position (indent, optional
+ * `- `, an optional `run: ` prefix), so an echo PRINTING the install
+ * line or a comment quoting it is not an install — only this spelling
+ * builds the binary the gate shells out to.
  */
 const ACTIONLINT_INSTALL_LINE =
   /^\s*-?\s*(?:run:)?\s*go install github\.com\/rhysd\/actionlint\/cmd\/actionlint@(\S+)\s*$/;
+
+/**
+ * The version an install line records in its TRAILING comment — the
+ * `# v1.7.12` that follows the pinned commit.
+ *
+ * Read from the RAW line: the inline comment is stripped before the
+ * install command is judged, so the stripped line is the command and the
+ * raw line is where the version is written down. The comment is now the
+ * only place the version survives, the reference being a commit.
+ */
+const ACTIONLINT_VERSION_COMMENT = /\s+#\s*(v\d+\.\d+\.\d+)\s*$/;
+
+/** One actionlint install: the file and line it sits on, the reference it pins, the version it records. */
+interface ActionlintInstall {
+  name: string;
+  line: number;
+  ref: string;
+  version: string;
+}
+
+/**
+ * Every actionlint install in a workflow text, in file order.
+ *
+ * Only real install COMMAND lines count: the line is judged after its
+ * inline comment is stripped, so a comment quoting the install is not an
+ * install and an echo printing it is not either. The version comes from
+ * the raw line, where the trailing comment still stands.
+ */
+function actionlintInstalls(name: string, text: string): ActionlintInstall[] {
+  const installs: ActionlintInstall[] = [];
+  const lines = text.split('\n');
+  for (const [index, line] of lines.entries()) {
+    const found = ACTIONLINT_INSTALL_LINE.exec(stripInlineComment(line));
+    if (found === null) continue;
+    installs.push({
+      name,
+      line: index + 1,
+      ref: found[1] ?? '',
+      version: ACTIONLINT_VERSION_COMMENT.exec(line)?.[1] ?? '',
+    });
+  }
+  return installs;
+}
+
+/**
+ * What is wrong with the actionlint installs in a workflow text: an
+ * empty list means every install pins the same commit and records the
+ * same version.
+ *
+ * A finding names the file, the line and the reference, so a failure
+ * says which install is wrong rather than only that something is.
+ */
+function actionlintPinFindings(name: string, text: string): string[] {
+  const findings: string[] = [];
+  for (const install of actionlintInstalls(name, text)) {
+    const where = `${name}:${install.line}`;
+    if (!/^[0-9a-f]{40}$/.test(install.ref)) {
+      findings.push(
+        `${where}: actionlint @${install.ref} is not pinned to a full 40-hex commit SHA`,
+      );
+    } else if (install.ref !== ACTIONLINT_COMMIT) {
+      findings.push(
+        `${where}: actionlint @${install.ref} is not the pinned commit ${ACTIONLINT_COMMIT}`,
+      );
+    }
+    if (install.version !== ACTIONLINT_VERSION) {
+      findings.push(
+        `${where}: actionlint @${install.ref} does not record ${ACTIONLINT_VERSION} in a trailing comment`,
+      );
+    }
+  }
+  return findings;
+}
 
 /**
  * A `npm run <script>` command in command position anywhere in a run
@@ -1161,23 +1251,41 @@ describe('ci.yml — the workflow the merge gate depends on', () => {
     // themselves. If one drifts to another version, the legs lint with
     // different rule sets — a change green on one leg goes red on
     // another, surfacing as an unrelated-looking failure on whichever
-    // leg moves last. There must be at least one occurrence, all
-    // carrying the version pinned in this file; zero occurrences would
-    // make this guard pass on nothing. Only real install COMMAND lines
-    // count — a comment quoting the line is not an install, and an echo
-    // printing it would otherwise drag a stray quote into the version.
-    const installs: { name: string; version: string }[] = [];
-    for (const { name, path } of workflowFiles) {
-      for (const line of readFileSync(path, 'utf8').split('\n')) {
-        const found = ACTIONLINT_INSTALL_LINE.exec(stripInlineComment(line));
-        if (found !== null) installs.push({ name, version: found[1] ?? '' });
-      }
-    }
+    // leg moves last. There must be at least one occurrence, all pinning
+    // the SAME commit; zero occurrences would make this guard pass on
+    // nothing. Only real install COMMAND lines count — a comment quoting
+    // the line is not an install, and an echo printing it would otherwise
+    // drag a stray quote into the version.
+    //
+    // The pin is the COMMIT, not the tag: a tag is a pointer somebody
+    // else can move, and a retagged upstream release would build
+    // different code inside CI, with the runner's default credentials,
+    // while every workflow still read as pinned. The version stays
+    // readable in the trailing comment, and every install site pins the
+    // same commit — so the legs still lint with the same rule set.
+    const installs = workflowFiles.flatMap(({ name, path }) =>
+      actionlintInstalls(name, readFileSync(path, 'utf8')),
+    );
     expect(installs.length, 'no actionlint install found').toBeGreaterThan(0);
-    for (const install of installs) {
-      const message = `${install.name}: actionlint @${install.version}`;
-      expect(install.version, message).toBe(ACTIONLINT_VERSION);
+    // Both workflow files that install actionlint are seen, so one
+    // file's installs cannot satisfy the guard on their own. The other
+    // guard above demands an install before every gate consumer, so no
+    // install site can go missing unnoticed either.
+    for (const name of ['ci.yml', 'release.yml']) {
+      const seen = installs.filter((install) => install.name === name).length;
+      expect(seen, `${name}: no actionlint install seen`).toBeGreaterThan(0);
     }
+    // One identical pin everywhere: the same reference at every site.
+    const refs = new Set(installs.map((install) => install.ref));
+    expect(refs.size, `actionlint installs disagree: ${[...refs].join(', ')}`).toBe(1);
+    // And that one pin is the pinned commit, with the version recorded.
+    const findings = workflowFiles.flatMap(({ name, path }) =>
+      actionlintPinFindings(name, readFileSync(path, 'utf8')),
+    );
+    expect(
+      findings,
+      'every actionlint install must pin the same commit and record the version',
+    ).toEqual([]);
   });
 
   it('still produces every check branch protection requires', () => {
@@ -2205,6 +2313,99 @@ describe('the per-job gate guard — synthetic job snippets', () => {
       '        run: # npm run ci',
     ]);
     expect(workflowGateConsumers(text)).toEqual([]);
+  });
+});
+
+/**
+ * The actionlint pin guard's own rules, on SYNTHETIC install lines —
+ * never by mutating a real workflow. Each snippet violates exactly one
+ * rule, so a guard that stops enforcing that rule fails HERE, where the
+ * message names the rule; the real-file test can only show that the real
+ * files still hold today, not that the guard would notice their
+ * violation tomorrow.
+ */
+describe('the actionlint pin guard — synthetic install lines', () => {
+  it('fails an install pinned to a tag instead of a commit', () => {
+    // Silent failure this prevents: a mutable tag lets whoever controls
+    // the upstream repository change what CI builds, and the workflow
+    // still reads as pinned. The finding names the reference it read, so
+    // the fix is one edit. The version comment is there, so this
+    // snippet breaks the pin rule and nothing else.
+    const text = syntheticWorkflow([
+      '  gate:',
+      '    steps:',
+      '      - name: Install actionlint',
+      `        run: go install github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION} # ${ACTIONLINT_VERSION}`,
+    ]);
+    expect(actionlintPinFindings('synthetic.yml', text)).toEqual([
+      'synthetic.yml:7: actionlint @v1.7.12 is not pinned to a full 40-hex commit SHA',
+    ]);
+  });
+
+  it('fails an install that records no version in a trailing comment', () => {
+    // Silent failure this prevents: the reference is a commit now, so
+    // the version is readable only where the comment writes it down. An
+    // install with no comment says nothing about which release it
+    // builds — the reader has to go and look the commit up.
+    const text = syntheticWorkflow([
+      '  gate:',
+      '    steps:',
+      '      - name: Install actionlint',
+      `        run: ${ACTIONLINT_INSTALL}`,
+    ]);
+    expect(actionlintPinFindings('synthetic.yml', text)).toEqual([
+      `synthetic.yml:7: actionlint @${ACTIONLINT_COMMIT} does not record ${ACTIONLINT_VERSION} in a trailing comment`,
+    ]);
+  });
+
+  it('fails an install that pins a different commit', () => {
+    // Silent failure this prevents: a SHA-shaped pin is still a pin on
+    // whatever upstream commit it names, and a different commit is a
+    // different actionlint — the legs would lint with different rule
+    // sets while every line still looked pinned.
+    const text = syntheticWorkflow([
+      '  gate:',
+      '    steps:',
+      '      - name: Install actionlint',
+      '        run: go install github.com/rhysd/actionlint/cmd/actionlint@0123456789abcdef0123456789abcdef01234567 # v1.7.12',
+    ]);
+    expect(actionlintPinFindings('synthetic.yml', text)).toEqual([
+      `synthetic.yml:7: actionlint @0123456789abcdef0123456789abcdef01234567 is not the pinned commit ${ACTIONLINT_COMMIT}`,
+    ]);
+  });
+
+  it('passes an install that pins the commit and records the version', () => {
+    // The shape the workflows use: the commit as the reference, the
+    // version in a trailing comment.
+    const text = syntheticWorkflow([
+      '  gate:',
+      '    steps:',
+      '      - name: Install actionlint',
+      `        run: ${ACTIONLINT_INSTALL} # ${ACTIONLINT_VERSION}`,
+    ]);
+    expect(actionlintPinFindings('synthetic.yml', text)).toEqual([]);
+  });
+
+  it('reads the install in a block scalar, and ignores one a comment only quotes', () => {
+    // The block-scalar spelling is the one ci.yml's quality job uses:
+    // there the version comment is part of the shell command, and the
+    // guard still has to read it. A line that only QUOTES the install is
+    // documentation — it builds no binary, so it is not an install and
+    // the guard must read no version out of it.
+    const block = syntheticWorkflow([
+      '  gate:',
+      '    steps:',
+      '      - name: Install actionlint',
+      '        run: |',
+      `          ${ACTIONLINT_INSTALL} # ${ACTIONLINT_VERSION}`,
+    ]);
+    expect(actionlintPinFindings('synthetic.yml', block)).toEqual([]);
+    const quoted = syntheticWorkflow([
+      '  gate:',
+      '    steps:',
+      `      # ${ACTIONLINT_INSTALL} # ${ACTIONLINT_VERSION}`,
+    ]);
+    expect(actionlintInstalls('synthetic.yml', quoted)).toEqual([]);
   });
 });
 
