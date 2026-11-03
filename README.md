@@ -61,6 +61,10 @@ Docker; the second needs only npm; the third needs only Node and runs
 the package straight from a release tarball (no compiler); the fourth
 needs npm and a compiler; the fifth needs a checkout.
 
+New here? [First 10 minutes](docs/first-ten-minutes.md) picks one of these
+routes and walks it end to end: build the local index, search it, read a
+provision and cite it.
+
 ### 1. Docker (nothing to install)
 
 ```bash
