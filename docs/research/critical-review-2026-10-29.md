@@ -1738,7 +1738,7 @@ surface it"_).
 | `test/no-conflict-markers.test.ts:75-96`                           | the text of every tracked file                                                                                                                                  | a conflict marker fails the suite                                                                                                               |
 
 **Assessment:** the first two are defensible inter-file contract tests —
-`install-paths.test.ts:36-40` states the rationale explicitly and each
+`install-paths.test.ts:44-50` states the rationale explicitly and each
 assertion names the file it reads — but their blast radius is wider than the
 "Reads" column first suggested, and the table above now names every file.
 Two edits that the earlier form of this table did not disclose were confirmed
