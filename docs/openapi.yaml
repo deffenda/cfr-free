@@ -39,7 +39,7 @@ servers:
     description: Default loopback bind (CFR_HOST/CFR_PORT may override deliberately).
 paths:
   /:
-    # source: src/titan/http-server.ts:545
+    # source: src/titan/http-server.ts:577
     get:
       summary: Read-only web UI (HTML shell)
       responses:
@@ -64,7 +64,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /ui.js:
-    # source: src/titan/http-server.ts:549
+    # source: src/titan/http-server.ts:581
     get:
       summary: Web UI script (a real file, linted and copied into dist/ at build time)
       responses:
@@ -89,7 +89,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /ui.css:
-    # source: src/titan/http-server.ts:553
+    # source: src/titan/http-server.ts:585
     get:
       summary: Web UI stylesheet (a real file, linted and copied into dist/ at build time)
       responses:
@@ -114,7 +114,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /health:
-    # source: src/titan/http-server.ts:502
+    # source: src/titan/http-server.ts:538
     get:
       summary: Index freshness report
       responses:
@@ -139,7 +139,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /metrics:
-    # source: src/titan/http-server.ts:521
+    # source: src/titan/http-server.ts:557
     get:
       summary: Prometheus exposition
       responses:
@@ -164,7 +164,7 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/search:
-    # source: src/titan/http-server.ts:525 (router), :279 (revalidatable send)
+    # source: src/titan/http-server.ts:561 (router), :314 (revalidatable send)
     get:
       summary: Full-text search over the local index
       responses:
@@ -251,7 +251,7 @@ paths:
           description: 'Restrict to one chapter by Roman-numeral identifier — exact and case-sensitive (e.g. "I").'
           schema: { type: string, minLength: 1, maxLength: 8, pattern: '^[IVXLCDM]+$' }
   /api/v1/sections/{citation}:
-    # source: src/titan/http-server.ts:529 (router), :297 (revalidatable send)
+    # source: src/titan/http-server.ts:565 (router), :332 (revalidatable send)
     get:
       summary: Full text of one section or appendix
       responses:
@@ -306,7 +306,7 @@ paths:
           description: 'Citation or appendix name — 4.125, § 4.125, or 38 CFR 4.125 — URL-encoded (≤ 120 chars).'
           schema: { type: string, maxLength: 120 }
   /api/v1/browse:
-    # source: src/titan/http-server.ts:533 (router), :312 (revalidatable send)
+    # source: src/titan/http-server.ts:569 (router), :347 (revalidatable send)
     get:
       summary: Structure-tree navigation
       responses:
@@ -383,7 +383,7 @@ paths:
           description: "Subject-group identifier (1–40 chars; the eCFR node id, e.g. `ECFRd158704dcab040e`); requires `part`. Subject groups hang off a part or a subpart, and hold the sections the flat tree could not reach (1,910 of the corpus's 2,953 sections)."
           schema: { type: string, minLength: 1, maxLength: 40 }
   /api/v1/diff:
-    # source: src/titan/http-server.ts:537
+    # source: src/titan/http-server.ts:573
     get:
       summary: Point-in-time provision diff between two eCFR issue dates
       responses:
@@ -397,6 +397,7 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/UpstreamBusy' }
       parameters:
         - name: from
           in: query
@@ -418,6 +419,7 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/UpstreamBusy' }
       parameters:
         - name: from
           in: query
@@ -430,7 +432,7 @@ paths:
           description: 'End issue date (YYYY-MM-DD), later than `from`.'
           schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
   /api/v1/redline:
-    # source: src/titan/http-server.ts:541
+    # source: src/titan/http-server.ts:573
     get:
       summary: Line redline of one provision between two eCFR issue dates
       responses:
@@ -445,6 +447,7 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/UpstreamBusy' }
       parameters:
         - name: from
           in: query
@@ -472,6 +475,7 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/UpstreamBusy' }
       parameters:
         - name: from
           in: query
@@ -491,20 +495,20 @@ paths:
 components:
   responses:
     BadRequest:
-      # source: src/titan/http-server.ts:293,620,625 (encoding, URL parse, byte caps) + :429 (service input) + :347 (diff params) + :410 (redline params)
+      # source: src/titan/http-server.ts:328,690,695 (encoding, URL parse, byte caps) + :464 (service input) + :382 (diff params) + :445 (redline params)
       # source: src/core/archive.ts:33 (a date before the archive floor is an invalid_input)
       description: '{ error: "invalid_input", message } — malformed URL or citation encoding, oversized q (800 bytes) or part (10 bytes), a service-level input rejection (incl. missing/empty `from`/`to` on /api/v1/diff, missing/empty `from`/`to`/`citation` on /api/v1/redline, and impossible dates like month 13), and a date before eCFR''s point-in-time archive floor (2017-01-01) on /api/v1/diff or /api/v1/redline.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     NotFound:
-      # source: src/titan/http-server.ts:557 (no route), :426 (structure/service miss)
+      # source: src/titan/http-server.ts:608 (no route), :461 (structure/service miss)
       description: '{ error: "not_found", message } — any path not listed here, a citation absent from the index, a citation missing from BOTH dates on /api/v1/redline, or a nonexistent browse node (browse adds `available`: the identifiers that do exist).'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     MethodNotAllowed:
-      # source: src/titan/http-server.ts:596
+      # source: src/titan/http-server.ts:666
       description: '{ error: "method_not_allowed", message } — any method other than GET/HEAD, on any path.'
       headers:
         allow: { description: 'Always GET, HEAD.', schema: { type: string } }
@@ -512,27 +516,34 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     UriTooLong:
-      # source: src/titan/http-server.ts:612
+      # source: src/titan/http-server.ts:673
       description: '{ error: "uri_too_long", message } — request URL over 2048 bytes.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     RateLimited:
-      # source: src/titan/http-server.ts:603
+      # source: src/titan/http-server.ts:682
       description: '{ error: "rate_limited", message } — per-peer token bucket exhausted (armed only when CFR_ALLOW_REMOTE=1; loopback never throttles).'
       headers:
         retry-after: { description: Seconds to wait., schema: { type: integer } }
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    UpstreamBusy:
+      description: '{ error: "upstream_busy", message } — the route fetches both dates from eCFR per call and the server-wide cap on concurrent upstream fetches (default 4, shared by /api/v1/diff and /api/v1/redline) is reached; Retry-After: 1.'
+      headers:
+        retry-after: { description: Seconds to wait., schema: { type: integer } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     InternalError:
-      # source: src/titan/http-server.ts:669
+      # source: src/titan/http-server.ts:744
       description: '{ error: "internal_error", message } — unexpected failure; details are logged server-side only.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     NotModified:
-      # source: src/titan/http-server.ts:157
+      # source: src/titan/http-server.ts:192
       description: "Not modified — the request's If-None-Match matched the current ETag (weak comparison, RFC 9110 §13.1.2: `*` matches any representation, a list matches when any member matches, and a weak validator matches the strong one). The ETag and Cache-Control of the 200 it replaces, and NO body. Only the index-backed reads can answer this way; an error response never does."
       headers:
         ETag:
