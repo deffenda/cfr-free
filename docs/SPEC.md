@@ -155,6 +155,15 @@ no route to the rest. The flags are validated BEFORE the index is opened,
 for the same reason the query length is — a rejected input is the reader's
 mistake, and it must not be billed to a 2–3 MB sync.
 
+The first line of each search hit also carries the part context after the
+heading, using the same convention as the UI's hit meta line: when `part` is
+neither `null` nor `undefined`, append ` — part <part>`; when `partTitle` is
+also neither `null` nor `undefined` and its string value is non-empty, append
+`: <partTitle>`. For example, the suffix is ` — part 9: Servicemembers' Group
+Life Insurance and Veterans' Group Life Insurance` for that titled part. A
+null or empty title stops at ` — part 9` with no colon; a missing part leaves
+the first line unchanged and suppresses any part title.
+
 Verified 2026-10-20 against the live site: both forms answer 302 to a
 canonical path that preserves the date. **Retention limit (also measured
 2026-10-20):** eCFR serves the point-in-time archive only from 2017
@@ -390,7 +399,7 @@ Unit: citation parser, FTS sanitizer (incl. injection attempts `" OR 1=1--`), XM
 
 - Public repo `deffenda/cfr-free`, **MIT** license.
 - Trunk-based flow: bootstrap `main` (docs/license only) → feature branch → **PR** → CI green → **squash merge** + branch delete.
-- Branch protection on `main`: PR required, strict up-to-date, required checks `quality (22)` + `quality (24)` + `security` (the `security` context is required per the live protection config; `docker` runs in CI as gate evidence but is not itself required). Review process: **an independent fresh-context review of the exact head is required for every PR** — see [`AGENTS.md`](../AGENTS.md) (the historical "no mandatory review (solo maintainer)" posture is superseded; solo-maintainer practice was documented in CONTRIBUTING).
+- Branch protection on `main`: PR required, strict up-to-date, required checks `quality (22)` + `quality (24)` + `security` + `actionlint` (the `security` and `actionlint` contexts are required per the live protection config; `docker` runs in CI as gate evidence but is not itself required). Review process: **an independent fresh-context review of the exact head is required for every PR** — see [`AGENTS.md`](../AGENTS.md) (the historical "no mandatory review (solo maintainer)" posture is superseded; solo-maintainer practice was documented in CONTRIBUTING).
 - Repo settings: squash merge only, auto-delete head branches, Dependabot (npm, actions and docker weekly), all workflow Actions **SHA-pinned** (Dependabot re-pins on updates), minimal `GITHUB_TOKEN` permissions (`contents: read`).
 - Local pre-push gates: `npm run ci` + `npm run scan` (npm audit, osv-scanner, gitleaks, trivy, semgrep).
 - Container (v0.5): multi-stage `Dockerfile` (node:22-alpine, non-root, index in `/data` volume); CI `docker` job builds the image and runs a hermetic offline smoke (no eCFR in PR CI). `release.yml` on `v*` tags runs the full CI gate + a live container e2e (real sync, HTTP surface, MCP `list_parts` handshake), then publishes multi-arch (`linux/amd64` + `linux/arm64`) `ghcr.io/deffenda/cfr-free:{version,major.minor,latest}` with SLSA provenance attestation — built-in `GITHUB_TOKEN` only, no secrets.
