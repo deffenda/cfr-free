@@ -694,6 +694,34 @@ describe('main: redline output', () => {
 });
 
 describe('cfr-free search', () => {
+  const baseSearchHit = {
+    citation: '9.21',
+    citationDisplay: '38 C.F.R. § 9.21',
+    heading: 'Traumatic brain injury compensation',
+    snippet: '…',
+    sourceUrl: 'https://www.ecfr.gov/current/title-38/section-9.21',
+    sourceUrlAtIndexDate: 'https://www.ecfr.gov/on/2026-10-16/title-38/section-9.21',
+    direct: true,
+    inResults: true,
+    partTitle: null,
+  };
+
+  function renderSearchHits(hits: unknown[]): string {
+    return formatSearchResults({
+      query: 'brain injury',
+      page: 1,
+      perPage: 10,
+      total: hits.length,
+      tier: 'or',
+      indexIssueDate: '2026-10-16',
+      indexStale: false,
+      notice: null,
+      matchedTerms: ['brain', 'injury'],
+      unmatchedTerms: [],
+      hits,
+    } as unknown as Parameters<typeof formatSearchResults>[0]);
+  }
+
   it('parses the words after the command as one query', () => {
     expect(parseArgs(['search', 'PTSD', 'diagnosis'])).toEqual({
       command: 'search',
@@ -765,6 +793,53 @@ describe('cfr-free search', () => {
       hits: [],
     } as unknown as Parameters<typeof formatSearchResults>[0]);
     expect(out).toContain('warning: local index is stale');
+  });
+
+  it('prints the part number and non-empty part title on the first line', () => {
+    const out = renderSearchHits([
+      {
+        ...baseSearchHit,
+        part: '9',
+        partTitle: "Servicemembers' Group Life Insurance and Veterans' Group Life Insurance",
+      },
+    ]);
+    expect(out).toBe(
+      [
+        "1. 38 C.F.R. § 9.21 — Traumatic brain injury compensation — part 9: Servicemembers' Group Life Insurance and Veterans' Group Life Insurance",
+        `   ${baseSearchHit.sourceUrlAtIndexDate}`,
+        '   …',
+        '',
+        '1 candidate provision(s); index issue date 2026-10-16',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('prints the part number without a colon when the part title is null', () => {
+    const out = renderSearchHits([{ ...baseSearchHit, part: '9', partTitle: null }]);
+    expect(out.split('\n')[0]).toBe(
+      '1. 38 C.F.R. § 9.21 — Traumatic brain injury compensation — part 9',
+    );
+  });
+
+  it('prints the part number without a colon when the part title is empty', () => {
+    const out = renderSearchHits([{ ...baseSearchHit, part: '9', partTitle: '' }]);
+    expect(out.split('\n')[0]).toBe(
+      '1. 38 C.F.R. § 9.21 — Traumatic brain injury compensation — part 9',
+    );
+  });
+
+  it('leaves the first line unchanged and ignores the title when part is null or undefined', () => {
+    const lines = renderSearchHits([
+      { ...baseSearchHit, part: null, partTitle: 'Ignored null-part title' },
+      { ...baseSearchHit, part: undefined, partTitle: 'Ignored undefined-part title' },
+      { ...baseSearchHit, part: '9', partTitle: null },
+    ]).split('\n');
+    expect(lines[0]).toBe('1. 38 C.F.R. § 9.21 — Traumatic brain injury compensation');
+    expect(lines[3]).toBe('2. 38 C.F.R. § 9.21 — Traumatic brain injury compensation');
+    // This present-part control makes the test fail if all part rendering is reverted,
+    // while the assertions above pin the unchanged output for a missing part.
+    expect(lines[6]).toBe('3. 38 C.F.R. § 9.21 — Traumatic brain injury compensation — part 9');
   });
 
   it('prints the DATED verification URL for each hit, not the current one', () => {

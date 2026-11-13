@@ -58,8 +58,43 @@ const OPENAPI_PATH = '/openapi.yaml';
 const MAX_URL_BYTES = 2048;
 const MAX_QUERY_BYTES = 800;
 const MAX_PART_BYTES = 10;
+/** Default {@link HttpServerOptions.maxConcurrentUpstream}: 4 concurrent eCFR-fetching handlers. */
+const DEFAULT_MAX_CONCURRENT_UPSTREAM = 4;
 
 type JsonBody = Record<string, unknown>;
+
+/**
+ * Bounded concurrency for the two routes that fetch from eCFR
+ * (`/api/v1/diff`, `/api/v1/redline`). Every call fans out to two ~2 MB
+ * upstream fetches that may each retry — a small request carries a large
+ * upstream cost, and without a server-wide cap, N concurrent clients (one
+ * peer, many peers, or local tooling gone wrong) hold N×2 upstream
+ * connections and amplify retries against a struggling third party during
+ * its outage. The gate is fail-fast: a full house answers 503 +
+ * Retry-After instead of queueing, so a slow eCFR degrades this server to
+ * fast errors rather than to a pile of held requests, and it releases on
+ * every exit path (the handlers' finally), so a failed fetch never leaks a
+ * slot. Unlike the per-peer rate limiter this gate is unconditional — the
+ * boundary it protects (a shared third-party upstream) exists on the
+ * loopback bind too.
+ */
+class UpstreamGate {
+  private inFlight = 0;
+
+  constructor(private readonly capacity: number) {}
+
+  /** Take a slot, or false when the house is full. */
+  tryAcquire(): boolean {
+    if (this.inFlight >= this.capacity) return false;
+    this.inFlight += 1;
+    return true;
+  }
+
+  /** Return a slot taken by tryAcquire. */
+  release(): void {
+    this.inFlight -= 1;
+  }
+}
 
 /**
  * Options for the JSON sender. `revalidatable` marks the response as a
@@ -625,7 +660,8 @@ async function dispatch(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   url: URL,
-  disk?: () => DiskSnapshot | null,
+  disk: (() => DiskSnapshot | null) | undefined,
+  upstreamGate: UpstreamGate,
 ): Promise<void> {
   const pathname = url.pathname;
   if (pathname === HEALTH_PATH) {
@@ -663,12 +699,8 @@ async function dispatch(
     handleBrowse(service, req, res, url);
     return;
   }
-  if (pathname === DIFF_PATH) {
-    await handleDiff(service, req, res, url);
-    return;
-  }
-  if (pathname === REDLINE_PATH) {
-    await handleRedline(service, req, res, url);
+  if (pathname === DIFF_PATH || pathname === REDLINE_PATH) {
+    await handlePointInTime(service, upstreamGate, pathname, req, res, url);
     return;
   }
   if (handleDiscovery(req, res, pathname)) return;
@@ -687,10 +719,48 @@ async function dispatch(
   sendJson(req, res, 404, errorBody('not_found', `no route for ${pathname}`));
 }
 
+/**
+ * Serves `/api/v1/diff` and `/api/v1/redline`. Both routes fan out to two
+ * eCFR fetches per call; the server-wide gate caps how many may be in
+ * flight at once (429 ordering is unchanged — precheck runs before routing).
+ * Fail fast: no queue, just a 503 the client can retry.
+ */
+async function handlePointInTime(
+  service: CFRService,
+  upstreamGate: UpstreamGate,
+  pathname: string,
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  url: URL,
+): Promise<void> {
+  if (!upstreamGate.tryAcquire()) {
+    res.setHeader('retry-after', '1');
+    sendJson(
+      req,
+      res,
+      503,
+      errorBody('upstream_busy', 'upstream fetches are saturated — retry shortly'),
+    );
+    return;
+  }
+  try {
+    if (pathname === DIFF_PATH) await handleDiff(service, req, res, url);
+    else await handleRedline(service, req, res, url);
+  } finally {
+    upstreamGate.release();
+  }
+}
+
 /** Optional server knobs; the default (loopback) deployment needs none. */
 export interface HttpServerOptions {
   /** Per-peer request budget — enabled only when the bind is deliberately remote. */
   readonly rateLimit?: { readonly capacity: number; readonly refillPerSec: number };
+  /**
+   * Server-wide cap on concurrent eCFR-fetching handlers (diff + redline
+   * together; default {@link DEFAULT_MAX_CONCURRENT_UPSTREAM}). Fail-fast
+   * 503 + Retry-After when full — see {@link UpstreamGate}.
+   */
+  readonly maxConcurrentUpstream?: number;
   /**
    * Disk-capacity accessor (SPEC §13 #22), read per request so `/health` and
    * `/metrics` reflect the caller's own moment, not a boot-time freeze; the
@@ -812,6 +882,9 @@ export function createHttpServer(
 ): http.Server {
   const limiter =
     options.rateLimit === undefined ? null : new RateLimiter({ ...options.rateLimit });
+  const upstreamGate = new UpstreamGate(
+    options.maxConcurrentUpstream ?? DEFAULT_MAX_CONCURRENT_UPSTREAM,
+  );
   const server = http.createServer((req, res) => {
     // `dispatch` is async since the diff and redline routes await the eCFR
     // facade, so one async task wraps the whole cycle: precheck runs first (it
@@ -824,7 +897,7 @@ export function createHttpServer(
       if (url === null) return;
 
       try {
-        await dispatch(service, req, res, url, options.disk);
+        await dispatch(service, req, res, url, options.disk, upstreamGate);
       } catch (error) {
         if (error instanceof ServiceError || error instanceof StructureError) {
           const { status, code } = statusFor(error);
@@ -844,6 +917,7 @@ export function createHttpServer(
           logger.warn('http request refused — upstream queue full', {
             path: url.pathname,
           });
+          res.setHeader('retry-after', '1');
           sendJson(
             req,
             res,
