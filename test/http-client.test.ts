@@ -26,6 +26,32 @@ function makeClient(fetchFn: FetchLike, overrides = {}): HttpClient {
 }
 
 describe('HttpClient', () => {
+  it('refuses a redirect instead of following it, without echoing Location', async () => {
+    let calls = 0;
+    const client = makeClient(async () => {
+      calls += 1;
+      return new Response('', {
+        status: 302,
+        // A redirect target the client must never contact or name: refusing
+        // is the whole point of the manual-redirect posture.
+        headers: { location: 'http://metadata.invalid/private' },
+      });
+    });
+    const failure = await client.getText(URL_UNDER_TEST).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(HttpError);
+    // 3xx is not retryable and must not be followed: exactly one attempt.
+    expect(calls).toBe(1);
+    const message = (failure as HttpError).message;
+    expect(message).toContain('redirect refused');
+    // The message policy is pathname-only: the refusing side's Location
+    // header never reaches logs or clients.
+    expect(message).not.toContain('metadata.invalid');
+    expect(message).not.toContain('secret');
+  });
+
   it('returns the body on success', async () => {
     const client = makeClient(async () => okResponse('hello'));
     await expect(client.getText(URL_UNDER_TEST)).resolves.toBe('hello');
