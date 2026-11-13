@@ -2,7 +2,8 @@ import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Logger } from '../logger.js';
-import { ServiceError, type CFRService } from '../core/service.js';
+import type { CFRService } from '../core/service.js';
+import { ServiceError } from '../core/errors.js';
 import { clientSafeMessage } from './client-safe.js';
 
 /**

@@ -18,9 +18,9 @@ import { upstreamFailure } from './commands/upstream-guidance.js';
 import {
   SEARCH_QUERY_MAX_LENGTH,
   SEARCH_QUERY_MIN_LENGTH,
-  ServiceError,
   validateSearchInput,
 } from './core/service.js';
+import { ServiceError } from './core/errors.js';
 import { CommandError, EXIT } from './exit-codes.js';
 import { createLogger, type Logger } from './logger.js';
 import { VERSION } from './version.js';

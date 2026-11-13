@@ -1,5 +1,5 @@
 import type { EcfrApi } from './ecfr.js';
-import { ServiceError } from './service.js';
+import { ServiceError } from './errors.js';
 
 /** The earliest date eCFR's point-in-time archive serves (measured 2026-10-20). */
 export const ARCHIVE_FLOOR = '2017-01-01';

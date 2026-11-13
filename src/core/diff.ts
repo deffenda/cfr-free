@@ -3,7 +3,7 @@ import { fetchFullTitleXml } from './archive.js';
 import { diffHashes, hashContent } from './changes.js';
 import { isIssueDateString, type EcfrApi } from './ecfr.js';
 import { POINT_IN_TIME_NOTICE } from './point-in-time.js';
-import { ServiceError } from './service.js';
+import { ServiceError } from './errors.js';
 import { SyncError } from './sync.js';
 import { parseTitleXml } from './xml.js';
 

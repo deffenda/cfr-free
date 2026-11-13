@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { browse, countNodes, parseStructure, StructureError } from '../src/core/structure.js';
+import { browse, countNodes, parseStructure } from '../src/core/structure.js';
+import { StructureError } from '../src/core/errors.js';
 import { FIXTURE_STRUCTURE } from './helpers.js';
 
 describe('parseStructure', () => {

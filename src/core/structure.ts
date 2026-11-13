@@ -1,3 +1,5 @@
+import { StructureError } from './errors.js';
+
 /** A node of the eCFR structure tree (title, chapter, part, section, ...). */
 export interface StructureNode {
   readonly type: string;
@@ -18,17 +20,6 @@ export interface BrowseResult {
   readonly node: StructureEntry;
   readonly path: readonly StructureEntry[];
   readonly children: readonly StructureEntry[];
-}
-
-/** Raised when navigation input does not match the structure. */
-export class StructureError extends Error {
-  override readonly name = 'StructureError';
-  readonly available: readonly string[];
-
-  constructor(message: string, available: readonly string[] = []) {
-    super(message);
-    this.available = available;
-  }
 }
 
 function toNode(raw: unknown): StructureNode | null {

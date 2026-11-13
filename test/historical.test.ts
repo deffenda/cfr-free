@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ARCHIVE_FLOOR } from '../src/core/archive.js';
 import { historicalSection } from '../src/core/historical.js';
-import { ServiceError } from '../src/core/service.js';
+import { ServiceError } from '../src/core/errors.js';
 import { createTestLogger } from './helpers.js';
 import type { EcfrApi } from '../src/core/ecfr.js';
 

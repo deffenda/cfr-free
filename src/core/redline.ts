@@ -5,7 +5,7 @@ import { normalizeCitation, type ParsedCitation } from './citations.js';
 import { assertIssueDate } from './diff.js';
 import type { EcfrApi } from './ecfr.js';
 import { POINT_IN_TIME_NOTICE } from './point-in-time.js';
-import { ServiceError } from './service.js';
+import { ServiceError } from './errors.js';
 import { SyncError } from './sync.js';
 import { parseTitleXml, type RawSection } from './xml.js';
 
