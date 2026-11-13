@@ -575,6 +575,13 @@ in that one row and nowhere else. The parser was never wrong here; the
 M1 inventory's own report is corrected in place at
 `docs/research/corpus-fidelity-2026-10-20.md` (§1 and G2).
 
+**M3 ranking-instrument design brief (2026-11-01):**
+`docs/research/ranking-instrument-design-2026-11-01.md` splits the eight
+in-window-but-not-first cases, analyses their corpus structure, and defines the
+Structural Citation Support instrument, its regression acceptance measure, and
+maintenance burden. It authorizes no implementation change; the next
+engineering round picks up the design.
+
 ### M4 — A verified first-use path
 
 **Dependency:** P1-04. **Risk:** LOW for docs; HIGH for release CI changes.
