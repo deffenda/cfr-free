@@ -259,11 +259,12 @@ describe('EcfrApi.getTitleSchedule', () => {
     // CR-21: a body that is not eCFR's contract is an upstream data fault —
     // it must answer 502 downstream, not collapse into a generic 500 that
     // reads as our bug.
-    const api = makeApi(async () =>
-      new Response(JSON.stringify({ titles: 'not-an-array' }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
+    const api = makeApi(
+      async () =>
+        new Response(JSON.stringify({ titles: 'not-an-array' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
     );
     await expect(api.getTitleSchedule()).rejects.toBeInstanceOf(UpstreamFormatError);
   });
