@@ -12,10 +12,12 @@ import type { EcfrApi } from '../src/core/ecfr.js';
 /**
  * The shared vocabulary the core modules now speak.
  *
- * CR-15, CR-16, CR-17, CR-20 and CR-22 each found the same rule written
- * twice — the FTS query, the eCFR permalink, the provision lookup — with
- * two copies that could drift apart. These tests pin the ONE place each
- * rule lives, so a second copy cannot appear without a failing test.
+ * CR-15, CR-16 and CR-17 each found the same rule written twice — the FTS
+ * query, the eCFR permalink, the provision lookup — with two copies that
+ * could drift apart; CR-20, CR-21 and CR-22 each found a place where the
+ * TYPE of a failure was lost. These tests pin the ONE place each rule
+ * lives and the types the failures carry, so a second copy cannot appear
+ * without a failing test.
  */
 
 describe('the shared FTS query builder (CR-15)', () => {
