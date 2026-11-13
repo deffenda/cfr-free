@@ -555,6 +555,13 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    UpstreamBusy:
+      description: '{ error: "upstream_busy", message } — the route fetches both dates from eCFR per call and the server-wide cap on concurrent upstream fetches (default 4, shared by /api/v1/diff and /api/v1/redline) is reached; Retry-After: 1.'
+      headers:
+        retry-after: { description: Seconds to wait., schema: { type: integer } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     InternalError:
       # source: src/titan/http-server.ts#createHttpServer
       description: '{ error: "internal_error", message } — unexpected failure; details are logged server-side only.'

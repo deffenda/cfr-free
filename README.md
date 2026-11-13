@@ -61,6 +61,10 @@ Docker; the second needs only npm; the third needs only Node and runs
 the package straight from a release tarball (no compiler); the fourth
 needs npm and a compiler; the fifth needs a checkout.
 
+New here? [First 10 minutes](docs/first-ten-minutes.md) picks one of these
+routes and walks it end to end: build the local index, search it, read a
+provision and cite it.
+
 ### 1. Docker (nothing to install)
 
 ```bash
@@ -411,9 +415,9 @@ static web UI assets. There is **no authentication** — if you bind it to a
 non-loopback address you must put it behind your own reverse proxy/auth
 (`CFR_ALLOW_REMOTE=1` is required to allow that, as an explicit opt-in).
 
-The serve root `/` also serves a **read-only web UI** (search + section
-reader with chapter/part browse over the same JSON API, hash-routed) — no auth, loopback bind by
-default like the rest of the surface.
+The serve root `/` also serves a **read-only web UI** (search + section reader
+with chapter/part browse + a redline view over the same JSON API, hash-routed) —
+no auth, loopback bind by default like the rest of the surface.
 
 ## Configuration
 
