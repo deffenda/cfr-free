@@ -420,8 +420,8 @@ describe('UI route ownership (P1-02)', () => {
 
     const heading = harness.element('section-heading').textContent;
     expect(heading).toBe('Heading 4.130');
-    expect(harness.element('section-text').textContent).toBe('Body 4.130.');
-    expect(harness.element('section-text').textContent).not.toContain('4.125');
+    expect(harness.element('section-text').allText).toBe('Body 4.130.');
+    expect(harness.element('section-text').allText).not.toContain('4.125');
   });
 
   it('does not let a late section error paint over the current view', async () => {
@@ -451,7 +451,7 @@ describe('UI route ownership (P1-02)', () => {
     await harness.flush();
 
     expect(harness.element('section-heading').textContent).toBe('Heading 4.130');
-    expect(harness.element('section-text').textContent).toBe('Body 4.130.');
+    expect(harness.element('section-text').allText).toBe('Body 4.130.');
   });
 
   it('does not let a late search response overwrite a newer search', async () => {
@@ -1186,5 +1186,169 @@ describe('UI usability (CR-08, CR-09, CR-24)', () => {
     const url = harness.calls[0]?.url ?? '';
     expect(url).toContain('part=4');
     expect(url).toContain('chapter=IV');
+  });
+});
+
+describe('UI provision rendering (CR-23 — the rating tables keep their structure)', () => {
+  const TABLE_MARKDOWN = [
+    'The rating schedule is set out below.',
+    '',
+    '| General rating | Mental disorders |',
+    '| --- | --- |',
+    '| 100 | 60 |',
+    '| 70 | 30 |',
+  ].join('\n');
+
+  /** Serve one provision with the given markdown body. */
+  async function serveMarkdown(harness: Harness, markdown: string): Promise<StubNode> {
+    await harness.navigate('#/section/4.130');
+    harness.calls[0]?.respond(true, {
+      ...sectionBody('4.130', 'Evaluation of residual functional capacity.'),
+      markdown,
+    });
+    await harness.flush();
+    return harness.element('section-text');
+  }
+
+  it('renders a rating table as a table, not a run-on block', async () => {
+    // § 4.130 is the most-read provision for this audience, and its rating
+    // table used to come out as pipe-joined rows that wrapped
+    // unpredictably on a narrow screen.
+    const harness = makeHarness();
+    const body = await serveMarkdown(harness, TABLE_MARKDOWN);
+    const table = body.childNodes.find((node) => node.tagName === 'TABLE');
+    expect(table, 'the rating table must be a real table').toBeDefined();
+    const headCells = table?.childNodes[0]?.childNodes[0]?.childNodes ?? [];
+    expect(headCells.map((cell) => cell.textContent)).toEqual([
+      'General rating',
+      'Mental disorders',
+    ]);
+    const bodyRows = table?.childNodes[1]?.childNodes ?? [];
+    expect(bodyRows.length).toBe(2);
+    expect(bodyRows[0]?.childNodes.map((cell) => cell.textContent)).toEqual(['100', '60']);
+    expect(bodyRows[1]?.childNodes.map((cell) => cell.textContent)).toEqual(['70', '30']);
+  });
+
+  it('gives the table the elements a table needs', async () => {
+    // The cell ELEMENTS, not only their text: a header row of ordinary
+    // cells would still show the words, and would tell a screen reader
+    // nothing about which column a cell belongs to.
+    const harness = makeHarness();
+    const body = await serveMarkdown(harness, TABLE_MARKDOWN);
+    const table = body.childNodes.find((node) => node.tagName === 'TABLE');
+    expect(table?.childNodes[0]?.tagName).toBe('THEAD');
+    expect(table?.childNodes[1]?.tagName).toBe('TBODY');
+    const headCells = table?.childNodes[0]?.childNodes[0]?.childNodes ?? [];
+    expect(headCells.map((cell) => cell.tagName)).toEqual(['TH', 'TH']);
+    const bodyRows = table?.childNodes[1]?.childNodes ?? [];
+    expect(bodyRows[0]?.tagName).toBe('TR');
+    expect(bodyRows[0]?.childNodes.map((cell) => cell.tagName)).toEqual(['TD', 'TD']);
+  });
+
+  /** Serve one provision without any markdown, and return its body. */
+  async function serveWithoutMarkdown(markdown?: string): Promise<StubNode> {
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.130');
+    const payload = sectionBody('4.130', 'Evaluation of residual functional capacity.');
+    harness.calls[0]?.respond(true, { ...payload, markdown });
+    await harness.flush();
+    return harness.element('section-text');
+  }
+
+  it('falls back to the plain text when the payload carries no markdown', async () => {
+    // The SPEC promises the plain text remains the fallback. Nothing
+    // pinned it: a build that dropped the fallback, or rendered it wrongly,
+    // left the suite green.
+    const payload = sectionBody('4.130', 'Evaluation of residual functional capacity.');
+    const body = await serveWithoutMarkdown(undefined);
+    expect(body.childNodes.map((node) => node.tagName)).toEqual(['P']);
+    expect(body.childNodes[0]?.textContent).toBe(payload.text);
+  });
+
+  it('falls back to the plain text when the markdown is only whitespace', async () => {
+    // A markdown body that is only whitespace carries nothing either, and
+    // the text is what the reader should see.
+    const payload = sectionBody('4.130', 'Evaluation of residual functional capacity.');
+    const body = await serveWithoutMarkdown('   \n\t\n  ');
+    expect(body.childNodes.map((node) => node.tagName)).toEqual(['P']);
+    expect(body.childNodes[0]?.textContent).toBe(payload.text);
+  });
+
+  it('reads a line that merely starts with a pipe as a paragraph', async () => {
+    // A table is a header row and a separator row. A paragraph that
+    // happens to begin with a pipe is not a table, and rendering it as one
+    // shows a table with no body and hides what the line said.
+    const harness = makeHarness();
+    const body = await serveMarkdown(harness, '| not a table |');
+    expect(body.childNodes.map((node) => node.tagName)).toEqual(['P']);
+    expect(body.childNodes[0]?.textContent).toBe('| not a table |');
+  });
+
+  it("reads the alignment colons the repository's own table dialect allows", async () => {
+    // The server-side table parser accepts `| :--- | ---: |`, so the
+    // renderer does too: a separator row it did not recognise would be
+    // rendered as a visible row of dashes.
+    const harness = makeHarness();
+    const body = await serveMarkdown(
+      harness,
+      ['| A | B |', '| :--- | ---: |', '| 1 | 2 |'].join('\n'),
+    );
+    const table = body.childNodes.find((node) => node.tagName === 'TABLE');
+    expect(table).toBeDefined();
+    const bodyRows = table?.childNodes[1]?.childNodes ?? [];
+    expect(bodyRows.length).toBe(1);
+    expect(bodyRows[0]?.childNodes.map((cell) => cell.textContent)).toEqual(['1', '2']);
+  });
+
+  it('reads CRLF line endings as one break, not two', async () => {
+    // A carriage left at the end of a heading is a character the reader
+    // sees, and the stylesheet preserves whitespace.
+    const harness = makeHarness();
+    const body = await serveMarkdown(harness, '### Heading\r\nBody\r\n');
+    expect(body.childNodes.map((node) => node.tagName)).toEqual(['H3', 'P']);
+    expect(body.childNodes[0]?.textContent).toBe('Heading');
+    expect(body.childNodes[1]?.textContent).toBe('Body');
+  });
+
+  it('renders the prose around the table as paragraphs', async () => {
+    const harness = makeHarness();
+    const body = await serveMarkdown(harness, TABLE_MARKDOWN);
+    const paragraphs = body.childNodes.filter((node) => node.tagName === 'P');
+    expect(paragraphs.length).toBe(1);
+    expect(paragraphs[0]?.textContent).toBe('The rating schedule is set out below.');
+  });
+
+  it('keeps a pipe that belongs to the cell inside that cell', async () => {
+    const harness = makeHarness();
+    const body = await serveMarkdown(
+      harness,
+      ['| A | B |', '| --- | --- |', '| x \\| y | z |'].join('\n'),
+    );
+    const table = body.childNodes.find((node) => node.tagName === 'TABLE');
+    const cell = table?.childNodes[1]?.childNodes[0]?.childNodes[0];
+    expect(cell?.textContent).toBe('x | y');
+  });
+
+  it('does not swallow the image marker that follows a table', async () => {
+    // The parser may leave the marker after the table, on its own line. It
+    // is not a row, and it must not become one.
+    const harness = makeHarness();
+    const body = await serveMarkdown(
+      harness,
+      ['| A | B |', '| --- | --- |', '| 1 | 2 |', '[image content not included: /img/x.png]'].join(
+        '\n',
+      ),
+    );
+    const table = body.childNodes.find((node) => node.tagName === 'TABLE');
+    const bodyRows = table?.childNodes[1]?.childNodes ?? [];
+    expect(bodyRows.length).toBe(1);
+    expect(body.allText).toContain('[image content not included');
+  });
+
+  it('renders a heading as a heading', async () => {
+    const harness = makeHarness();
+    const body = await serveMarkdown(harness, '### Schedule of ratings');
+    const heading = body.childNodes.find((node) => node.tagName === 'H3');
+    expect(heading?.textContent).toBe('Schedule of ratings');
   });
 });
