@@ -791,6 +791,7 @@ export function createHttpServer(
           logger.warn('http request refused — upstream queue full', {
             path: url.pathname,
           });
+          res.setHeader('retry-after', '1');
           sendJson(
             req,
             res,
