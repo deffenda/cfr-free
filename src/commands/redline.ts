@@ -6,10 +6,12 @@ import { createEcfrApi } from './ensure-index.js';
  * `cfr-free redline <from> <to> <citation>` — line-level redline of one
  * provision between two eCFR issue dates.
  *
- * Stateless like `diff`: both dates' full-title XML is fetched and the one
- * provision extracted from each — no index interaction at all, which is why
- * this command takes no config (every argument is required; unlike `diff`'s
- * default `to`, a redline cannot guess its dates).
+ * Like `diff`, nothing is PERSISTED between calls: both dates' full-title
+ * XML is fetched and the one provision extracted from each — no index
+ * interaction at all, which is why this command takes no config (every
+ * argument is required; unlike `diff`'s default `to`, a redline cannot guess
+ * its dates). The client's own short-lived memo may serve either document
+ * from memory (see `src/core/ecfr.ts`).
  *
  * @throws {ServiceError} (`invalid_input`) for bad dates/citations,
  *   (`not_found`) when the citation is in neither date's parse.

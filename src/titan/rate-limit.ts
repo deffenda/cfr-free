@@ -44,8 +44,17 @@ export class RateLimiter {
     this.maxPeers = Math.max(1, options.maxPeers ?? DEFAULT_MAX_PEERS);
   }
 
-  /** Take one token for `peer`; allowed while the bucket has capacity. */
-  consume(peer: string): RateVerdict {
+  /**
+   * Take `cost` tokens for `peer`; allowed while the bucket can pay.
+   *
+   * The cost is what the request will COST, not how many requests it is:
+   * a route that pulls the complete upstream document charges more than
+   * one that reads the local index. Charging one token per request let a
+   * peer buy the whole upstream document with every token — the
+   * published budget of ten requests a second bought TWENTY whole
+   * documents a second, because a diff or a redline pulls two of them.
+   */
+  consume(peer: string, cost = 1): RateVerdict {
     const nowMs = this.now();
     const bucket = this.buckets.get(peer) ?? { tokens: this.capacity, lastMs: nowMs };
     // Refill proportionally to elapsed time, capped at capacity.
@@ -55,12 +64,32 @@ export class RateLimiter {
     this.buckets.set(peer, bucket);
     if (this.buckets.size > this.maxPeers) this.prune();
 
-    if (bucket.tokens >= 1) {
-      bucket.tokens -= 1;
+    const wanted = Math.max(1, cost);
+    if (bucket.tokens >= wanted) {
+      bucket.tokens -= wanted;
       return { allowed: true, retryAfterSec: 0 };
     }
-    const deficit = 1 - bucket.tokens;
-    return { allowed: false, retryAfterSec: deficit / this.refillPerSec };
+    // A cost the bucket cannot hold must not make the route unreachable:
+    // with a capacity of 5 and a cost of 10, zero of a thousand calls
+    // were admitted, at any clock. A FULL bucket still admits one such
+    // request and is emptied by it — the shortfall is not carried over.
+    //
+    // The escape has a price worth naming: a bucket SMALLER than the
+    // cost buys one expensive request per refill interval, so a smaller
+    // bucket buys MORE expensive requests than a larger one. The
+    // published default (capacity 60, cost 10) never reaches this
+    // branch — it is reachable only by configuring the bucket below the
+    // route's own cost.
+    if (wanted > this.capacity && bucket.tokens >= this.capacity) {
+      bucket.tokens = 0;
+      return { allowed: true, retryAfterSec: 0 };
+    }
+    // The wait is until the request becomes admissible: until the bucket
+    // is full again when the cost exceeds the capacity, until it holds
+    // the cost otherwise.
+    const shortfall =
+      wanted > this.capacity ? this.capacity - bucket.tokens : wanted - bucket.tokens;
+    return { allowed: false, retryAfterSec: shortfall / this.refillPerSec };
   }
 
   /**

@@ -7,9 +7,11 @@ import { createEcfrApi } from './ensure-index.js';
  * `cfr-free historical <at> <citation>` — one provision as it stood at a
  * requested date.
  *
- * Stateless: the revision in force on the requested date is fetched from
- * eCFR and the provision is read out of it. Nothing is read from the local
- * index, and nothing is cached.
+ * Nothing is PERSISTED between calls: the revision in force on the requested
+ * date is fetched from eCFR and the provision is read out of it. Nothing is
+ * read from the local index, and nothing survives the call — the client's
+ * own short-lived memo may serve the document from memory (see
+ * `src/core/ecfr.ts`).
  *
  * The output NAMES THE REQUESTED DATE and the revision in force on it —
  * eCFR does not report which issue date it served, so no "served revision"

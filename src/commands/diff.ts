@@ -10,9 +10,12 @@ import { createEcfrApi } from './ensure-index.js';
 /**
  * `cfr-free diff <from> [to]` — provision-level diff of two eCFR issue dates.
  *
- * Stateless: both dates' full-title XML is fetched from eCFR and diffed on
- * the fly. When `to` is omitted it defaults to the issue date recorded by
- * the last sync ("what changed since my index was built?").
+ * Nothing is PERSISTED between calls: both dates' full-title XML is fetched
+ * from eCFR and diffed on the fly. The client's own short-lived memo may
+ * serve either document from memory (see `src/core/ecfr.ts`) — the reuse is
+ * in memory and inside this process, not across them. When `to` is omitted
+ * it defaults to the issue date recorded by the last sync ("what changed
+ * since my index was built?").
  *
  * @throws {CommandError} (exit 3) when `to` is omitted and there is no index
  *   (or the index carries no issue date) to resolve it from.
