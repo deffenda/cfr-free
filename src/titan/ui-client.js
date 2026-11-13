@@ -247,7 +247,10 @@
   function appendHit(hit) {
     const item = document.createElement('li');
     item.className = 'hit';
-    const heading = document.createElement('h3');
+    // h2, not h3: the search view's own heading level is h2, and the
+    // document's outline must not skip a level (the page starts at h1, so
+    // the results were an h1 -> h3 jump).
+    const heading = document.createElement('h2');
     const link = document.createElement('a');
     link.href = sectionHref(String(hit.citation));
     const label =
@@ -1016,6 +1019,33 @@
     });
   });
 
+  // The tab that is current for a route. A section is reached from a search
+  // hit, so the Search tab is the current one there.
+  const TAB_FOR_VIEW = {
+    search: 'search',
+    section: 'search',
+    browse: 'browse',
+    redline: 'redline',
+  };
+
+  /**
+   * Mark the current tab for assistive technology.
+   *
+   * The tabs are links, and a link that is the current view is what
+   * `aria-current="page"` is for: without it a screen-reader user is told
+   * which views EXIST but never which one they are looking at.
+   */
+  function markActiveTab(view) {
+    const current = TAB_FOR_VIEW[view] || 'search';
+    const names = ['search', 'browse', 'redline'];
+    for (let i = 0; i < names.length; i += 1) {
+      const tab = byId('tab-' + names[i]);
+      if (tab === null) continue;
+      if (names[i] === current) tab.setAttribute('aria-current', 'page');
+      else tab.removeAttribute('aria-current');
+    }
+  }
+
   /**
    * Move the keyboard to the view that just opened.
    *
@@ -1088,6 +1118,7 @@
     routeGeneration += 1;
     const generation = routeGeneration;
     const state = parseHash();
+    markActiveTab(state.view);
     if (state.view === 'section') renderSection(state.citation, generation);
     else if (state.view === 'browse') renderBrowse(generation);
     else if (state.view === 'redline') renderRedline();

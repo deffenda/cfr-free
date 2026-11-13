@@ -27,6 +27,13 @@ interface LintRule {
   readonly rule: string;
   readonly severity: string;
   readonly options: readonly string[];
+  /**
+   * False when the rule's OPTIONS cannot be written as `key=value` text —
+   * a rule whose options are a selector, a message or a list of objects.
+   * The SPEC's table states such a rule with its scope and severity only,
+   * and the options are not compared for it.
+   */
+  readonly comparable: boolean;
 }
 
 /** The rules `docs/SPEC.md` §7.1 states, keyed `scope|rule`. */
@@ -50,6 +57,7 @@ function specLintRules(): Map<string, LintRule> {
       rule,
       severity,
       options: options === undefined || options === '' ? [] : options.split(', '),
+      comparable: true,
     };
     rules.set(`${scope}|${rule}`, entry);
   }
@@ -83,7 +91,11 @@ function configLintRules(): Map<string, LintRule> {
       // sides are compared — otherwise a rule the config really enforces
       // would read as one the config never states.
       const entries = new Map<string, string>();
-      for (const spread of text.matchAll(/\.\.\.([A-Za-z_$][\w$]*)/g)) {
+      // A spread of a SHARED RULE OBJECT is `...NAME` and nothing else: a
+      // spread inside a rule's OPTIONS (`...CONSTANTS.map(...)`) is not a
+      // rule entry, and reading it as one would ask the config for a rule
+      // object it never declares.
+      for (const spread of text.matchAll(/\.\.\.([A-Za-z_$][\w$]*)(?![.\w$])/g)) {
         const sharedEntries = shared.get(spread[1] ?? '');
         expect(
           sharedEntries,
@@ -133,6 +145,14 @@ function readBalanced(source: string, open: number): { text: string; end: number
       if (char === quote) quote = '';
       continue;
     }
+    // A COMMENT is not code. An apostrophe in a comment — "the plugin's
+    // rule" — would otherwise open a string that swallows the rest of the
+    // file, and the block would never close.
+    const afterComment = skipComment(source, index);
+    if (afterComment !== -1) {
+      index = afterComment;
+      continue;
+    }
     if (char === "'" || char === '"' || char === '`') {
       quote = char;
       continue;
@@ -144,6 +164,24 @@ function readBalanced(source: string, open: number): { text: string; end: number
     }
   }
   return null;
+}
+
+/**
+ * The index just past a comment that starts at `index`, or -1 when the
+ * text there does not open one.
+ */
+function skipComment(source: string, index: number): number {
+  if (source.charAt(index) !== '/') return -1;
+  const marker = source.charAt(index + 1);
+  if (marker === '/') {
+    const newline = source.indexOf('\n', index);
+    return newline === -1 ? source.length : newline;
+  }
+  if (marker === '*') {
+    const close = source.indexOf('*/', index + 2);
+    return close === -1 ? source.length : close + 1;
+  }
+  return -1;
 }
 
 /** The index just past the whitespace and the comments at `index`. */
@@ -207,15 +245,58 @@ function readValue(text: string, index: number): { text: string; end: number } |
   return null;
 }
 
-/** A raw ESLint rule value as a severity plus the options it carries. */
-function describeValue(raw: string): { severity: string; options: string[] } {
-  const parsed = JSON.parse(toJson(raw)) as unknown;
-  if (typeof parsed === 'string') return { severity: parsed, options: [] };
-  if (!Array.isArray(parsed)) throw new Error(`unsupported ESLint rule value: ${raw}`);
+/**
+ * A raw ESLint rule value as a severity plus the options it carries.
+ *
+ * A rule whose options cannot be written as `key=value` text — a rule
+ * whose options are a SELECTOR, a message, or a list of objects — is
+ * reported with its severity alone and `comparable: false`: the SPEC's
+ * table states such a rule with its scope and severity, and the options
+ * are not compared for it. Reading such a value as a literal would fail
+ * on the template literals and spreads a selector is written with, and
+ * the options it did read would be `[object Object]` — noise, not the
+ * rule's own options.
+ */
+function describeValue(raw: string): {
+  severity: string;
+  options: string[];
+  comparable: boolean;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(toJson(raw)) as unknown;
+  } catch {
+    const severity = /^\s*\[\s*['"](error|warn|off)['"]/.exec(raw)?.[1] ?? '';
+    return { severity, options: [], comparable: false };
+  }
+  if (typeof parsed === 'string') return { severity: parsed, options: [], comparable: true };
+  if (!Array.isArray(parsed)) {
+    return { severity: '', options: [], comparable: false };
+  }
   const severity = typeof parsed[0] === 'string' ? parsed[0] : '';
   const options: string[] = [];
-  for (const option of parsed.slice(1)) options.push(...describeOption(option));
-  return { severity, options };
+  for (const option of parsed.slice(1)) {
+    if (!isExpressible(option)) return { severity, options: [], comparable: false };
+    options.push(...describeOption(option));
+  }
+  return { severity, options, comparable: true };
+}
+
+/**
+ * Whether an option can be written as `key=value` text: a scalar, or an
+ * object whose values are scalars or lists of scalars.
+ */
+function isExpressible(option: unknown): boolean {
+  if (option === null || typeof option !== 'object') return true;
+  if (Array.isArray(option)) {
+    return option.every((entry) => entry === null || typeof entry !== 'object');
+  }
+  return Object.values(option as Record<string, unknown>).every(
+    (value) =>
+      value === null ||
+      typeof value !== 'object' ||
+      (Array.isArray(value) && value.every((entry) => entry === null || typeof entry !== 'object')),
+  );
 }
 
 /**
@@ -263,6 +344,10 @@ describe('the lint contract between docs/SPEC.md and eslint.config.mjs', () => {
     expect([...config.keys()].sort()).toEqual([...spec.keys()].sort());
     for (const [key, rule] of config) {
       expect(spec.get(key)?.severity, `severity of ${key}`).toBe(rule.severity);
+      // A rule whose options cannot be written as `key=value` text is
+      // stated in the table with its scope and severity only, so its
+      // options are not compared.
+      if (!rule.comparable) continue;
       expect(spec.get(key)?.options, `options of ${key}`).toEqual([...rule.options]);
     }
   });

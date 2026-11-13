@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { runInNewContext } from 'node:vm';
 import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
@@ -117,6 +119,15 @@ class StubNode {
     else if (name === 'class') this.className = value;
     else if (name === 'tabindex') this.focusable = true;
     else (this as unknown as Record<string, string>)[name] = value;
+  }
+
+  removeAttribute(name: string): void {
+    delete (this as unknown as Record<string, string>)[name];
+  }
+
+  getAttribute(name: string): string | null {
+    const value = (this as unknown as Record<string, string | undefined>)[name];
+    return value === undefined ? null : value;
   }
 
   /** All text under this node (the script never reads it back; tests do). */
@@ -345,6 +356,76 @@ function searchBody(citation: string, heading: string): Record<string, unknown> 
     ],
   };
 }
+
+describe('UI view state for assistive technology', () => {
+  it('names every view the shell offers, in the README', () => {
+    // The README described the UI as "search + section reader with
+    // chapter/part browse" — two views — while the shell offers three
+    // tabs, and the SPEC named the third. A user looking for the redline
+    // VIEW in the browser did not learn it exists: the endpoint was in
+    // the route table, the view was not mentioned anywhere.
+    const readme = readFileSync(fileURLToPath(new URL('../README.md', import.meta.url)), 'utf8');
+    const paragraph = readme.split('\n\n').find((block) => block.includes('read-only web UI'));
+    expect(paragraph, 'README.md must describe the web UI').toBeDefined();
+    for (const view of ['search', 'browse', 'redline']) {
+      expect(paragraph?.toLowerCase(), `README.md must name the ${view} view`).toContain(view);
+    }
+  });
+
+  it('ships the tab ids the script marks, in the served HTML', () => {
+    // The script finds the tabs by id. If the shell and the script ever
+    // disagree about those ids the marking silently stops working — the
+    // script asks for a tab the document does not have — so the contract
+    // is checked here, not left to the eye.
+    for (const id of ['tab-search', 'tab-browse', 'tab-redline']) {
+      expect(UI_HTML, `the served HTML must carry id="${id}"`).toContain(`id="${id}"`);
+    }
+  });
+
+  it('marks the current tab with aria-current, and only that one', async () => {
+    // The tabs are links, and `aria-current="page"` is what tells a
+    // screen-reader user which view they are looking at. Without it the
+    // nav says which views exist and never which one is current.
+    const harness = makeHarness();
+    await harness.navigate('#/browse');
+    expect(harness.element('tab-browse').getAttribute('aria-current')).toBe('page');
+    expect(harness.element('tab-search').getAttribute('aria-current')).toBe(null);
+    expect(harness.element('tab-redline').getAttribute('aria-current')).toBe(null);
+
+    await harness.navigate('#/search?q=alpha');
+    expect(harness.element('tab-search').getAttribute('aria-current')).toBe('page');
+    expect(harness.element('tab-browse').getAttribute('aria-current')).toBe(null);
+
+    await harness.navigate('#/redline');
+    expect(harness.element('tab-redline').getAttribute('aria-current')).toBe('page');
+    expect(harness.element('tab-search').getAttribute('aria-current')).toBe(null);
+  });
+
+  it('keeps the section reader on the Search tab', async () => {
+    // A section is reached FROM a search hit, so the search tab is the
+    // current view there — not a fourth tab, and not no tab at all.
+    const harness = makeHarness();
+    await harness.navigate('#/section/4.16');
+    expect(harness.element('tab-search').getAttribute('aria-current')).toBe('page');
+    expect(harness.element('tab-browse').getAttribute('aria-current')).toBe(null);
+  });
+
+  it('heads a search result with h2, so the outline does not skip a level', async () => {
+    // The page starts at h1 and the search view's own heading is h2, so a
+    // result heading at h3 was an h1 -> h3 jump: assistive technology
+    // reports the search results as a subsection of nothing.
+    const harness = makeHarness();
+    await harness.navigate('#/search?q=alpha');
+    harness.calls[0]?.respond(true, searchBody('4.16', 'Heading 4.16'));
+    await harness.flush();
+
+    const hits = harness.element('search-hits');
+    const item = hits.childNodes[0];
+    expect(item?.tagName).toBe('LI');
+    const heading = item?.childNodes[0];
+    expect(heading?.tagName).toBe('H2');
+  });
+});
 
 describe('UI search grounding', () => {
   it('warns about the terms the results did not answer, without claiming coverage', async () => {

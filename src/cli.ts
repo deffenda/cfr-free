@@ -59,6 +59,95 @@ Exit codes:
   0 success   1 error   2 usage/config   3 index unavailable   4 port in use   5 export refused
 `;
 
+/**
+ * The sections of the usage text: a heading and the lines under it.
+ *
+ * The usage text is one block, and the per-command help is DERIVED from it
+ * rather than written out a second time — so the two can never disagree
+ * about a synopsis, and a change to the block reaches every command's help.
+ */
+function usageSections(): readonly {
+  readonly heading: string;
+  readonly lines: readonly string[];
+}[] {
+  const sections: { heading: string; lines: string[] }[] = [];
+  let current: { heading: string; lines: string[] } | null = null;
+  for (const line of USAGE.split('\n')) {
+    if (line !== '' && !line.startsWith(' ')) {
+      current = { heading: line, lines: [] };
+      sections.push(current);
+      continue;
+    }
+    if (current !== null) current.lines.push(line);
+  }
+  return sections;
+}
+
+/**
+ * The usage entry for one command: its line, and the continuation lines
+ * that belong to it (they are indented deeper than the entry itself).
+ */
+function usageEntry(lines: readonly string[], wanted: string): readonly string[] {
+  const entry: string[] = [];
+  let collecting = false;
+  for (const line of lines) {
+    if (line.trim() === '') break;
+    if (line.startsWith(`  ${wanted}`)) {
+      collecting = true;
+      entry.push(line);
+      continue;
+    }
+    if (!collecting) continue;
+    if (!line.startsWith('   ')) break;
+    entry.push(line);
+  }
+  return entry;
+}
+
+/**
+ * The usage text for one command: its own entry, plus the sections every
+ * command shares (the environment variables and the exit codes).
+ *
+ * `cfr-free search --help` used to be an error ("unknown option for
+ * search: --help"): the only usage text was the global block, so the one
+ * thing a user asks for when they have got a command wrong was the one
+ * thing the tool refused to say.
+ */
+export function commandUsage(command: string): string {
+  const wanted = command === 'mcp' ? 'cfr-free [mcp]' : `cfr-free ${command}`;
+  const picked: string[] = [];
+  for (const section of usageSections()) {
+    if (section.heading === 'Usage:') {
+      const entry = usageEntry(section.lines, wanted);
+      if (entry.length > 0) picked.push('Usage:', ...entry);
+      continue;
+    }
+    if (section.heading === 'Environment:' || section.heading === 'Exit codes:') {
+      picked.push('', section.heading, ...section.lines.filter((line) => line.trim() !== ''));
+    }
+  }
+  return `${picked.join('\n')}\n`;
+}
+
+/** `--help` or `-h` among the arguments: the user is asking about the command. */
+function asksForHelp(args: readonly string[]): boolean {
+  return args.some((arg) => arg === '--help' || arg === '-h');
+}
+
+/** The commands that have their own usage text. */
+const KNOWN_COMMANDS = new Set([
+  'mcp',
+  'sync',
+  'diff',
+  'redline',
+  'historical',
+  'search',
+  'serve',
+  'export',
+  'help',
+  'version',
+]);
+
 /** Raised for bad CLI usage (exit code 2). */
 export class CliError extends CommandError {
   override readonly name = 'CliError';
@@ -105,7 +194,13 @@ export type ParsedCommand =
       readonly kind?: 'section' | 'appendix' | undefined;
       readonly chapter?: string | undefined;
     }
-  | { readonly command: Exclude<Command, 'export' | 'diff' | 'redline' | 'historical' | 'search'> };
+  | { readonly command: 'help'; readonly topic?: string }
+  | {
+      readonly command: Exclude<
+        Command,
+        'export' | 'diff' | 'redline' | 'historical' | 'search' | 'help'
+      >;
+    };
 
 /** Validate `export`'s required target path and optional output format. */
 function parseExportTarget(rest: readonly string[]): ParsedCommand {
@@ -329,6 +424,22 @@ function parseSearchArgs(rest: readonly string[]): ParsedCommand {
 }
 
 /**
+ * The words and flags that select a command on their own.
+ *
+ * A Map, not a plain object: `parseArgs(['toString'])` must still fall
+ * through to "unknown command" — object literals inherit prototype keys,
+ * Maps don't.
+ */
+const GLOBAL_COMMANDS = new Map<string, ParsedCommand>([
+  ['help', { command: 'help' }],
+  ['-h', { command: 'help' }],
+  ['--help', { command: 'help' }],
+  ['version', { command: 'version' }],
+  ['-v', { command: 'version' }],
+  ['--version', { command: 'version' }],
+]);
+
+/**
  * Commands that carry positional arguments, mapped to their parser. A Map
  * (not a plain object): `parseArgs(['toString'])` must still fall through to
  * "unknown command" — object literals inherit prototype keys, Maps don't.
@@ -345,8 +456,14 @@ const ARG_PARSERS = new Map<string, (rest: readonly string[]) => ParsedCommand>(
 export function parseArgs(argv: readonly string[]): ParsedCommand {
   const [first, ...rest] = argv;
   if (first === undefined) return { command: 'mcp' };
-  if (first === '-h' || first === '--help' || first === 'help') return { command: 'help' };
-  if (first === '-v' || first === '--version' || first === 'version') return { command: 'version' };
+  const global = GLOBAL_COMMANDS.get(first);
+  if (global !== undefined) return { ...global };
+  // A help flag among the arguments is a request for the command's usage,
+  // and it is answered BEFORE the command's own parser: a command that
+  // takes arguments used to refuse to explain itself ("unknown option for
+  // search: --help"), which is the one thing a user asks for when they have
+  // got a command wrong.
+  if (asksForHelp(rest) && KNOWN_COMMANDS.has(first)) return { command: 'help', topic: first };
   const parseArgv = ARG_PARSERS.get(first);
   if (parseArgv !== undefined) return parseArgv(rest);
   if (first === 'mcp' || first === 'sync' || first === 'serve') {
@@ -370,6 +487,12 @@ export interface MainIO {
    * log without letting it near the user's line.
    */
   logger?: Logger;
+  /**
+   * Stops a long-running command. `serve` waits for a process signal by
+   * default; a caller that is not a process (a test, an embedder) aborts
+   * this instead.
+   */
+  stop?: AbortSignal;
 }
 
 /** Commands that read one provision across eCFR revisions (`historical`, `redline`). */
@@ -438,6 +561,23 @@ export function exitCodeFor(error: unknown): number {
   return error instanceof ConfigError ? EXIT.USAGE : EXIT.ERROR;
 }
 
+/**
+ * The answer a USAGE command gives: the general usage, the usage of one
+ * command, or the version. Undefined for every other command.
+ *
+ * It is its own function so the entry point keeps room for the commands
+ * that DO work: the complexity limit is the repo's own, and a command
+ * dispatch that answers `--help` inline spends the budget it needs for
+ * the commands that read the index.
+ */
+function usageAnswer(parsed: ParsedCommand): string | undefined {
+  if (parsed.command === 'help') {
+    return parsed.topic === undefined ? USAGE : commandUsage(parsed.topic);
+  }
+  if (parsed.command === 'version') return `${VERSION}\n`;
+  return undefined;
+}
+
 /** CLI entry point. Returns the process exit code. */
 export async function main(argv: readonly string[], io: MainIO): Promise<number> {
   // The logger is created from the config, which is loaded inside the try: a
@@ -447,12 +587,9 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
   try {
     const parsed = parseArgs(argv);
     const command = parsed.command;
-    if (command === 'help') {
-      io.out(USAGE);
-      return 0;
-    }
-    if (command === 'version') {
-      io.out(`${VERSION}\n`);
+    const usage = usageAnswer(parsed);
+    if (usage !== undefined) {
+      io.out(usage);
       return 0;
     }
 
@@ -509,7 +646,14 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
     if (PROVISION_READ_COMMANDS.has(command)) {
       return await runProvisionRead(parsed, logger, io);
     }
-    if (command === 'serve') return await runServeCommand(config, logger);
+    if (command === 'serve') {
+      // The URL in plain language: the structured log carries it too, but a
+      // log line is not what a human reads to find out where the server is.
+      return await runServeCommand(config, logger, {
+        onListening: (url) => io.out(`Serving on ${url}\n`),
+        ...(io.stop === undefined ? {} : { stop: io.stop }),
+      });
+    }
     await runMcpCommand(config, logger);
     return 0;
   } catch (error) {

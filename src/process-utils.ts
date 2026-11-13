@@ -13,8 +13,12 @@ export interface ShutdownIO {
 }
 
 export interface ShutdownController {
-  /** Invoke from `SIGINT`/`SIGTERM` handlers. */
-  handle(signal: NodeJS.Signals): Promise<void>;
+  /**
+   * Invoke from `SIGINT`/`SIGTERM` handlers — or from an abort, which is
+   * why the reason is a string and not a signal: the log line names WHY
+   * the shutdown started, and "abort" is a reason a signal is not.
+   */
+  handle(reason: string): Promise<void>;
   readonly shuttingDown: boolean;
 }
 
@@ -28,14 +32,14 @@ export function createShutdownController(
     get shuttingDown(): boolean {
       return started;
     },
-    async handle(signal: NodeJS.Signals): Promise<void> {
+    async handle(reason: string): Promise<void> {
       if (started) {
-        io.logger.warn('second signal received, forcing exit', { signal });
+        io.logger.warn('second signal received, forcing exit', { reason });
         io.exit(1);
         return;
       }
       started = true;
-      io.logger.info('shutting down', { signal });
+      io.logger.info('shutting down', { reason });
       try {
         await cleanup();
         io.exit(0);

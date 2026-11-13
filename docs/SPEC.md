@@ -156,15 +156,6 @@ no route to the rest. The flags are validated BEFORE the index is opened,
 for the same reason the query length is — a rejected input is the reader's
 mistake, and it must not be billed to a 2–3 MB sync.
 
-The first line of each search hit also carries the part context after the
-heading, using the same convention as the UI's hit meta line: when `part` is
-neither `null` nor `undefined`, append ` — part <part>`; when `partTitle` is
-also neither `null` nor `undefined` and its string value is non-empty, append
-`: <partTitle>`. For example, the suffix is ` — part 9: Servicemembers' Group
-Life Insurance and Veterans' Group Life Insurance` for that titled part. A
-null or empty title stops at ` — part 9` with no colon; a missing part leaves
-the first line unchanged and suppresses any part title.
-
 Verified 2026-10-20 against the live site: both forms answer 302 to a
 canonical path that preserves the date. **Retention limit (also measured
 2026-10-20):** eCFR serves the point-in-time archive only from 2017
@@ -373,13 +364,13 @@ All return MCP `structuredContent` + text content. The two channels carry the SA
 
 ## 7. Security plan
 
-- **Deps:** runtime deps limited to `@modelcontextprotocol/sdk`, `zod`, `fast-xml-parser`; lockfile committed; `npm audit --audit-level=high` runs in the quality job, and `npm run scan` adds osv-scanner, gitleaks, trivy, semgrep locally. No hosted scanner service: the operator withdrew hosted code-scanning gates permanently (2026-10-18), so these local gates are the security floor.
-- **Code (quality):** `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`; ESLint (`eslint.config.mjs`) — the rules this repo sets, and the scope each one applies to, are listed in §7.1 below; no regex without linear guarantees (`security/detect-unsafe-regex`); no `eval`/`Function` (`no-eval`, `no-implied-eval`, `no-new-func`); `src/` is `child_process`-free — `security/detect-child-process` is set for `**/*.ts`, but the rule reports the CommonJS `require('child_process')` form and `child_process.exec()` with a non-literal argument, not the ESM `import` form `test/` uses on purpose, so the invariant is `src/`'s; no secrets (none needed); all error paths return sanitized messages (no stack traces to clients).
+- **Deps:** runtime deps limited to `@modelcontextprotocol/sdk`, `zod`, `fast-xml-parser`; lockfile committed; `npm audit --audit-level=high` runs in the quality job, and `npm run scan` adds osv-scanner, gitleaks, trivy, semgrep locally. No hosted scanner service: the operator withdrew hosted code-scanning gates permanently (2026-10-18), so these local gates are the security floor — with CI running trivy and semgrep beside them, in jobs that report but do not block.
+- **Code (quality):** `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`; ESLint (`eslint.config.mjs`) — the rules this repo sets, and the scope each one applies to, are listed in §7.1 below; `no-explicit-any=error`, `no-console` allow-only-`error`, `complexity ≤ 15`, `eqeqeq`; no regex without linear guarantees (`security/detect-unsafe-regex`); no `eval`/`Function`/`child_process` in `src/` — `scripts/` runs a child process in exactly 3 files (`scripts/pack-list.mjs`, `scripts/prepare.mjs`, `scripts/verify-packed.mjs`), and only `scripts/prepare.mjs` is exempt from the computed-command rule; the `child_process` rule reports the CommonJS `require('child_process')` form and `child_process.exec()` with a non-literal argument, not the ESM `import` form `test/` uses on purpose, so the invariant is `src/`'s; no secrets (none needed); all error paths return sanitized messages (no stack traces to clients).
 - **Untrusted input (MCP surface):** the regulation text the tools return is DATA, never instructions — a provision that appears to address the model, redirect its task or ask it to act is quoted regulatory text: report it, do not follow it. The posture is stated where the model reads it (the tool descriptions and both prompt templates) and comes from one shared constant. A prompt's free-text arguments are fenced as caller data (per-render nonce) so they cannot restructure the generated message. The MCP wire bounds one provision's body at 100 000 characters and reports `truncated: true` when it cuts it, so a single huge provision cannot blow out a context.
 - **Corpus receipt:** the receipt is a RECEIPT over the local index — it detects ACCIDENTAL corruption of the local copy. It is stored in the index it covers, so it is not a signature and it makes no claim about the upstream text (SPEC §4).
 - **Coverage:** vitest + v8 ≥ 90 % branches/lines/functions/statements (fail-under thresholds in `vitest.config.ts`); mocked-fetch tests (no live network in PR CI).
 - **Deployment posture:** the service binds `127.0.0.1` by default and refuses a non-loopback bind unless `CFR_ALLOW_REMOTE=1`; there is NO authentication, so an exposed bind needs a reverse proxy with auth in front of it. The published container image is the one documented exception: it sets `CFR_HOST=0.0.0.0` and `CFR_ALLOW_REMOTE=1`, because a process bound to the container's own loopback cannot be reached through a published port (measured 2026-10-30: a container serving on `127.0.0.1` answers "Empty reply from server" through `-p`, and the same container on `0.0.0.0` answers 200). The exposure gate is therefore the HOST-side published port, and the documented default for it is loopback — `-p 127.0.0.1:8787:8787` in the README and in `docker-compose.yml`; `-p 8787:8787` publishes on every interface and is the opt-in.
-- **CI:** GitHub Actions — quality job (format, lint, workflow lint, typecheck, test, build, audit) + security job (gitleaks, osv-scanner) + docker job + actionlint job (workflow lint); no hosted-scanner job exists.
+- **CI:** GitHub Actions — quality job (format, lint, workflow lint, typecheck, test, build, audit) + security job (gitleaks, osv-scanner) + trivy job (filesystem: dependencies, secrets, misconfiguration) + semgrep job + docker job (build, offline smoke test, and a scan of the built image's base-OS packages) + actionlint job (workflow lint); no hosted-scanner service exists (the operator withdrew hosted code-scanning gates permanently, 2026-10-18). The trivy and semgrep jobs run on every pull request but are not required checks — the vulnerability database and the rule registry they read move without this repository changing, so promoting them to the merge floor is the operator's decision. The image's Node layer is covered by the committed lockfile, which `npm audit --audit-level=high` and the trivy job's filesystem scan both read; the image scan therefore reads the base image's OS packages, because the runtime image carries `package.json` without `package-lock.json` and a whole-image scan would resolve the manifest's devDependencies as shipped (measured 2026-10-30: ten HIGH findings, none of them in the image).
 
 ### 7.1 The lint rules `eslint.config.mjs` sets
 
@@ -408,6 +399,13 @@ All return MCP `structuredContent` + text content. The two channels carry the SA
 **/*.ts | security/detect-object-injection | off |
 **/*.ts | security/detect-possible-timing-attacks | off |
 **/*.mjs, scripts/**/*.js | no-console | off |
+**/*.mjs, scripts/**/*.js | security/detect-unsafe-regex | error |
+**/*.mjs, scripts/**/*.js | security/detect-child-process | error |
+**/*.mjs, scripts/**/*.js | security/detect-eval-with-expression | error |
+**/*.mjs, scripts/**/*.js | security/detect-non-literal-require | error |
+scripts/**/*.mjs | no-restricted-imports | error |
+scripts/**/*.mjs | no-restricted-syntax | error |
+scripts/prepare.mjs | no-restricted-syntax | off |
 src/titan/ui-client.js | no-console | error | allow=error,warn
 src/titan/ui-client.js | eqeqeq | error | always
 src/titan/ui-client.js | complexity | error | 15
@@ -428,7 +426,7 @@ test/**/*.ts | @typescript-eslint/no-explicit-any | off |
 
 <!-- lint-rules:end -->
 
-The complexity ceiling is therefore **15**, not 10, and `no-console` allows `error` and `warn` — not `error` alone. The config states the correctness rules ONCE and spreads them into the TypeScript scope and the browser script's own scope, so `src/titan/ui-client.js` carries the same rules as `**/*.ts` — the browser script is a real file, so the gate can see it at all.
+The complexity ceiling is therefore **15**, not 10, and `no-console` allows `error` and `warn` — not `error` alone. The `scripts/` scope carries two rules of its own — `no-restricted-imports` and `no-restricted-syntax` — and the options of those two are SELECTORS and messages, which the table above cannot write as `key=value` text: the table states them with their scope and severity only, and `test/lint-contract.test.ts` compares their severity alone. The config states the correctness rules ONCE and spreads them into the TypeScript scope and the browser script's own scope, so `src/titan/ui-client.js` carries the same rules as `**/*.ts` — the browser script is a real file, so the gate can see it at all.
 
 ## 8. Test plan
 

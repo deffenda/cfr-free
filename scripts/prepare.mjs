@@ -43,6 +43,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
@@ -112,20 +113,35 @@ function installDevDependencies() {
     'prepare: no local TypeScript found — installing the dev dependencies to build with',
   );
   const env = { ...process.env, CFR_FREE_PREPARING: '1' };
-  const status = run(
+  // The LOCKED install is preferred. `npm ci` installs exactly the versions
+  // the committed lockfile pins and refuses to run when package.json and
+  // the lockfile disagree, so the build cannot be fed a version nobody
+  // reviewed — and it audits what it installed, which the `--no-audit`
+  // install did not: an install that suppressed its own audit cannot
+  // report the vulnerability it just fetched.
+  const locked = existsSync(fileURLToPath(new URL('../package-lock.json', import.meta.url)));
+  const status = locked ? runLockedInstall(env) : runInstall(env);
+  if (status === 0) return localTypeScript() !== null;
+  if (!locked) return false;
+  // `npm ci` refuses to run when the lockfile is out of step with
+  // package.json. The install still has to work, so the unlocked install
+  // is the fallback — audited, but not locked.
+  console.error('prepare: the locked install failed — retrying with an unlocked install');
+  return runInstall(env) === 0 && localTypeScript() !== null;
+}
+
+/** The locked install: `npm ci` against the committed lockfile. */
+function runLockedInstall(env) {
+  return run('npm', ['ci', '--include=dev', '--no-fund', '--global=false'], env);
+}
+
+/** The unlocked install, for a tree with no lockfile to install from. */
+function runInstall(env) {
+  return run(
     'npm',
-    [
-      'install',
-      '--include=dev',
-      '--no-save',
-      '--no-package-lock',
-      '--no-audit',
-      '--no-fund',
-      '--global=false',
-    ],
+    ['install', '--include=dev', '--no-save', '--no-package-lock', '--no-fund', '--global=false'],
     env,
   );
-  return status === 0 && localTypeScript() !== null;
 }
 
 function main() {
