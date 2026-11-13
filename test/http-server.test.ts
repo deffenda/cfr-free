@@ -1648,4 +1648,83 @@ describe('Titan HTTP conditional requests (ETag / 304)', () => {
       expect(headers.get('etag'), `${path} must carry no ETag`).toBeNull();
     }
   });
+
+  it('fails fast with 503 when the upstream slot cap is reached, and releases on completion', async () => {
+    const logger = createTestLogger();
+    let releaseFirst!: (value: unknown) => void;
+    const firstMayFinish = new Promise((resolve) => {
+      releaseFirst = resolve;
+    });
+    let entered!: () => void;
+    const enteredFirst = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const fetching = {
+      diffBetween: async () => {
+        entered();
+        await firstMayFinish;
+        return {
+          fromIssueDate: '2026-01-01',
+          toIssueDate: '2026-06-01',
+          changed: [],
+          added: [],
+          removed: [],
+          notice: 'test notice',
+        };
+      },
+    } as unknown as CFRService;
+    const custom = createHttpServer(fetching, logger, { maxConcurrentUpstream: 1 });
+    await new Promise<void>((resolve) => custom.listen(0, '127.0.0.1', resolve));
+    const port = (custom.address() as AddressInfo).port;
+    const url = `http://127.0.0.1:${port}/api/v1/diff?from=2026-01-01&to=2026-06-01`;
+    try {
+      const first = fetch(url);
+      await enteredFirst; // the first handler holds the only slot
+      const second = await fetch(url);
+      expect(second.status).toBe(503);
+      expect(second.headers.get('retry-after')).toBe('1');
+      const body = (await second.json()) as Json;
+      expect(body['error']).toBe('upstream_busy');
+      releaseFirst(null);
+      const firstResponse = await first;
+      expect(firstResponse.status).toBe(200);
+      // The slot came back: the next request reaches the handler again.
+      const third = await fetch(url);
+      expect(third.status).toBe(200);
+    } finally {
+      releaseFirst(null);
+      await new Promise<void>((resolve) => {
+        custom.close(() => resolve());
+        custom.closeAllConnections();
+      });
+    }
+  });
+
+  it('releases the upstream slot when the handler throws', async () => {
+    let calls = 0;
+    const failing = {
+      diffBetween: async () => {
+        calls += 1;
+        throw new Error('upstream exploded');
+      },
+    } as unknown as CFRService;
+    const custom = createHttpServer(failing, createTestLogger(), { maxConcurrentUpstream: 1 });
+    await new Promise<void>((resolve) => custom.listen(0, '127.0.0.1', resolve));
+    const port = (custom.address() as AddressInfo).port;
+    const url = `http://127.0.0.1:${port}/api/v1/diff?from=2026-01-01&to=2026-06-01`;
+    try {
+      const first = await fetch(url);
+      expect(first.status).toBe(500);
+      // The failed handler released its slot: the second request reaches the
+      // handler (another 500), instead of bouncing off a leaked 503.
+      const second = await fetch(url);
+      expect(second.status).toBe(500);
+      expect(calls).toBe(2);
+    } finally {
+      await new Promise<void>((resolve) => {
+        custom.close(() => resolve());
+        custom.closeAllConnections();
+      });
+    }
+  });
 });
