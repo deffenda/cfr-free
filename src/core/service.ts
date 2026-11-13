@@ -3,7 +3,7 @@ import { ServiceError } from './errors.js';
 import { normalizeCitation } from './citations.js';
 import { datedSourceUrlFor, sourceUrlFor } from './urls.js';
 import { extractReferences } from './references.js';
-import type { SyncChanges } from './changes.js';
+import { syncChangesSchema, type SyncChanges } from './changes.js';
 import { diffIssues, type IssueDiff } from './diff.js';
 import { redlineSection, type SectionRedline } from './redline.js';
 import type { EcfrApi } from './ecfr.js';
@@ -675,11 +675,16 @@ export class CFRService {
   private lastChanges(): SyncChanges | null {
     const raw = this.store.getMeta('last_changes');
     if (raw === null) return null;
+    let parsed: unknown;
     try {
-      return JSON.parse(raw) as SyncChanges;
+      parsed = JSON.parse(raw);
     } catch {
       return null;
     }
+    // A syntactically valid record is not necessarily a VALID one: the
+    // schema is what makes the doc comment true (CR-20).
+    const result = syncChangesSchema.safeParse(parsed);
+    return result.success ? (result.data as SyncChanges) : null;
   }
 
   /**

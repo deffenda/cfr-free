@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { z } from 'zod';
 
 /**
  * What changed between the previous sync and the current one, computed from
@@ -28,6 +29,33 @@ export interface SyncChanges {
   readonly parserChanged: boolean;
   readonly recordedAt: string;
 }
+
+/**
+ * The validator for the persisted sync-change record.
+ *
+ * CR-20 found that the record was read back with a bare `JSON.parse(raw) as
+ * SyncChanges`. The `catch` covered only PARSE failure — a syntactically
+ * valid record with a different shape passed straight through the cast and
+ * onto the wire (`/health`'s `lastChanges`, MCP `index_status`). The cast
+ * silently disabled the guarantee the doc comment claimed, and a future
+ * change to {@link SyncChanges} would not have been caught.
+ *
+ * This schema is the shape check. A record that does not satisfy it is
+ * treated as absent, not as a crash.
+ */
+export const syncChangesSchema = z.object({
+  fromIssueDate: z.string().nullable(),
+  toIssueDate: z.string(),
+  changed: z.number().int().nonnegative(),
+  added: z.number().int().nonnegative(),
+  removed: z.number().int().nonnegative(),
+  changedCitations: z.array(z.string()),
+  addedCitations: z.array(z.string()),
+  removedCitations: z.array(z.string()),
+  baseline: z.boolean(),
+  parserChanged: z.boolean(),
+  recordedAt: z.string(),
+});
 
 /**
  * sha256 of a section's TEXT — the unit of "did this provision change?".

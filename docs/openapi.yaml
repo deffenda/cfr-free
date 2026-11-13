@@ -618,6 +618,12 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    UpstreamError:
+      # source: src/titan/http-server.ts#createHttpServer
+      description: '{ error: "upstream_error", message } — eCFR answered, but the data it sent was not usable (an unparseable date, a missing title, or a missing issue date). The detail is logged server-side only.'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     NotModified:
       # source: src/titan/http-server.ts#sendNotModified
       description: "Not modified — the request's If-None-Match matched the current ETag (weak comparison, RFC 9110 §13.1.2: `*` matches any representation, a list matches when any member matches, and a weak validator matches the strong one). The ETag and Cache-Control of the 200 it replaces, and NO body. Only the index-backed reads can answer this way; an error response never does."

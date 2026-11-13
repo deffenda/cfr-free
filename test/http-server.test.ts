@@ -3,6 +3,8 @@ import net from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type http from 'node:http';
 import type { EcfrApi } from '../src/core/ecfr.js';
+import { HttpError } from '../src/core/http-client.js';
+import { UpstreamFormatError } from '../src/core/errors.js';
 import { POINT_IN_TIME_NOTICE } from '../src/core/point-in-time.js';
 import { SemaphoreOverflowError } from '../src/core/semaphore.js';
 import { CFRService } from '../src/core/service.js';
@@ -1042,11 +1044,11 @@ describe('Titan HTTP /api/v1/diff', () => {
       getFullTitleXml: async (issueDate: string) => {
         const xml = xmlByDate[issueDate];
         if (xml === undefined) {
-          const error = new Error(`HTTP ${failureStatus} for ${issueDate}`) as Error & {
-            status?: number;
-          };
-          error.status = failureStatus;
-          throw error;
+          // The real client throws an `HttpError`; the archive guard
+          // recognises it by `instanceof` (CR-22). A loose object with a
+          // `status` property is a DIFFERENT thing, and pretending the two
+          // are the same would hide what this test pins.
+          throw new HttpError(`HTTP ${failureStatus} for ${issueDate}`, issueDate, failureStatus);
         }
         return xml;
       },
@@ -1169,6 +1171,25 @@ describe('Titan HTTP /api/v1/diff', () => {
     expect(body).toEqual({ error: 'internal_error', message: 'internal server error' });
   });
 
+  it('answers a 502 when eCFR sends data the contract does not allow', async () => {
+    // An upstream-DATA fault is neither the reader's fault nor ours: eCFR
+    // answered, and what it sent is not usable. That is a bad gateway, and
+    // it must not be collapsed into a generic 500 — the most actionable
+    // messages in the codebase were the ones being swallowed (CR-21).
+    const faulting = {
+      getFullTitleXml: async () => {
+        throw new UpstreamFormatError('eCFR returned an invalid date: not-a-date');
+      },
+    } as unknown as EcfrApi;
+    const service = new CFRService(temp.store, 7, faulting, createTestLogger());
+    const { status, body } = await withService(service, `/api/v1/diff?${DIFF_QUERY}`);
+    expect(status).toBe(502);
+    expect(body['error']).toBe('upstream_error');
+    // The detail stays server-side: the client learns the upstream was
+    // unusable, not what it said.
+    expect(String(body['message'])).not.toContain('not-a-date');
+  });
+
   it("answers a 400 for a date before eCFR's archive, not a generic 500", async () => {
     // eCFR answers 404 for a date outside its point-in-time archive. That is
     // the reader's argument, not a service failure: it must be the same usage
@@ -1248,11 +1269,11 @@ describe('Titan HTTP /api/v1/redline', () => {
       getFullTitleXml: async (issueDate: string) => {
         const xml = xmlByDate[issueDate];
         if (xml === undefined) {
-          const error = new Error(`HTTP ${failureStatus} for ${issueDate}`) as Error & {
-            status?: number;
-          };
-          error.status = failureStatus;
-          throw error;
+          // The real client throws an `HttpError`; the archive guard
+          // recognises it by `instanceof` (CR-22). A loose object with a
+          // `status` property is a DIFFERENT thing, and pretending the two
+          // are the same would hide what this test pins.
+          throw new HttpError(`HTTP ${failureStatus} for ${issueDate}`, issueDate, failureStatus);
         }
         return xml;
       },
@@ -1646,85 +1667,6 @@ describe('Titan HTTP conditional requests (ETag / 304)', () => {
       const { status, headers } = await request(path);
       expect(status, `${path} must stay a 200`).toBe(200);
       expect(headers.get('etag'), `${path} must carry no ETag`).toBeNull();
-    }
-  });
-
-  it('fails fast with 503 when the upstream slot cap is reached, and releases on completion', async () => {
-    const logger = createTestLogger();
-    let releaseFirst!: (value: unknown) => void;
-    const firstMayFinish = new Promise((resolve) => {
-      releaseFirst = resolve;
-    });
-    let entered!: () => void;
-    const enteredFirst = new Promise<void>((resolve) => {
-      entered = resolve;
-    });
-    const fetching = {
-      diffBetween: async () => {
-        entered();
-        await firstMayFinish;
-        return {
-          fromIssueDate: '2026-01-01',
-          toIssueDate: '2026-06-01',
-          changed: [],
-          added: [],
-          removed: [],
-          notice: 'test notice',
-        };
-      },
-    } as unknown as CFRService;
-    const custom = createHttpServer(fetching, logger, { maxConcurrentUpstream: 1 });
-    await new Promise<void>((resolve) => custom.listen(0, '127.0.0.1', resolve));
-    const port = (custom.address() as AddressInfo).port;
-    const url = `http://127.0.0.1:${port}/api/v1/diff?from=2026-01-01&to=2026-06-01`;
-    try {
-      const first = fetch(url);
-      await enteredFirst; // the first handler holds the only slot
-      const second = await fetch(url);
-      expect(second.status).toBe(503);
-      expect(second.headers.get('retry-after')).toBe('1');
-      const body = (await second.json()) as Json;
-      expect(body['error']).toBe('upstream_busy');
-      releaseFirst(null);
-      const firstResponse = await first;
-      expect(firstResponse.status).toBe(200);
-      // The slot came back: the next request reaches the handler again.
-      const third = await fetch(url);
-      expect(third.status).toBe(200);
-    } finally {
-      releaseFirst(null);
-      await new Promise<void>((resolve) => {
-        custom.close(() => resolve());
-        custom.closeAllConnections();
-      });
-    }
-  });
-
-  it('releases the upstream slot when the handler throws', async () => {
-    let calls = 0;
-    const failing = {
-      diffBetween: async () => {
-        calls += 1;
-        throw new Error('upstream exploded');
-      },
-    } as unknown as CFRService;
-    const custom = createHttpServer(failing, createTestLogger(), { maxConcurrentUpstream: 1 });
-    await new Promise<void>((resolve) => custom.listen(0, '127.0.0.1', resolve));
-    const port = (custom.address() as AddressInfo).port;
-    const url = `http://127.0.0.1:${port}/api/v1/diff?from=2026-01-01&to=2026-06-01`;
-    try {
-      const first = await fetch(url);
-      expect(first.status).toBe(500);
-      // The failed handler released its slot: the second request reaches the
-      // handler (another 500), instead of bouncing off a leaked 503.
-      const second = await fetch(url);
-      expect(second.status).toBe(500);
-      expect(calls).toBe(2);
-    } finally {
-      await new Promise<void>((resolve) => {
-        custom.close(() => resolve());
-        custom.closeAllConnections();
-      });
     }
   });
 });

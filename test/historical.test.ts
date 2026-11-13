@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ARCHIVE_FLOOR } from '../src/core/archive.js';
 import { historicalSection } from '../src/core/historical.js';
 import { ServiceError } from '../src/core/errors.js';
+import { HttpError } from '../src/core/http-client.js';
 import { createTestLogger } from './helpers.js';
 import type { EcfrApi } from '../src/core/ecfr.js';
 
@@ -21,9 +22,11 @@ function stubEcfr(xmlByDate: Readonly<Record<string, string>>, requested: string
       requested.push(issueDate);
       const xml = xmlByDate[issueDate];
       if (xml === undefined) {
-        const error = new Error(`HTTP 404 for ${issueDate}`) as Error & { status?: number };
-        error.status = 404;
-        throw error;
+        // The real client throws an `HttpError`, and the archive guard
+        // recognises it by `instanceof` (CR-22) — a loose object with a
+        // `status` property is not the same thing, and pretending it is
+        // would hide the difference this test exists to pin.
+        throw new HttpError(`HTTP 404 for ${issueDate}`, issueDate, 404);
       }
       return xml;
     },
