@@ -568,12 +568,6 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
-    UpstreamBusy:
-      # source: src/titan/http-server.ts#createHttpServer
-      description: '{ error: "upstream_busy", message } — the upstream fetch queue was full: the request was refused at once instead of being parked behind the fetches already in flight (the eCFR-fetching routes only).'
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/Error' }
     NotModified:
       # source: src/titan/http-server.ts#sendNotModified
       description: "Not modified — the request's If-None-Match matched the current ETag (weak comparison, RFC 9110 §13.1.2: `*` matches any representation, a list matches when any member matches, and a weak validator matches the strong one). The ETag and Cache-Control of the 200 it replaces, and NO body. Only the index-backed reads can answer this way; an error response never does."
