@@ -51,6 +51,7 @@ export const UI_HTML = `<!doctype html>
     <link rel="stylesheet" href="/ui.css" />
   </head>
   <body>
+    <a class="skip-link" id="skip-link" href="#main">Skip to the main content</a>
     <header class="site-header">
       <h1><a href="#/search">cfr-free</a></h1>
       <p>Read-only search over the local Title 38 CFR index.</p>
@@ -63,8 +64,10 @@ export const UI_HTML = `<!doctype html>
     <noscript>
       <p>This page needs JavaScript. The JSON API stays available at /api/v1/… without it.</p>
     </noscript>
-    <main id="main">
+    <main id="main" tabindex="-1">
+      <p id="view-announcer" class="visually-hidden" role="status" aria-live="polite"></p>
       <section id="search-view">
+        <h2 id="search-heading" tabindex="-1">Search Title 38</h2>
         <form id="search-form">
           <label for="q">Search</label>
           <input id="q" name="q" type="search" autocomplete="off" />
@@ -74,8 +77,14 @@ export const UI_HTML = `<!doctype html>
             <option value="section">section</option>
             <option value="appendix">appendix</option>
           </select>
+          <label for="part">Part</label>
+          <input id="part" name="part" type="text" inputmode="numeric" autocomplete="off"
+                 pattern="[0-9]{1,3}" maxlength="3" title="The CFR part number, for example 4"
+                 placeholder="e.g. 4" />
           <label for="chapter">Chapter</label>
-          <input id="chapter" name="chapter" type="text" placeholder="e.g. I" />
+          <input id="chapter" name="chapter" type="text" autocomplete="off"
+                 pattern="[IVXLCDM]{1,8}" maxlength="8"
+                 title="The chapter as a Roman numeral, for example IV" placeholder="e.g. I" />
           <label for="per-page">Per page</label>
           <select id="per-page" name="per_page">
             <option value="10">10</option>
@@ -91,7 +100,7 @@ export const UI_HTML = `<!doctype html>
       <section id="section-view" hidden>
         <p id="section-back"><a href="#/search">Back to search</a></p>
         <p id="section-error" role="status"></p>
-        <h2 id="section-heading"></h2>
+        <h2 id="section-heading" tabindex="-1"></h2>
         <p id="section-path" class="breadcrumb"></p>
         <p id="section-meta" class="breadcrumb"></p>
         <p id="section-copy"><button type="button" id="copy-citation">Copy citation</button>
@@ -107,7 +116,7 @@ export const UI_HTML = `<!doctype html>
       <section id="browse-view" hidden>
         <p id="browse-error" role="status"></p>
         <nav id="browse-crumbs" class="breadcrumb" aria-label="Breadcrumb"></nav>
-        <h2 id="browse-heading"></h2>
+        <h2 id="browse-heading" tabindex="-1"></h2>
         <ul id="browse-list"></ul>
       </section>
       <section id="redline-view" hidden>
@@ -121,7 +130,7 @@ export const UI_HTML = `<!doctype html>
           <button type="submit">Show redline</button>
         </form>
         <p id="redline-error" role="status"></p>
-        <h2 id="redline-heading"></h2>
+        <h2 id="redline-heading" tabindex="-1"></h2>
         <p id="redline-meta" class="breadcrumb"></p>
         <pre id="redline-output" aria-label="Line-level redline"></pre>
       </section>
