@@ -27,6 +27,7 @@
   },
   "files": [
     "dist",
+    "docs/openapi.yaml",
     "scripts/prepare.mjs",
     "scripts/copy-assets.mjs",
     "README.md",
