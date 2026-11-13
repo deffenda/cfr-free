@@ -43,7 +43,7 @@ export async function runServeCommand(config: AppConfig, logger: Logger): Promis
     const freshness = await ensureIndex(store, config, logger, { createEcfr: () => ecfr });
     const service = new CFRService(store, config.maxAgeDays, ecfr, logger);
 
-    // Disk capacity for /health and /metrics (SPEC §13 #22): probed once at
+    // Disk capacity for /health and /metrics (delivery log §13 #22): probed once at
     // boot and re-probed after every refresh attempt — success or failure,
     // because the capacity signal must not depend on sync health. The HTTP
     // layer reads this cell per request through an accessor, so it never

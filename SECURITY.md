@@ -37,12 +37,15 @@ Design choices that keep the attack surface small:
   exposing it.
 - **Deliberate container exposure.** The published Docker image sets
   `CFR_HOST=0.0.0.0` and `CFR_ALLOW_REMOTE=1` intentionally: the published
-  port (`-p 8787:8787`) is the explicit exposure gate — a loopback bind
-  inside the container would make that port unreachable. `/metrics` and
-  `/health` are unauthenticated by design; coarse 429 rate limiting guards
-  non-loopback binds when the remote opt-in is set. Every HTTP response
-  carries `Cross-Origin-Resource-Policy: same-origin`, so browsers refuse
-  to load these endpoints from foreign origins.
+  port is the explicit exposure gate — a loopback bind inside the container
+  would make that port unreachable. The documented default publishes on
+  loopback (`-p 127.0.0.1:8787:8787`, as in the README and in
+  `docker-compose.yml`); publishing on every interface (`-p 8787:8787`) is
+  the opt-in, and the unauthenticated API then needs your own auth in front.
+  `/metrics` and `/health` are unauthenticated by design; coarse 429 rate
+  limiting guards non-loopback binds when the remote opt-in is set. Every
+  HTTP response carries `Cross-Origin-Resource-Policy: same-origin`, so
+  browsers refuse to load these endpoints from foreign origins.
 - **Protocol hygiene.** MCP stdout carries JSON-RPC only; all logging goes to
   stderr as JSON lines. Error messages returned to HTTP clients are
   sanitized (no stack traces, no raw upstream bodies, no query strings).
@@ -64,6 +67,12 @@ Design choices that keep the attack surface small:
 Every PR runs `npm audit` (high+), gitleaks (secret scan over full git
 history) and osv-scanner in CI. Locally, `npm run scan` additionally runs
 trivy and semgrep when installed.
+
+The release path (a `v*` tag) does NOT re-run the secret scan: its gate is
+`npm run ci`, whose last step is `npm audit` alone, and CI's `security` job
+has no tag trigger. The release checklist (`docs/SPEC.md` §11.1) therefore
+requires `npm run scan:strict`, which fails unless gitleaks and osv-scanner
+actually ran.
 
 ## Operator-run local scans
 

@@ -1737,9 +1737,10 @@ surface it"_).
 | `test/markdown-tables.test.ts:152-171`                             | the text of every tracked `.md`                                                                                                                                 | a malformed table fails the suite                                                                                                               |
 | `test/no-conflict-markers.test.ts:75-96`                           | the text of every tracked file                                                                                                                                  | a conflict marker fails the suite                                                                                                               |
 | `test/contract-drift.test.ts` (added by CR-04)                     | the text of `docs/openapi.yaml` (the token-cost table and the 429 text), `docs/SPEC.md`, `README.md` and EVERY `.ts`/`.js`/`.mjs`/`.cjs` file under `src/`      | editing a published price or fetch bound fails the suite; editing a source file's DOC COMMENT can fail it (a false claim about the memo)        |
+| `test/lint-contract.test.ts` (added by CR-19)                      | the text of `docs/SPEC.md` §7.1's lint-rules table and of `eslint.config.mjs`'s own rule blocks                                                                 | editing either file's rule set without following the other fails the suite                                                                      |
 
 **Assessment:** the first two are defensible inter-file contract tests —
-`install-paths.test.ts:44-50` states the rationale explicitly and each
+`install-paths.test.ts:36-40` states the rationale explicitly and each
 assertion names the file it reads — but their blast radius is wider than the
 "Reads" column first suggested, and the table above now names every file.
 Two edits that the earlier form of this table did not disclose were confirmed

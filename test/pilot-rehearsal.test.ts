@@ -20,7 +20,7 @@ import { makeSection, openTempStore } from './helpers.js';
  * participant finding: it cannot say whether a practitioner would find the
  * right answer, because the suite can read the answer key. In particular
  * it does NOT touch the subject-index reopen condition, which is fixed on
- * the PILOT's `E3` count (`ROADMAP.md` §M3).
+ * the PILOT's `E3` count (delivery log §M3).
  *
  * The suite runs against a SEEDED temporary index, like the retrieval
  * evaluation's own test: it stays offline and hermetic, never touches the

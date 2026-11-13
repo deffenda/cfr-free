@@ -95,7 +95,7 @@ function verifyAgainstStructure(
       actualAppendices: actual.appendices,
     });
   }
-  // Expected counts are persisted so later readers can detect drift (SPEC §13).
+  // Expected counts are persisted so later readers can detect drift (delivery log §13).
   return { expectedSections, expectedAppendices };
 }
 

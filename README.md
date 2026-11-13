@@ -62,14 +62,10 @@ Docker; the second needs only npm; the third needs only Node and runs
 the package straight from a release tarball (no compiler); the fourth
 needs npm and a compiler; the fifth needs a checkout.
 
-New here? [First 10 minutes](docs/first-ten-minutes.md) picks one of these
-routes and walks it end to end: build the local index, search it, read a
-provision and cite it.
-
 ### 1. Docker (nothing to install)
 
 ```bash
-docker run -d --name cfr-free -p 8787:8787 -v cfr-data:/data \
+docker run -d --name cfr-free -p 127.0.0.1:8787:8787 -v cfr-data:/data \
   ghcr.io/deffenda/cfr-free:latest
 ```
 
@@ -80,6 +76,10 @@ CLI command works the same way, e.g. `docker run --rm -v cfr-data:/data
 ghcr.io/deffenda/cfr-free:latest sync` to refresh, or `… export
 /data/backup.sqlite` to snapshot into the volume. Details under
 [Docker](#docker) below.
+
+**The API has no authentication.** The command above publishes it on loopback
+only, so only this machine can reach it. Publishing it on every interface
+takes `-p 8787:8787` instead — and then it needs your own auth in front.
 
 ### 2. From npm (no compiler, no Docker)
 
@@ -205,9 +205,14 @@ CFR_INDEX_PATH=/tmp/cfr-smoke.sqlite node dist/cli.js sync   # ~5 s, then delete
 ### Docker
 
 ```bash
-docker run -d --name cfr-free -p 8787:8787 -v cfr-data:/data \
+docker run -d --name cfr-free -p 127.0.0.1:8787:8787 -v cfr-data:/data \
   ghcr.io/deffenda/cfr-free:latest
 ```
+
+**The API has no authentication.** The command above publishes it on loopback
+only, so only this machine can reach it. Publishing it on every interface
+takes `-p 8787:8787` instead — and then it needs a reverse proxy with auth in
+front of it.
 
 The container syncs on first start (~5 s, ~2–3 MB from eCFR), then serves
 the HTTP API; the index persists in the `cfr-data` volume mounted at `/data`.
@@ -215,24 +220,13 @@ Any CLI command works the same way, e.g.
 `docker run --rm -v cfr-data:/data ghcr.io/deffenda/cfr-free:latest sync` to
 refresh, or `… export /data/backup.sqlite` to snapshot into the volume.
 
-The image runs as a non-root user and binds `0.0.0.0` with the remote opt-in
-already set — inside a container the published port (`-p`) is the exposure
-gate, and loopback would make it unreachable. Outside Docker the CLI still
-defaults to `127.0.0.1` with `CFR_ALLOW_REMOTE=1` required. When you do
-expose it, a per-peer token-bucket rate limit (60-burst, 10 tokens/s) turns on
-automatically. The budget is spent by cost, not by request: a read of the
-local index costs one token, and a route that pulls the whole upstream
-document from eCFR costs ten.
+The image runs as a non-root user and binds `0.0.0.0` inside the container with the remote opt-in already set. That part is a container-networking requirement, not an exposure decision: a process bound to the container's own `127.0.0.1` cannot be reached through a published port, so the **published port is the exposure gate** — and the documented default publishes on loopback. Outside Docker the CLI still defaults to `127.0.0.1` with `CFR_ALLOW_REMOTE=1` required. When you do expose it, a per-peer token-bucket rate limit (60-burst, 10 tokens/s) turns on automatically. The budget is spent by cost, not by request: a read of the local index costs one token, and a route that pulls the whole upstream document from eCFR costs ten.
 
-Behind a TLS-terminating proxy, add `Strict-Transport-Security` there
-rather than in the app: the header is a promise about the public hostname,
-and the app does not know it. The app answers with
-`Referrer-Policy: no-referrer` on every route, so a link out of a response
-cannot carry the URL you were reading to the next site. Images are published to GHCR on `v*` tags with
-build-provenance attestations.
+Behind a TLS-terminating proxy, add `Strict-Transport-Security` there rather than in the app: the header is a promise about the public hostname, and the app does not know it. The app answers with `Referrer-Policy: no-referrer` on every route, so a link out of a response cannot carry the URL you were reading to the next site. Images are published to GHCR on `v*` tags with build-provenance attestations.
 
-Prefer Compose? `docker compose up -d --build` serves the API on
-`127.0.0.1:8787` with a named volume, healthcheck, and sync left explicit
+Compose is the one-command deployment, and it binds loopback too:
+`docker compose up -d --build` serves the API on `127.0.0.1:8787` with a
+named volume, healthcheck, and sync left explicit
 (`docker compose run --rm cfr-free sync`) so starts never trigger a surprise
 download.
 
@@ -442,9 +436,9 @@ static web UI assets. There is **no authentication** — if you bind it to a
 non-loopback address you must put it behind your own reverse proxy/auth
 (`CFR_ALLOW_REMOTE=1` is required to allow that, as an explicit opt-in).
 
-The serve root `/` also serves a **read-only web UI** (search + section reader
-with chapter/part browse + a redline view over the same JSON API, hash-routed) —
-no auth, loopback bind by default like the rest of the surface.
+The serve root `/` also serves a **read-only web UI** (search + section
+reader with chapter/part browse over the same JSON API, hash-routed) — no auth, loopback bind by
+default like the rest of the surface.
 
 ## Configuration
 
@@ -517,7 +511,8 @@ eCFR API ──sync──▶ SQLite (sections + FTS5 + structure meta)
 - `src/commands/` — one entrypoint per subcommand: `mcp`, `sync`, `diff`,
   `redline`, `historical`, `search`, `serve`, `export` (`help` and
   `version` dispatch from `src/cli.ts`)
-- `docs/SPEC.md` — design decisions and review dispositions
+- `docs/SPEC.md` — the design authority; `docs/research/delivery-log.md` —
+  the review dispositions and the closed delivery record
 
 Sync is atomic: the whole index is replaced inside one `BEGIN IMMEDIATE`
 transaction under WAL, so concurrent readers never see a partial build, and

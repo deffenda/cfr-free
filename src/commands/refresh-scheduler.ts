@@ -3,7 +3,8 @@ import { upstreamFailure } from './upstream-guidance.js';
 
 /**
  * Opt-in periodic index refresh for long-running `serve`/`mcp` processes
- * (ROADMAP #17): re-runs the startup sync path every `refreshHours` so
+ * (delivery log, "Later" #17): re-runs the startup sync path every
+ * `refreshHours` so
  * staleness repairs itself mid-flight. Disabled (no timer at all) when
  * `refreshHours` is 0.
  *

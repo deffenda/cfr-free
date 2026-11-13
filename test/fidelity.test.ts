@@ -3,7 +3,7 @@ import { extractReferences } from '../src/core/references.js';
 import { decodeNumericEntities, parseTitleXml } from '../src/core/xml.js';
 
 /**
- * Regulatory-text fidelity fixtures (SPEC §13).
+ * Regulatory-text fidelity fixtures (delivery log §13).
  *
  * Every fragment below is VERBATIM from the eCFR versioner API:
  *

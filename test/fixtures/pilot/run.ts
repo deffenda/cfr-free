@@ -16,7 +16,7 @@
  * right answer — that needs a person who cannot read the answer key, and
  * this suite can. In particular it does NOT touch the subject-index
  * reopen condition, which is fixed on the PILOT's `E3` count
- * (`ROADMAP.md` §M3).
+ * (delivery log §M3).
  *
  * WHY IT IS OFFLINE. Every task in the suite runs against the LOCAL index
  * and the local surfaces only, and no check it runs performs a network
