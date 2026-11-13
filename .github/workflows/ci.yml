@@ -61,7 +61,7 @@ jobs:
       # pull request.
       - name: Install actionlint
         run: |
-          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          go install github.com/rhysd/actionlint/cmd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: lint (actionlint, workflows)
         run: npm run lint:actions
@@ -104,9 +104,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # v1.7.12 is the version AGENTS.md blesses for `npm run lint:actions`:
-      # the local gate and this job must lint the same way.
+      # the local gate and this job must lint the same way. The install
+      # pins the COMMIT that version names, so a retagged upstream release
+      # cannot change what CI builds; the comment keeps the version
+      # readable.
       - name: Install actionlint
-        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
       # Silent failure this prevents: a workflow that is valid YAML but
       # invalid to GitHub's expression parser — a job-level `if` reading the
       # `matrix` context, for instance — yields a failed run with zero jobs,

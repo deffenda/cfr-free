@@ -222,6 +222,12 @@ export class HttpClient {
     try {
       response = await fetchFn(url, {
         signal: AbortSignal.timeout(timeoutMs),
+        // The base URL is pinned by construction (ecfr.ts) — a redirect
+        // answer means the origin we are talking to is not the origin we
+        // intend, so it is refused rather than followed (no SSRF hop onto
+        // whatever Location the other side names). A 3xx maps to a `status`
+        // failure, which isRetryable does not retry.
+        redirect: 'manual',
         headers: {
           accept: 'application/xml, application/json;q=0.9, text/plain;q=0.8, */*;q=0.1',
           'user-agent': this.options.userAgent ?? 'cfr-free',
@@ -232,6 +238,17 @@ export class HttpClient {
       throw new HttpError(
         `request failed for ${url.pathname}: ${errorMessage(error)}`,
         url.pathname,
+      );
+    }
+
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel().catch(() => undefined);
+      // Never echo Location: it is the refusing side's data, and the
+      // message policy here is pathname-only (no upstream strings).
+      throw new HttpError(
+        `upstream redirect refused for ${url.pathname}`,
+        url.pathname,
+        response.status,
       );
     }
 
