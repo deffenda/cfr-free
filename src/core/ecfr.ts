@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { ZodError, z } from 'zod';
 import type { HttpClient } from './http-client.js';
 import { DEFAULT_MAX_WAITERS, Semaphore } from './semaphore.js';
 import { UpstreamFormatError } from './errors.js';
@@ -123,7 +123,22 @@ export class EcfrApi {
   /** Resolve Title 38's current issue date (eCFR rejects dates past it). */
   async getTitleSchedule(): Promise<TitleSchedule> {
     const url = new URL('/api/versioner/v1/titles.json', this.baseUrl);
-    const data = await this.http.getJson(url, (raw) => titlesSchema.parse(raw));
+    let data: z.infer<typeof titlesSchema>;
+    try {
+      data = await this.http.getJson(url, (raw) => titlesSchema.parse(raw));
+    } catch (error) {
+      // eCFR answered with a body that is not its contract. A bare schema
+      // fault would read as OUR bug and collapse into a generic 500 (the
+      // most actionable messages were the ones being swallowed — CR-21);
+      // the contract clause that failed is the actionable part, and it
+      // stays in this message.
+      if (error instanceof ZodError) {
+        throw new UpstreamFormatError(
+          `eCFR titles.json did not match the contract: ${error.message}`,
+        );
+      }
+      throw error;
+    }
     const title = data.titles.find((entry) => entry.number === TITLE_38);
     if (!title) {
       throw new UpstreamFormatError(`eCFR titles.json does not include title ${TITLE_38}`);
