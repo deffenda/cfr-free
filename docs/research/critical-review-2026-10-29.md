@@ -1739,7 +1739,7 @@ surface it"_).
 | `test/contract-drift.test.ts` (added by CR-04)                     | the text of `docs/openapi.yaml` (the token-cost table and the 429 text), `docs/SPEC.md`, `README.md` and EVERY `.ts`/`.js`/`.mjs`/`.cjs` file under `src/`      | editing a published price or fetch bound fails the suite; editing a source file's DOC COMMENT can fail it (a false claim about the memo)        |
 
 **Assessment:** the first two are defensible inter-file contract tests —
-`install-paths.test.ts:36-40` states the rationale explicitly and each
+`install-paths.test.ts:44-50` states the rationale explicitly and each
 assertion names the file it reads — but their blast radius is wider than the
 "Reads" column first suggested, and the table above now names every file.
 Two edits that the earlier form of this table did not disclose were confirmed
