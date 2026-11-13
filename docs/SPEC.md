@@ -143,6 +143,17 @@ navigation (it is the "what does it say today" link), and the HTTP and MCP
 surfaces carry both. The same rule governs the section view's copy block,
 which prints the dated form as its verification link.
 
+**The CLI's search surface.** `cfr-free search` runs the same search the
+HTTP and MCP surfaces run, and takes the same parameters: `--page`,
+`--per-page`, `--part`, `--kind` and `--chapter` mirror the HTTP query
+parameters, and `--json` emits the `SearchResponse` verbatim for a script
+(the prose is for a reader; a script must never have to parse it). The
+page size is the reader's to choose: the ten results the command used to
+print were a dead end for anyone who narrowed by the wrong wording, with
+no route to the rest. The flags are validated BEFORE the index is opened,
+for the same reason the query length is — a rejected input is the reader's
+mistake, and it must not be billed to a 2–3 MB sync.
+
 The first line of each search hit also carries the part context after the
 heading, using the same convention as the UI's hit meta line: when `part` is
 neither `null` nor `undefined`, append ` — part <part>`; when `partTitle` is
