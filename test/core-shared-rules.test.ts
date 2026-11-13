@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { findProvision, normalizeCitation } from '../src/core/citations.js';
-import { buildFtsQueries, queryTerms, toFtsQuery } from '../src/core/store.js';
+import { buildFtsQueries, queryTerms, toFtsQuery } from '../src/core/query.js';
 import { datedSourceUrlFor, sourceUrlFor } from '../src/core/urls.js';
 import type { RawSection } from '../src/core/xml.js';
 import { syncChangesSchema, type SyncChanges } from '../src/core/changes.js';
