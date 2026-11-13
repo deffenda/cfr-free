@@ -622,6 +622,31 @@ round wrote the row.
 | M3 (the measured state restated after the ranking round)                                | #108                                         | `3c5c5be` → APPROVE 0/0/0; `a7e2cfb` → APPROVE 0/0/0 (re-affirm)                                        | `f455e01`                                        | `npm run ci` exit 0, 639 tests                                                                                                                          |
 | M3 (the part title on every hit — the § 9.21 context remedy)                            | #109                                         | `fa70b33` → APPROVE 0/0/0                                                                               | `5306fb8`                                        | `npm run ci` exit 0, 660 passed \| 1 skipped, 97.3 % stmts / 90.96 % branches                                                                           |
 | **CLOSED — not a defect** — P1-20261021-07 (the browse view's request identity)         | #118 (closed by measurement; no code change) | `69d5df3` → APPROVE 0/0/0 (the review's one P1 was this row's gate tail — corrected in the same commit) | — (this PR's own merge; recorded in the journal) | `npm run ci` exit 0, 670 passed \| 1 skipped, prettier clean, eslint 0 errors (8 pre-existing warnings); the two pinning tests are in `test/ui.test.ts` |
+| M6 (the success criteria accepted, the subject index decided, a session runnable)       | #121                                         | `3bf4f0c` → APPROVE 0/0/0 (PR-body claim; no GitHub APPROVED event) — `opencode/nemotron-3-ultra-free`  | 4c6d558f                                         | `npm run ci` exit 0, 670 passed \| 1 skipped, prettier clean                                                                                            |
+| M6 (the measurement machinery repaired, the rehearsal recorded)                         | #122                                         | — (no verdict; a Codex COMMENTED receipt only)                                                          | 1fa5f3c3                                         | `npm run ci` exit 0, 670 passed \| 1 skipped, prettier clean                                                                                            |
+| M6 rehearsal (the three provenance gaps the rehearsal found, closed)                    | #130                                         | — (no verdict; a Codex COMMENTED receipt only)                                                          | 1e9dee77                                         | `npm run ci` exit 0, 696 passed \| 1 skipped, audit 0 vulnerabilities                                                                                   |
+| M6 (the three items' completion records, the rehearsal check that can fail)             | #131                                         | — (no verdict; a Codex COMMENTED receipt only)                                                          | 9aeab6c6                                         | `npm run ci` exit 0, 701 passed \| 1 skipped, audit 0 vulnerabilities                                                                                   |
+| M6 rehearsal (the unwind seam failure-tolerant and non-mutating)                        | #178                                         | `26aa6bb` → APPROVE 0/0/0 (the merge-floor review)                                                      | 911d3455                                         | `npm run ci` exit 0 at `26aa6bb` (97.35% stmts / 90.9% branches), audit 0 vulnerabilities                                                               |
+
+**The #121 row's evidence state (recorded 2026-11-02).** Its verdict is the
+PR body's own claim — "Independent review at the final head `3bf4f0c` —
+APPROVE, 0 P0 / 0 P1 / 0 P2" — and GitHub holds no APPROVED review event
+for #121: the only formal review on that PR is the Codex COMMENTED receipt,
+at the same head SHA. The row records that claim and labels it a body claim.
+No PR in this table carries a GitHub approval event — checked PR by PR, 21
+hold COMMENTED receipts only and four hold no review event at all — so no row
+here can be read as a GitHub-recorded approval, and what separates #121's row
+from #122's, #130's and #131's is whether a verdict was claimed at all:
+#121's PR claims one at its final head, and those three claim none.
+
+**The reviewer that claim names.** `opencode/nemotron-3-ultra-free` is one
+of the models the operator's directive — recorded in `docs/SPEC.md` §13 #67
+— tells the repository to stop using as reviewers; the free-roster rule
+file that record points at (`claude/rules/cross-model-review.md`) was
+retired 2026-10-24 (#139). The directive is dated 2026-10-21, and so is the
+#121 review — its head `3bf4f0c` was committed and merged that day — so the
+record places the two on one day and no further: it does not say which came
+first, and this note claims no order.
 
 **CORRECTED (2026-10-21): the M1 inventory's "four provisions lose their
 footnote text" item is WITHDRAWN — it was a MEASUREMENT defect, not a
@@ -815,6 +840,27 @@ change view stated the limit on what its two dates mean (the dates are
 selectors, not a stamp of the revision served). All three are fixed, and
 the limit now lives in one constant — `POINT_IN_TIME_NOTICE`, used by both
 the diff and the redline — so they cannot drift apart in wording.
+
+### M6 — the preparation chain is complete (2026-11-01); the pilot itself is the operator's step
+
+Every M6 deliverable has landed: the protocol
+(#100), the criteria revision (#103), the sibling re-anchoring (#119),
+the completion-record convention (#120), the criteria acceptance and
+the session pack (#121), the measurement repairs and the rehearsal
+record (#122), the provenance fixes the rehearsal found (#130), the
+completion records and the rehearsal check that can fail (#131), and
+the rehearsal test's own failure-tolerance (#178). The records table
+above now carries a row for each of them; three rows (#122, #130, #131)
+record honestly that no review verdict exists for them — only a Codex review
+receipt — because that is what the record shows, and the #121 row records a
+different evidence state: an APPROVE 0/0/0 that the PR body claims at
+`3bf4f0c`, with no GitHub APPROVED review event behind it (the note under
+the table sets out what the record does and does not show). What M6
+still needs cannot be closed by a commit: the operator's arrangement of
+the proposed five-practitioner cohort, the sessions themselves, and the
+results template filled with real numbers. M6's acceptance therefore
+stands as: criteria agreed and runnable, rehearsal regression-checked,
+pilot pending operator arrangement.
 
 ### Historical delivery record — original top 20
 
