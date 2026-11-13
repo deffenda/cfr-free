@@ -6,6 +6,7 @@ import {
   EcfrApi,
   FULL_TITLE_XML_MEMO_CAP,
 } from '../src/core/ecfr.js';
+import { UpstreamFormatError } from '../src/core/errors.js';
 import { HttpClient } from '../src/core/http-client.js';
 import type { FetchLike } from '../src/core/http-client.js';
 import { SemaphoreOverflowError } from '../src/core/semaphore.js';
@@ -250,5 +251,20 @@ describe('EcfrApi.getFullTitleXml', () => {
     // Let the parked fetches finish so nothing is left running.
     openGate?.();
     await Promise.allSettled(requests);
+  });
+});
+
+describe('EcfrApi.getTitleSchedule', () => {
+  it('maps a malformed titles.json to an UpstreamFormatError, not a bare schema fault', async () => {
+    // CR-21: a body that is not eCFR's contract is an upstream data fault —
+    // it must answer 502 downstream, not collapse into a generic 500 that
+    // reads as our bug.
+    const api = makeApi(async () =>
+      new Response(JSON.stringify({ titles: 'not-an-array' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    await expect(api.getTitleSchedule()).rejects.toBeInstanceOf(UpstreamFormatError);
   });
 });
