@@ -473,7 +473,6 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
-        '502': { $ref: '#/components/responses/UpstreamError' }
         '503': { $ref: '#/components/responses/UpstreamBusy' }
       parameters:
         - name: from
@@ -496,7 +495,6 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
-        '502': { $ref: '#/components/responses/UpstreamError' }
         '503': { $ref: '#/components/responses/UpstreamBusy' }
       parameters:
         - name: from
@@ -525,7 +523,6 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
-        '502': { $ref: '#/components/responses/UpstreamError' }
         '503': { $ref: '#/components/responses/UpstreamBusy' }
       parameters:
         - name: from
@@ -554,7 +551,6 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
-        '502': { $ref: '#/components/responses/UpstreamError' }
         '503': { $ref: '#/components/responses/UpstreamBusy' }
       parameters:
         - name: from
@@ -609,6 +605,13 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    UpstreamBusy:
+      description: '{ error: "upstream_busy", message } — the route fetches both dates from eCFR per call and either the server-wide cap on concurrent eCFR-fetching handlers (default 4) is reached, answering fail-fast with Retry-After: 1, or the per-process upstream fetch queue (sixteen waiting) is full and the request is refused at once instead of being parked behind the fetches already in flight (the eCFR-fetching routes only).'
+      headers:
+        retry-after: { description: Seconds to wait., schema: { type: integer } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     InternalError:
       # source: src/titan/http-server.ts#createHttpServer
       description: '{ error: "internal_error", message } — unexpected failure; details are logged server-side only.'
@@ -618,12 +621,6 @@ components:
     UpstreamError:
       # source: src/titan/http-server.ts#createHttpServer
       description: '{ error: "upstream_error", message } — eCFR answered, but the data it sent was not usable (an unparseable date, a missing title, or a missing issue date). The detail is logged server-side only.'
-      content:
-        application/json:
-          schema: { $ref: '#/components/schemas/Error' }
-    UpstreamBusy:
-      # source: src/titan/http-server.ts#createHttpServer
-      description: '{ error: "upstream_busy", message } — the upstream fetch queue was full: the request was refused at once instead of being parked behind the fetches already in flight (the eCFR-fetching routes only).'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

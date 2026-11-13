@@ -26,6 +26,10 @@ Nothing else is needed: the OpenAPI contract suite parses `docs/openapi.yaml`
 with the `yaml` package from this repository's own devDependencies, so no
 Python interpreter or PyYAML is involved.
 
+Nothing else is needed: the OpenAPI contract suite parses `docs/openapi.yaml`
+with the `yaml` package from this repository's own devDependencies, so no
+Python interpreter or PyYAML is involved.
+
 ## Workflow
 
 1. Open an issue first for anything beyond small fixes.
@@ -50,7 +54,7 @@ Python interpreter or PyYAML is involved.
    actually ran.
 
 5. Open a pull request using the template. CI must be green
-   (`quality (22)`, `quality (24)`, `security`).
+   (`quality (22)`, `quality (24)`, `security`, `actionlint`).
 6. Squash-merged PRs only; keep commit messages meaningful in the squash
    title.
 
