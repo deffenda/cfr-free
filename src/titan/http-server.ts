@@ -649,7 +649,8 @@ function handleDiscovery(
       );
       return true;
     }
-    sendStatic(req, res, YAML_HEADER, document, undefined);
+    // The contract is the live one: a client must not cache it.
+    sendStatic(req, res, YAML_HEADER, document, 'no-store');
     return true;
   }
   return false;
