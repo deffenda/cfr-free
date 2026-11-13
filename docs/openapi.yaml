@@ -399,6 +399,7 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/UpstreamBusy' }
       parameters:
         - name: from
           in: query
@@ -420,6 +421,7 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/UpstreamBusy' }
       parameters:
         - name: from
           in: query
@@ -447,6 +449,7 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/UpstreamBusy' }
       parameters:
         - name: from
           in: query
@@ -474,6 +477,7 @@ paths:
         '414': { $ref: '#/components/responses/UriTooLong' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/UpstreamBusy' }
       parameters:
         - name: from
           in: query
@@ -522,6 +526,13 @@ components:
     RateLimited:
       # source: src/titan/http-server.ts#precheck
       description: '{ error: "rate_limited", message } — per-peer token bucket exhausted (armed only when CFR_ALLOW_REMOTE=1; loopback never throttles).'
+      headers:
+        retry-after: { description: Seconds to wait., schema: { type: integer } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    UpstreamBusy:
+      description: '{ error: "upstream_busy", message } — the route fetches both dates from eCFR per call and the server-wide cap on concurrent upstream fetches (default 4, shared by /api/v1/diff and /api/v1/redline) is reached; Retry-After: 1.'
       headers:
         retry-after: { description: Seconds to wait., schema: { type: integer } }
       content:
