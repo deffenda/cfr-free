@@ -540,6 +540,14 @@ dependencies beyond the MCP SDK, XML parser hardening (no
 DOCTYPE, bounded depth/size), FTS query sanitization (no SQL injection
 surface), and loopback-only networking by default.
 
+## Feedback
+
+Wrong citation, ranking surprise, installation obstacle, feature request:
+[open an issue](https://github.com/deffenda/cfr-free/issues) (usage questions
+fit [Discussions](https://github.com/deffenda/cfr-free/discussions)). User
+feedback is the project's demand signal — the roadmap's stage E reads it
+before any expansion decision.
+
 ## License
 
 [MIT](https://github.com/deffenda/cfr-free/blob/main/LICENSE)
