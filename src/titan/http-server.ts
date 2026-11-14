@@ -8,6 +8,9 @@ import { ServiceError, StructureError, UpstreamFormatError } from '../core/error
 import type { Logger } from '../logger.js';
 import { RateLimiter } from './rate-limit.js';
 import { UI_CSP, UI_CSS, UI_HTML, UI_JS } from './ui.js';
+import { PLAYGROUND_CSP, PLAYGROUND_HTML } from './playground.js';
+import { calculateCombinedRating } from '../core/va-math.js';
+import { expandSemanticQuery } from '../core/semantic-expansion.js';
 import { VERSION } from '../version.js';
 
 /**
@@ -49,6 +52,8 @@ const METRICS_PATH = '/metrics';
 const UI_PATH = '/';
 const UI_JS_PATH = '/ui.js';
 const UI_CSS_PATH = '/ui.css';
+const PLAYGROUND_PATH = '/playground';
+const VIBE_COMBINE_PATH = '/api/v1/vibe/combine';
 const API_INDEX_PATH = '/api/v1';
 const OPENAPI_PATH = '/openapi.yaml';
 
@@ -322,8 +327,27 @@ function handleSearch(
   res: http.ServerResponse,
   url: URL,
 ): void {
+  const rawQ = url.searchParams.get('q') ?? '';
+  const semantic =
+    url.searchParams.get('semantic') === '1' || url.searchParams.get('semantic') === 'true';
+  let query = rawQ;
+  let semanticMatches:
+    | readonly {
+        readonly canonicalName: string;
+        readonly diagnosticCode: string;
+        readonly citation: string;
+      }[]
+    | undefined;
+  if (semantic && rawQ.trim().length >= 3) {
+    const expansion = expandSemanticQuery(rawQ);
+    if (expansion.matches.length > 0) {
+      query = expansion.expandedQuery;
+      semanticMatches = expansion.matches;
+    }
+  }
+
   const result = service.search({
-    query: url.searchParams.get('q') ?? '',
+    query,
     page: parseOptionalInt(url.searchParams.get('page')),
     perPage: parseOptionalInt(url.searchParams.get('per_page')),
     part: url.searchParams.get('part') ?? undefined,
@@ -331,7 +355,34 @@ function handleSearch(
     kind: (url.searchParams.get('kind') ?? undefined) as 'section' | 'appendix' | undefined,
     chapter: url.searchParams.get('chapter') ?? undefined,
   });
-  sendJson(req, res, 200, { ...result }, 'public, max-age=300', REVALIDATABLE);
+  sendJson(
+    req,
+    res,
+    200,
+    { ...result, ...(semanticMatches ? { semanticMatches } : {}) },
+    'public, max-age=300',
+    REVALIDATABLE,
+  );
+}
+
+function handleVibeCombine(req: http.IncomingMessage, res: http.ServerResponse, url: URL): void {
+  const raw = url.searchParams.get('ratings') ?? '';
+  const tokens = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const ratings = tokens.map((t) => Number(t));
+  if (ratings.length === 0 || ratings.some((n) => Number.isNaN(n) || n < 0 || n > 100)) {
+    sendJson(
+      req,
+      res,
+      400,
+      errorBody('invalid_input', 'ratings must be comma-separated numbers between 0 and 100'),
+    );
+    return;
+  }
+  const result = calculateCombinedRating(ratings);
+  sendJson(req, res, 200, { ...result }, 'public, max-age=3600');
 }
 
 function handleSection(
@@ -600,6 +651,12 @@ const ROUTE_INDEX: JsonBody = {
       summary: 'Line-level redline of one provision.',
       required: ['from', 'to', 'citation'],
     },
+    {
+      method: 'GET',
+      path: '/api/v1/vibe/combine',
+      summary: 'Combined disability rating evaluation (38 C.F.R. § 4.25 VA Math).',
+      required: ['ratings'],
+    },
     { method: 'GET', path: '/health', summary: 'Freshness and status.', required: [] },
     { method: 'GET', path: '/metrics', summary: 'Prometheus exposition text.', required: [] },
   ],
@@ -657,6 +714,30 @@ function handleDiscovery(
   return false;
 }
 
+function handleStaticRoutes(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  pathname: string,
+): boolean {
+  if (pathname === PLAYGROUND_PATH) {
+    sendStatic(req, res, HTML_HEADER, PLAYGROUND_HTML, PLAYGROUND_CSP);
+    return true;
+  }
+  if (pathname === UI_PATH) {
+    sendStatic(req, res, HTML_HEADER, UI_HTML, UI_CSP);
+    return true;
+  }
+  if (pathname === UI_JS_PATH) {
+    sendStatic(req, res, JS_HEADER, UI_JS, undefined);
+    return true;
+  }
+  if (pathname === UI_CSS_PATH) {
+    sendStatic(req, res, CSS_HEADER, UI_CSS, undefined);
+    return true;
+  }
+  return false;
+}
+
 async function dispatch(
   service: CFRService,
   req: http.IncomingMessage,
@@ -689,6 +770,10 @@ async function dispatch(
     sendText(req, res, 200, renderMetrics(service, disk), 'no-store');
     return;
   }
+  if (pathname === VIBE_COMBINE_PATH) {
+    handleVibeCombine(req, res, url);
+    return;
+  }
   if (pathname === SEARCH_PREFIX) {
     handleSearch(service, req, res, url);
     return;
@@ -706,18 +791,7 @@ async function dispatch(
     return;
   }
   if (handleDiscovery(req, res, pathname)) return;
-  if (pathname === UI_PATH) {
-    sendStatic(req, res, HTML_HEADER, UI_HTML, UI_CSP);
-    return;
-  }
-  if (pathname === UI_JS_PATH) {
-    sendStatic(req, res, JS_HEADER, UI_JS, undefined);
-    return;
-  }
-  if (pathname === UI_CSS_PATH) {
-    sendStatic(req, res, CSS_HEADER, UI_CSS, undefined);
-    return;
-  }
+  if (handleStaticRoutes(req, res, pathname)) return;
   sendJson(req, res, 404, errorBody('not_found', `no route for ${pathname}`));
 }
 

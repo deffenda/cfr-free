@@ -1220,4 +1220,49 @@ describe('vibe coder pack cli commands', () => {
     expect(out.join('')).toContain('38 C.F.R. § 4.87');
     expect(err.join('')).toBe('');
   });
+
+  it('parses and executes vibe ui command', async () => {
+    expect(parseArgs(['vibe', 'ui', 'rating-card', '--framework', 'react'])).toEqual({
+      command: 'vibe-ui',
+      component: 'rating-card',
+      framework: 'react',
+      write: undefined,
+      list: false,
+    });
+    const { out, err, io } = makeIo();
+    const code = await main(['vibe', 'ui', 'rating-card'], io);
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('DisabilityRatingCard');
+    expect(err.join('')).toBe('');
+  });
+
+  it('parses and executes vibe combine command', async () => {
+    expect(parseArgs(['vibe', 'combine', '50', '30', '10'])).toEqual({
+      command: 'vibe-combine',
+      ratings: [50, 30, 10],
+    });
+    const { out, err, io } = makeIo();
+    const code = await main(['vibe', 'combine', '50', '30'], io);
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('Combined Rating:      70%');
+    expect(err.join('')).toBe('');
+  });
+
+  it('parses search --semantic and executes clinical expansion', async () => {
+    expect(parseArgs(['search', '--demo', '--semantic', 'ringing in ears'])).toEqual({
+      command: 'search',
+      query: 'ringing in ears',
+      json: false,
+      page: 1,
+      perPage: 10,
+      demo: true,
+      semantic: true,
+    });
+    const { out, err, io } = makeIo();
+    const code = await main(['search', '--demo', '--semantic', 'ringing in ears'], io);
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('38 C.F.R. § 4.87');
+    expect(out.join('')).toContain('clinical semantic mapping: Tinnitus');
+    expect(err.join('')).toBe('');
+  });
 });

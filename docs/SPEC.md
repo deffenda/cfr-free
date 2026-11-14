@@ -24,9 +24,14 @@ and `version` dispatch there, the other entrypoints in `src/commands/`.
 The CLI additionally supports agent and developer automation: `cfr-free mcp install`
 for zero-config editor MCP client setup (Cursor, Claude Desktop,
 Windsurf, VS Code), `cfr-free vibe rules` and `cfr-free vibe prompt` for
-pre-packaged agent system rules and claim evaluation workflows, and
+pre-packaged agent system rules and claim evaluation workflows,
+`cfr-free vibe ui` for copy-paste Tailwind and React components (v0, Lovable, Cursor),
+`cfr-free vibe combine` and `/api/v1/vibe/combine` for 38 C.F.R. § 4.25 VA Math
+combined disability rating calculations, `cfr-free search --semantic` and
+`/api/v1/search?semantic=1` for clinical symptom-to-code expansion,
 `cfr-free demo` / `cfr-free serve --demo` for instant offline testing against
-curated Title 38 provisions without network sync.
+curated Title 38 provisions without network sync, and `/playground` for an
+interactive visual browser sandbox.
 
 `cfr-free search` takes a query of 3–200 characters; a query outside that
 range is refused before the index is opened, so a rejected query costs no
@@ -42,7 +47,7 @@ src/
   version.ts          package-version resolution seam
   commands/           per-subcommand entrypoints (diff, export,
                       historical, mcp, mcp-install, redline, search,
-                      serve, sync, vibe)
+                      serve, sync, vibe, vibe-ui)
                       plus two internal helpers (ensure-index,
                       refresh-scheduler)
   core/
@@ -58,10 +63,12 @@ src/
     query.ts          the query language: tokenizer, synonyms, FTS5 fragments, stopwords
     redline.ts        per-provision line redline between two issue dates
     references.ts     cross-reference extraction for search results
+    semantic-expansion.ts clinical complaint to Title 38 statutory terms mapping
     service.ts        facade shared by MCP + HTTP: search/getSection/browse/status
     store.ts          SQLite schema, queries (FTS5), transactional rebuild
     structure.ts      browse-tree validation + browse
     sync.ts           index build pipeline
+    va-math.ts        38 C.F.R. § 4.25 combined ratings table calculation
     xml.ts            XML → markdown/text renderer + section extractor
   mcp/
     client-safe.ts    client-safe error text (sanitized messages on the wire)
