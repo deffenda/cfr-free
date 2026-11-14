@@ -72,18 +72,35 @@ export function renderToolText(
   return body === '' ? meta.join('\n') : [...meta, '', body].join('\n');
 }
 
+/**
+ * A value on the one line its label owns.
+ *
+ * The text channel is `label: value` lines, and a reader (a model) takes each
+ * line start as a label. A value that carries a line break could start a line
+ * of its own and forge a label of ours — `\nissueDate: 2099-01-01` inside a
+ * snippet or a heading. The upstream's text is the value's author, not us, so
+ * its line breaks become spaces. The body fields are the one place text keeps
+ * its lines: they come last, after a blank line, with no label to forge.
+ */
+function oneLine(value: string): string {
+  return value.replace(/\s*[\r\n\v\f\u0085\u2028\u2029]+\s*/g, ' ').trim();
+}
+
 /** One field of the text rendering; `null` is rendered, absent is not. */
 function renderField(key: string, value: unknown, indent = ''): string[] {
   if (value === undefined) return [];
   if (value === null) return [`${indent}${key}: (none)`];
-  if (typeof value === 'string') return value === '' ? [] : [`${indent}${key}: ${value}`];
+  if (typeof value === 'string') {
+    const line = oneLine(value);
+    return line === '' ? [] : [`${indent}${key}: ${line}`];
+  }
   if (typeof value === 'number' || typeof value === 'boolean') {
     return [`${indent}${key}: ${String(value)}`];
   }
   if (Array.isArray(value)) {
     if (value.length === 0) return [`${indent}${key}: (none)`];
     if (value.every((entry) => typeof entry === 'string')) {
-      return [`${indent}${key}: ${value.join(', ')}`];
+      return [`${indent}${key}: ${value.map(oneLine).join(', ')}`];
     }
     return [`${indent}${key}:`, ...value.flatMap((entry) => renderEntry(entry, indent))];
   }
@@ -98,7 +115,9 @@ function renderField(key: string, value: unknown, indent = ''): string[] {
 
 /** One entry of an object list. */
 function renderEntry(entry: unknown, indent: string): string[] {
-  if (typeof entry !== 'object' || entry === null) return [`${indent}  - ${String(entry)}`];
+  if (typeof entry !== 'object' || entry === null) {
+    return [`${indent}  - ${typeof entry === 'string' ? oneLine(entry) : String(entry)}`];
+  }
   const entries = Object.entries(entry as Record<string, unknown>);
   return entries.flatMap(([key, value]) => renderField(key, value, `${indent}  `));
 }

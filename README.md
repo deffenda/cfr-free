@@ -458,6 +458,7 @@ MCP client configs stay uniform):
 | `CFR_HOST`          | `127.0.0.1`                | HTTP bind address                                          |
 | `CFR_PORT`          | `8787`                     | HTTP bind port                                             |
 | `CFR_ALLOW_REMOTE`  | unset                      | Set `1` to permit non-loopback binds                       |
+| `CFR_ALLOWED_HOSTS` | unset                      | Host names a loopback bind also answers to (a local proxy) |
 | `CFR_LOG_LEVEL`     | `info`                     | `debug` \| `info` \| `warn` \| `error`                     |
 
 Logs are structured JSON lines on **stderr** only — stdout is reserved for

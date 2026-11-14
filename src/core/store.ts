@@ -412,6 +412,50 @@ function toSectionRow(row: Record<string, unknown>): SectionRow {
   };
 }
 
+/** The tables this schema creates, the FTS5 shadow tables of `sections_fts` included. */
+const OWN_TABLES: ReadonlySet<string> = new Set([
+  'meta',
+  'sections',
+  'section_references',
+  ...['', '_data', '_idx', '_content', '_docsize', '_config'].map((tail) => `sections_fts${tail}`),
+]);
+
+/**
+ * Refuse a SQLite file that belongs to something else.
+ *
+ * `CREATE TABLE IF NOT EXISTS` is silent about a table that already exists
+ * with another shape. Opening some other program's database (a wrong
+ * `CFR_INDEX_PATH`, a file received from someone else) would stamp our schema
+ * version over it, and the next sync's `DELETE FROM sections` would wipe a
+ * table that was never ours. An empty file is ours to create; a file with
+ * tables must hold only ours.
+ *
+ * It runs BEFORE any pragma that writes (the journal mode rewrites the file
+ * header), so a file that is refused is left byte for byte as it was.
+ */
+function refuseForeignDatabase(db: DatabaseSync): void {
+  const tables = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+    .all()
+    .map((row) => String((row as Record<string, unknown>)['name']));
+  // A file whose creation was interrupted holds only SOME of our tables, so
+  // the test is that every table is ours, not that all of them are there.
+  if (tables.some((name) => !OWN_TABLES.has(name))) {
+    throw new StoreError('the file is a SQLite database, but not a cfr-free index');
+  }
+  if (tables.includes('sections')) {
+    const columns = new Set(
+      db
+        .prepare("SELECT name FROM pragma_table_info('sections')")
+        .all()
+        .map((row) => String((row as Record<string, unknown>)['name'])),
+    );
+    if (!columns.has('citation') || !columns.has('markdown')) {
+      throw new StoreError('the file is a SQLite database, but not a cfr-free index');
+    }
+  }
+}
+
 export class Store {
   private readonly db: DatabaseSync;
   private readonly statements = new Map<string, Statement>();
@@ -434,6 +478,13 @@ export class Store {
     let db: DatabaseSync;
     try {
       db = new DatabaseSync(filePath);
+      // The file is an INPUT: `export` exists so an index can be handed to
+      // someone else, and `CFR_INDEX_PATH` can name any file. Views and
+      // triggers stored in a schema we did not write must not be allowed to
+      // call SQL functions on our behalf, so the schema is not trusted. Set
+      // before anything reads it.
+      db.exec('PRAGMA trusted_schema = OFF');
+      refuseForeignDatabase(db);
       db.exec('PRAGMA journal_mode = WAL');
       db.exec('PRAGMA synchronous = NORMAL');
       // Pinned explicitly (node:sqlite currently defaults it on, but the

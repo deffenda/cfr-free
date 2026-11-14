@@ -1,4 +1,4 @@
-import { existsSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, statSync, writeFileSync } from 'node:fs';
 import type { AppConfig } from '../config.js';
 import { CommandError, EXIT } from '../exit-codes.js';
 import type { Logger } from '../logger.js';
@@ -54,7 +54,7 @@ function toJsonlLine(row: SectionRow): string {
 function writeJsonl(store: Store, target: string): number {
   const rows = store.allSections();
   const chunks: string[] = rows.map(toJsonlLine);
-  writeFileSync(target, chunks.join(''), 'utf8');
+  writeFileSync(target, chunks.join(''), { encoding: 'utf8', flag: 'wx' });
   return rows.length;
 }
 
@@ -78,8 +78,18 @@ function writeMarkdown(store: Store, target: string): number {
     const body = row.text.endsWith('\n') ? row.text : `${row.text}\n`;
     chunks.push(`\n## ${row.citation} — ${row.heading}\n${body}\n---\n`);
   }
-  writeFileSync(target, chunks.join(''), 'utf8');
+  writeFileSync(target, chunks.join(''), { encoding: 'utf8', flag: 'wx' });
   return rows.length;
+}
+
+/** Whether anything, a dangling symlink included, is at `target`. */
+function pathExists(target: string): boolean {
+  try {
+    lstatSync(target);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ENOENT';
+  }
 }
 
 /**
@@ -107,7 +117,11 @@ export function runExportCommand(
       EXIT.INDEX_UNAVAILABLE,
     );
   }
-  if (existsSync(target)) {
+  // `lstat`, not `existsSync`: a dangling symlink "does not exist" to
+  // `existsSync`, and the write that follows would create the file it points
+  // at, wherever that is. The writers below also open with `wx`, which
+  // refuses an existing path (symlink included) at the moment of writing.
+  if (pathExists(target)) {
     throw new CommandError(
       `refusing to overwrite existing file: ${target} — remove it first`,
       EXIT.REFUSED,

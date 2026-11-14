@@ -201,6 +201,7 @@ function sendNotModified(
     'content-type': JSON_HEADER,
     etag,
     [NOSNIFF]: 'nosniff',
+    [REFERRER_POLICY]: 'no-referrer',
   };
   if (cacheControl !== undefined) headers['cache-control'] = cacheControl;
   res.setHeader('cross-origin-resource-policy', 'same-origin');
@@ -769,6 +770,31 @@ export interface HttpServerOptions {
    * omits the fields/gauges entirely rather than fabricating zeros.
    */
   readonly disk?: () => DiskSnapshot | null;
+  /**
+   * The server is bound to loopback. Then the only clients it means to
+   * serve are programs on this machine, and a web page in the user's browser
+   * must not be one of them:
+   *
+   * - DNS rebinding: a page on `evil.example` re-points that name at
+   *   127.0.0.1, after which the browser treats this server as the page's own
+   *   origin and lets it read every response. The request still names
+   *   `evil.example` in `Host`, so a `Host` that is not a loopback name is
+   *   refused (421).
+   * - Cross-site requests: a browser marks a request that a page on another
+   *   site made with `Sec-Fetch-Site: cross-site`. Nothing legitimate does
+   *   that to a local API (the CORP header already forbids reading the
+   *   answer), but a page could still spend the diff and redline routes'
+   *   upstream fetches, so they are refused (403).
+   *
+   * Unset for a deliberately remote bind: its hostnames are unknowable here.
+   */
+  readonly localOnly?: boolean;
+  /**
+   * Further host names a `localOnly` server answers to: a reverse proxy on
+   * this machine forwards the public name in `Host`, and that name is one
+   * the operator chose (`CFR_ALLOWED_HOSTS`), not one a web page can pick.
+   */
+  readonly allowedHosts?: readonly string[];
 }
 
 /**
@@ -781,6 +807,57 @@ export interface DiskSnapshot {
   readonly freeBytes: number;
   /** Total bytes on the volume — `blocks × bsize`. */
   readonly totalBytes: number;
+}
+
+/** Host names a loopback-bound server answers to. */
+const LOCAL_HOST_NAMES: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/** The host name of a `Host` header value (port and case removed), or null. */
+function hostNameOf(header: string | undefined): string | null {
+  if (header === undefined) return null;
+  const value = header.trim().toLowerCase();
+  // A bracketed IPv6 literal keeps its colons inside the brackets.
+  const close = value.startsWith('[') ? value.indexOf(']') : -1;
+  const rest = close === -1 ? value : value.slice(close + 1);
+  const name = close === -1 ? value.split(':')[0] : value.slice(0, close + 1);
+  const port = close === -1 ? value.slice((name ?? '').length) : rest;
+  // What follows the name is nothing, or a colon and a port: never more.
+  if (name === undefined || name === '') return null;
+  if (port !== '' && !/^:\d{1,5}$/.test(port)) return null;
+  return name;
+}
+
+/**
+ * The browser-facing gates of a loopback bind. Returns true when it
+ * answered (refused) the request.
+ */
+function refuseNonLocalRequest(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  extraHosts: ReadonlySet<string>,
+): boolean {
+  // No Host at all is an HTTP/1.0 client; a browser always sends one, so
+  // letting it through gives a web page nothing.
+  const host = req.headers.host === undefined ? 'localhost' : hostNameOf(req.headers.host);
+  if (host === null || !(LOCAL_HOST_NAMES.has(host) || extraHosts.has(host))) {
+    sendJson(
+      req,
+      res,
+      421,
+      errorBody('misdirected_request', 'this server answers to loopback host names only'),
+    );
+    return true;
+  }
+  if (req.headers['sec-fetch-site'] === 'cross-site') {
+    sendJson(
+      req,
+      res,
+      403,
+      errorBody('forbidden', 'cross-site requests to this server are refused'),
+    );
+    return true;
+  }
+  return false;
 }
 
 /** The request's URL, or null when it does not parse. */
@@ -829,7 +906,10 @@ function precheck(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   limiter: RateLimiter | null,
+  localOnly: boolean,
+  extraHosts: ReadonlySet<string>,
 ): URL | null {
+  if (localOnly && refuseNonLocalRequest(req, res, extraHosts)) return null;
   const methodRefused = req.method !== 'GET' && req.method !== 'HEAD';
   const urlTooLong = Buffer.byteLength(req.url ?? '/', 'utf8') > MAX_URL_BYTES;
   // The URL is parsed before the limiter, because the cost of a request
@@ -886,6 +966,7 @@ export function createHttpServer(
   const upstreamGate = new UpstreamGate(
     options.maxConcurrentUpstream ?? DEFAULT_MAX_CONCURRENT_UPSTREAM,
   );
+  const extraHosts = new Set((options.allowedHosts ?? []).map((name) => name.toLowerCase()));
   const server = http.createServer((req, res) => {
     // `dispatch` is async since the diff and redline routes await the eCFR
     // facade, so one async task wraps the whole cycle: precheck runs first (it
@@ -894,7 +975,7 @@ export function createHttpServer(
     // handlers have always used — ServiceError/StructureError → statusFor
     // (400/404/500 + client-safe message), anything else → logged + generic 500.
     void (async () => {
-      const url = precheck(req, res, limiter);
+      const url = precheck(req, res, limiter, options.localOnly === true, extraHosts);
       if (url === null) return;
 
       try {

@@ -14,6 +14,15 @@ describe('loadConfig', () => {
     expect(config.logLevel).toBe('info');
   });
 
+  it('reads the extra host names a local proxy forwards', () => {
+    expect(loadConfig({}).allowedHosts).toEqual([]);
+    expect(loadConfig({ CFR_ALLOWED_HOSTS: 'CFR.example.org,b.example' }).allowedHosts).toEqual([
+      'cfr.example.org',
+      'b.example',
+    ]);
+    expect(() => loadConfig({ CFR_ALLOWED_HOSTS: 'a b' })).toThrow(ConfigError);
+  });
+
   it('honors explicit values', () => {
     const config = loadConfig({
       CFR_INDEX_PATH: '/tmp/custom.sqlite',

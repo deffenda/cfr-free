@@ -416,7 +416,8 @@ export function registerTools(
         'Navigate the Title 38 hierarchy (title → chapter → part → subpart → subject group) and list what exists at a level. ' +
         'With no arguments, returns the chapters. Use this to discover valid parts/subparts before searching. ' +
         'Most sections live inside a subject group: pass the subject_group identifier you saw in a ' +
-        'previous response to list the sections it holds.',
+        'previous response to list the sections it holds. ' +
+        UNTRUSTED_DATA_NOTE,
       inputSchema: {
         chapter: z.string().max(20).optional().describe('chapter identifier, e.g. "I"'),
         part: z.string().max(20).optional().describe('part number, e.g. "4"'),
@@ -492,7 +493,8 @@ export function registerTools(
       title: 'List CFR parts in the local index',
       description:
         'Enumerate every Title 38 CFR part present in the local index, with its structure-tree title ' +
-        'and section/appendix counts. Use this to discover which parts are searchable.',
+        'and section/appendix counts. Use this to discover which parts are searchable. ' +
+        UNTRUSTED_DATA_NOTE,
       inputSchema: {},
       outputSchema: listPartsOutputSchema,
       annotations: READ_ONLY_ANNOTATIONS,

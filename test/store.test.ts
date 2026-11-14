@@ -361,11 +361,15 @@ describe('Store resilience', () => {
 
 describe('Store schema versioning', () => {
   /** A raw file stamped with `version` (only the version gate inspects it). */
+  // What an older cfr-free file holds, as far as the "is this ours" check can see.
+  const OLD_INDEX_TABLES =
+    'CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT); CREATE TABLE sections(citation TEXT, markdown TEXT)';
+
   function makeVersionedFile(version: number): { file: string; cleanup: () => void } {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-free-version-'));
     const file = path.join(dir, 'index.sqlite');
     const raw = new DatabaseSync(file);
-    raw.exec('CREATE TABLE dummy(x)');
+    raw.exec(OLD_INDEX_TABLES);
     raw.exec(`PRAGMA user_version = ${version}`);
     raw.close();
     return { file, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
@@ -376,7 +380,7 @@ describe('Store schema versioning', () => {
     const file = path.join(dir, 'index.sqlite');
     try {
       const raw = new DatabaseSync(file);
-      raw.exec('CREATE TABLE dummy(x)');
+      raw.exec(OLD_INDEX_TABLES);
       raw.exec('PRAGMA user_version = 99');
       raw.close();
       expect(() => Store.open(file)).toThrow(/schema version 99/);
@@ -391,7 +395,7 @@ describe('Store schema versioning', () => {
     const file = path.join(dir, 'index.sqlite');
     try {
       const raw = new DatabaseSync(file);
-      raw.exec('CREATE TABLE dummy(x)');
+      raw.exec(OLD_INDEX_TABLES);
       raw.close();
       const store = Store.open(file);
       store.close();
