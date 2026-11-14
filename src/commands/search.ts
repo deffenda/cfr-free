@@ -1,4 +1,6 @@
 import type { AppConfig } from '../config.js';
+import { openDemoStore } from '../core/demo-data.js';
+import { expandSemanticQuery } from '../core/semantic-expansion.js';
 import { CFRService, type PresentedHit, type SearchResponse } from '../core/service.js';
 import { Store } from '../core/store.js';
 import type { Logger } from '../logger.js';
@@ -14,6 +16,10 @@ export interface SearchOptions {
   readonly part?: string | undefined;
   readonly kind?: 'section' | 'appendix' | undefined;
   readonly chapter?: string | undefined;
+  /** Search against the built-in demo index without requiring network or local sync. */
+  readonly demo?: boolean | undefined;
+  /** Expand clinical and conversational terms to official diagnostic codes. */
+  readonly semantic?: boolean | undefined;
 }
 
 /**
@@ -30,11 +36,32 @@ export async function runSearchCommand(
   query: string,
   options: SearchOptions = {},
 ): Promise<SearchResponse> {
-  const store = Store.open(config.indexPath);
+  const store = options.demo === true ? openDemoStore() : Store.open(config.indexPath);
   try {
-    await ensureIndex(store, config, logger);
+    if (options.demo !== true) {
+      await ensureIndex(store, config, logger);
+    }
+    let effectiveQuery = query;
+    let semanticNotice: string | undefined;
+    if (options.semantic) {
+      const expansion = expandSemanticQuery(query);
+      if (expansion.matches.length > 0) {
+        effectiveQuery = expansion.expandedQuery;
+        const mapped = expansion.matches
+          .map((m) => `${m.canonicalName} (DC ${m.diagnosticCode} -> § ${m.citation})`)
+          .join(', ');
+        semanticNotice = `clinical semantic mapping: ${mapped}`;
+      }
+    }
     const service = new CFRService(store, config.maxAgeDays, createEcfrApi(), logger);
-    return service.search({ query, ...options });
+    const result = service.search({ query: effectiveQuery, ...options });
+    if (semanticNotice) {
+      return {
+        ...result,
+        notice: result.notice ? `${semanticNotice} | ${result.notice}` : semanticNotice,
+      };
+    }
+    return result;
   } finally {
     store.close();
   }

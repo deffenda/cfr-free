@@ -3,12 +3,16 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { ConfigError, loadConfig } from './config.js';
 import { runMcpCommand } from './commands/mcp.js';
+import { runMcpInstallCommand } from './commands/mcp-install.js';
 import { runServeCommand } from './commands/serve.js';
 import { runSyncCommand } from './commands/sync.js';
 import { runExportCommand } from './commands/export.js';
 import { formatIssueDiff, runDiffCommand } from './commands/diff.js';
 import { formatSectionRedline, runRedlineCommand } from './commands/redline.js';
 import { formatHistoricalSection, runHistoricalCommand } from './commands/historical.js';
+import { generateVibePrompt, generateVibeRules } from './commands/vibe.js';
+import { runVibeUiCommand } from './commands/vibe-ui.js';
+import { calculateCombinedRating, formatCombineResult } from './core/va-math.js';
 import {
   formatSearchResults,
   formatSearchResultsJson,
@@ -30,6 +34,15 @@ export const USAGE = `cfr-free ${VERSION} — self-hosted Title 38 CFR data serv
 
 Usage:
   cfr-free [mcp]          Start the MCP server on stdio (default)
+  cfr-free mcp install    Configure MCP server in Cursor, Claude Desktop, Windsurf or VS Code
+                            Options: --client <cursor|claude|windsurf|vscode|all>, --workspace, --print
+  cfr-free vibe <subcommand> Developer & agent tooling suite (rules, prompt, ui, combine, playground)
+                            Subcommands:
+                              rules [--format cursor|claude|markdown] [--write]
+                              prompt <adjudicator|researcher|ratings>
+                              ui <rating-card|search-bar|citation-badge|evaluator> [--framework react|html] [--write] [--list]
+                              combine <ratings...> (38 C.F.R. § 4.25 VA math)
+                              playground (launch instant visual developer sandbox)
   cfr-free sync           Rebuild the local index from eCFR
   cfr-free diff <from> [to]  Show provision changes between two eCFR issue dates
                              (to defaults to the index's issue date)
@@ -39,8 +52,9 @@ Usage:
                                      point-in-time archive, 2017 onward)
   cfr-free search <query>  Ranked provisions from the local index
                              Options: --json, --page N, --per-page N,
-                             --part P, --kind section|appendix, --chapter C
-  cfr-free serve          Start the Titan HTTP API (default http://127.0.0.1:8787)
+                             --part P, --kind section|appendix, --chapter C, --demo, --semantic
+  cfr-free serve          Start the Titan HTTP API (default http://127.0.0.1:8787; --demo for sample data)
+  cfr-free demo           Instant offline demo server with core rating schedules
   cfr-free export <path> [jsonl|md]  Snapshot the index (sqlite default;
                                      jsonl/md for pipeline ingestion)
   cfr-free help           Show this help
@@ -137,6 +151,9 @@ function asksForHelp(args: readonly string[]): boolean {
 /** The commands that have their own usage text. */
 const KNOWN_COMMANDS = new Set([
   'mcp',
+  'mcp-install',
+  'vibe',
+  'demo',
   'sync',
   'diff',
   'redline',
@@ -158,6 +175,11 @@ export class CliError extends CommandError {
 
 export type Command =
   | 'mcp'
+  | 'mcp-install'
+  | 'vibe-rules'
+  | 'vibe-prompt'
+  | 'vibe-ui'
+  | 'vibe-combine'
   | 'sync'
   | 'diff'
   | 'redline'
@@ -170,6 +192,36 @@ export type Command =
 
 /** Parsed argv: `export`, `diff` and `redline` carry their positional arguments. */
 export type ParsedCommand =
+  | {
+      readonly command: 'mcp-install';
+      readonly client?: string | undefined;
+      readonly workspace?: boolean | undefined;
+      readonly print?: boolean | undefined;
+    }
+  | {
+      readonly command: 'vibe-rules';
+      readonly format?: 'cursor' | 'claude' | 'markdown' | undefined;
+      readonly write?: boolean | undefined;
+    }
+  | {
+      readonly command: 'vibe-prompt';
+      readonly preset: 'adjudicator' | 'researcher' | 'ratings';
+    }
+  | {
+      readonly command: 'vibe-ui';
+      readonly component?: string | undefined;
+      readonly framework?: 'react' | 'html' | undefined;
+      readonly write?: string | undefined;
+      readonly list?: boolean | undefined;
+    }
+  | {
+      readonly command: 'vibe-combine';
+      readonly ratings: readonly number[];
+    }
+  | {
+      readonly command: 'serve';
+      readonly demo?: boolean | undefined;
+    }
   | {
       readonly command: 'export';
       readonly exportPath: string;
@@ -193,12 +245,25 @@ export type ParsedCommand =
       readonly part?: string | undefined;
       readonly kind?: 'section' | 'appendix' | undefined;
       readonly chapter?: string | undefined;
+      readonly demo?: boolean | undefined;
+      readonly semantic?: boolean | undefined;
     }
   | { readonly command: 'help'; readonly topic?: string }
   | {
       readonly command: Exclude<
         Command,
-        'export' | 'diff' | 'redline' | 'historical' | 'search' | 'help'
+        | 'export'
+        | 'diff'
+        | 'redline'
+        | 'historical'
+        | 'search'
+        | 'help'
+        | 'mcp-install'
+        | 'vibe-rules'
+        | 'vibe-prompt'
+        | 'vibe-ui'
+        | 'vibe-combine'
+        | 'serve'
       >;
     };
 
@@ -280,6 +345,157 @@ function parseHistoricalArgs(rest: readonly string[]): ParsedCommand {
   return { command: 'historical', atDate, citation };
 }
 
+/** Parse `mcp install` arguments. */
+function parseMcpInstallArgs(rest: readonly string[]): ParsedCommand {
+  let client: string | undefined;
+  let workspace: boolean | undefined;
+  let print = false;
+  for (let i = 0; i < rest.length; i += 1) {
+    const arg = rest[i] as string;
+    if (arg === '--print') {
+      print = true;
+    } else if (arg === '--workspace') {
+      workspace = true;
+    } else if (arg.startsWith('--client=')) {
+      const val = arg.slice(9).toLowerCase();
+      const allowed = ['cursor', 'claude', 'windsurf', 'vscode', 'all'];
+      if (!allowed.includes(val)) {
+        throw new CliError(`client must be one of: ${allowed.join(', ')}`);
+      }
+      client = val;
+    } else if (arg === '--client') {
+      const next = rest[i + 1];
+      if (next === undefined || next.startsWith('-')) {
+        throw new CliError(
+          '--client requires a client name (e.g. cursor, claude, windsurf, vscode, all)',
+        );
+      }
+      const val = next.toLowerCase();
+      const allowed = ['cursor', 'claude', 'windsurf', 'vscode', 'all'];
+      if (!allowed.includes(val)) {
+        throw new CliError(`client must be one of: ${allowed.join(', ')}`);
+      }
+      client = val;
+      i += 1;
+    } else {
+      throw new CliError(`unknown option for mcp install: ${arg}`);
+    }
+  }
+  return { command: 'mcp-install', client, workspace, print };
+}
+
+function parseVibeRulesArgs(args: readonly string[]): ParsedCommand {
+  let format: 'cursor' | 'claude' | 'markdown' | undefined;
+  let write = false;
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] as string;
+    if (arg === '--write') {
+      write = true;
+    } else if (arg.startsWith('--format=')) {
+      const val = arg.slice(9);
+      if (val !== 'cursor' && val !== 'claude' && val !== 'markdown') {
+        throw new CliError(`format must be cursor, claude, or markdown, got: ${val}`);
+      }
+      format = val;
+    } else if (arg === '--format') {
+      const val = args[i + 1];
+      if (val !== 'cursor' && val !== 'claude' && val !== 'markdown') {
+        throw new CliError(`format must be cursor, claude, or markdown, got: ${val ?? 'missing'}`);
+      }
+      format = val;
+      i += 1;
+    } else {
+      throw new CliError(`unknown option for vibe rules: ${arg}`);
+    }
+  }
+  return { command: 'vibe-rules', format, write };
+}
+
+function parseVibePromptArgs(args: readonly string[]): ParsedCommand {
+  const preset = args[0];
+  if (preset !== 'adjudicator' && preset !== 'researcher' && preset !== 'ratings') {
+    throw new CliError(
+      `vibe prompt requires a valid preset (adjudicator, researcher, ratings), got: ${preset ?? 'none'}`,
+    );
+  }
+  if (args.length > 1) {
+    throw new CliError(
+      `unexpected arguments after 'vibe prompt ${preset}': ${args.slice(1).join(' ')}`,
+    );
+  }
+  return { command: 'vibe-prompt', preset };
+}
+
+function parseFrameworkOption(val: string | undefined): 'react' | 'html' {
+  const lower = val?.toLowerCase();
+  if (lower !== 'react' && lower !== 'html') {
+    throw new CliError(`framework must be react or html, got: ${val ?? 'missing'}`);
+  }
+  return lower;
+}
+
+function parseVibeUiArgs(args: readonly string[]): ParsedCommand {
+  let component: string | undefined;
+  let framework: 'react' | 'html' | undefined;
+  let write: string | undefined;
+  let list = false;
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] as string;
+    if (arg === '--list') {
+      list = true;
+    } else if (arg.startsWith('--framework=')) {
+      framework = parseFrameworkOption(arg.slice(12));
+    } else if (arg === '--framework') {
+      framework = parseFrameworkOption(args[i + 1]);
+      i += 1;
+    } else if (arg.startsWith('--write=')) {
+      write = arg.slice(8);
+    } else if (arg === '--write') {
+      const next = args[i + 1];
+      if (!next || next.startsWith('-')) throw new CliError('--write requires a file path');
+      write = next;
+      i += 1;
+    } else if (!arg.startsWith('-') && !component) {
+      component = arg;
+    } else {
+      throw new CliError(`unknown option for vibe ui: ${arg}`);
+    }
+  }
+
+  return { command: 'vibe-ui', component, framework, write, list };
+}
+
+function parseVibeCombineArgs(args: readonly string[]): ParsedCommand {
+  const ratings: number[] = [];
+  for (const arg of args) {
+    const n = Number(arg);
+    if (Number.isNaN(n) || n < 0 || n > 100) {
+      throw new CliError(`rating must be a number between 0 and 100, got: ${arg}`);
+    }
+    ratings.push(n);
+  }
+  if (ratings.length === 0) {
+    throw new CliError(
+      'vibe combine requires at least one rating percentage (e.g. `cfr-free vibe combine 50 30 10`)',
+    );
+  }
+  return { command: 'vibe-combine', ratings };
+}
+
+/** Parse `vibe` arguments: `vibe rules`, `vibe prompt`, `vibe ui`, `vibe combine`, or `vibe playground`. */
+function parseVibeArgs(rest: readonly string[]): ParsedCommand {
+  const sub = rest[0];
+  if (sub === 'rules') return parseVibeRulesArgs(rest.slice(1));
+  if (sub === 'prompt') return parseVibePromptArgs(rest.slice(1));
+  if (sub === 'ui') return parseVibeUiArgs(rest.slice(1));
+  if (sub === 'combine') return parseVibeCombineArgs(rest.slice(1));
+  if (sub === 'playground') return { command: 'serve', demo: true };
+  throw new CliError(
+    `vibe requires a subcommand: 'rules', 'prompt', 'ui', 'combine', or 'playground'`,
+  );
+}
+
 /**
  * The `search` flags, and whether each takes a value.
  *
@@ -293,6 +509,8 @@ const SEARCH_FLAGS: Readonly<Record<string, boolean>> = {
   '--part': true,
   '--kind': true,
   '--chapter': true,
+  '--demo': false,
+  '--semantic': false,
 };
 
 /** The search arguments, split into query words, value flags and switches. */
@@ -420,6 +638,8 @@ function parseSearchArgs(rest: readonly string[]): ParsedCommand {
     part: input.part,
     kind: input.kind,
     chapter: input.chapter,
+    ...(switches.has('--demo') ? { demo: true } : {}),
+    ...(switches.has('--semantic') ? { semantic: true } : {}),
   };
 }
 
@@ -439,6 +659,30 @@ const GLOBAL_COMMANDS = new Map<string, ParsedCommand>([
   ['--version', { command: 'version' }],
 ]);
 
+function parseMcpCommandArgs(rest: readonly string[]): ParsedCommand {
+  if (rest.length > 0) {
+    if (rest[0] === 'install') return parseMcpInstallArgs(rest.slice(1));
+    throw new CliError(`unexpected arguments after 'mcp': ${rest.join(' ')}`);
+  }
+  return { command: 'mcp' };
+}
+
+function parseServeCommandArgs(rest: readonly string[]): ParsedCommand {
+  if (rest.length === 0) return { command: 'serve' };
+  if (rest.length === 1 && rest[0] === '--demo') return { command: 'serve', demo: true };
+  throw new CliError(`unexpected arguments after 'serve': ${rest.join(' ')}`);
+}
+
+function parseSyncCommandArgs(rest: readonly string[]): ParsedCommand {
+  if (rest.length > 0) throw new CliError(`unexpected arguments after 'sync': ${rest.join(' ')}`);
+  return { command: 'sync' };
+}
+
+function parseDemoCommandArgs(rest: readonly string[]): ParsedCommand {
+  if (rest.length > 0) throw new CliError(`unexpected arguments after 'demo': ${rest.join(' ')}`);
+  return { command: 'serve', demo: true };
+}
+
 /**
  * Commands that carry positional arguments, mapped to their parser. A Map
  * (not a plain object): `parseArgs(['toString'])` must still fall through to
@@ -450,6 +694,14 @@ const ARG_PARSERS = new Map<string, (rest: readonly string[]) => ParsedCommand>(
   ['redline', parseRedlineArgs],
   ['historical', parseHistoricalArgs],
   ['search', parseSearchArgs],
+  ['mcp', parseMcpCommandArgs],
+  ['mcp-install', parseMcpInstallArgs],
+  ['vibe', parseVibeArgs],
+  ['vibe-rules', (rest) => parseVibeArgs(['rules', ...rest])],
+  ['vibe-prompt', (rest) => parseVibeArgs(['prompt', ...rest])],
+  ['serve', parseServeCommandArgs],
+  ['sync', parseSyncCommandArgs],
+  ['demo', parseDemoCommandArgs],
 ]);
 
 /** Parse argv (without node/script) into a command. Default: `mcp`. */
@@ -458,19 +710,9 @@ export function parseArgs(argv: readonly string[]): ParsedCommand {
   if (first === undefined) return { command: 'mcp' };
   const global = GLOBAL_COMMANDS.get(first);
   if (global !== undefined) return { ...global };
-  // A help flag among the arguments is a request for the command's usage,
-  // and it is answered BEFORE the command's own parser: a command that
-  // takes arguments used to refuse to explain itself ("unknown option for
-  // search: --help"), which is the one thing a user asks for when they have
-  // got a command wrong.
   if (asksForHelp(rest) && KNOWN_COMMANDS.has(first)) return { command: 'help', topic: first };
   const parseArgv = ARG_PARSERS.get(first);
   if (parseArgv !== undefined) return parseArgv(rest);
-  if (first === 'mcp' || first === 'sync' || first === 'serve') {
-    if (rest.length > 0)
-      throw new CliError(`unexpected arguments after '${first}': ${rest.join(' ')}`);
-    return { command: first };
-  }
   if (first.startsWith('-')) throw new CliError(`unknown option: ${first} (try --help)`);
   throw new CliError(`unknown command: ${first} (try --help)`);
 }
@@ -578,6 +820,51 @@ function usageAnswer(parsed: ParsedCommand): string | undefined {
   return undefined;
 }
 
+function runVibeCoderCommand(parsed: ParsedCommand, io: MainIO): boolean {
+  if (parsed.command === 'mcp-install') {
+    const report = runMcpInstallCommand({
+      client: parsed.client,
+      workspace: parsed.workspace,
+      print: parsed.print,
+    });
+    io.out(report.output);
+    return true;
+  }
+  if (parsed.command === 'vibe-rules') {
+    const report = generateVibeRules({
+      format: parsed.format,
+      write: parsed.write,
+    });
+    if (report.writtenPath) {
+      io.out(`✓ Wrote agent rules to ${report.writtenPath}\n`);
+    } else {
+      io.out(report.content + '\n');
+    }
+    return true;
+  }
+  if (parsed.command === 'vibe-prompt') {
+    const prompt = generateVibePrompt(parsed.preset);
+    io.out(prompt + '\n');
+    return true;
+  }
+  if (parsed.command === 'vibe-ui') {
+    const report = runVibeUiCommand({
+      component: parsed.component,
+      framework: parsed.framework,
+      write: parsed.write,
+      list: parsed.list,
+    });
+    io.out(report.output);
+    return true;
+  }
+  if (parsed.command === 'vibe-combine') {
+    const result = calculateCombinedRating(parsed.ratings);
+    io.out(formatCombineResult(result));
+    return true;
+  }
+  return false;
+}
+
 /** CLI entry point. Returns the process exit code. */
 export async function main(argv: readonly string[], io: MainIO): Promise<number> {
   // The logger is created from the config, which is loaded inside the try: a
@@ -592,6 +879,8 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
       io.out(usage);
       return 0;
     }
+
+    if (runVibeCoderCommand(parsed, io)) return 0;
 
     const config = loadConfig(io.env);
     logger ??= createLogger(config.logLevel);
@@ -639,6 +928,8 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
         part: parsed.part,
         kind: parsed.kind,
         chapter: parsed.chapter,
+        demo: parsed.demo,
+        semantic: parsed.semantic,
       });
       io.out(parsed.json ? formatSearchResultsJson(result) : formatSearchResults(result));
       return 0;
@@ -650,7 +941,11 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
       // The URL in plain language: the structured log carries it too, but a
       // log line is not what a human reads to find out where the server is.
       return await runServeCommand(config, logger, {
-        onListening: (url) => io.out(`Serving on ${url}\n`),
+        demo: parsed.demo,
+        onListening: (url) => {
+          const mode = parsed.demo ? ' (demo mode)' : '';
+          io.out(`Serving on ${url}${mode}\n`);
+        },
         ...(io.stop === undefined ? {} : { stop: io.stop }),
       });
     }

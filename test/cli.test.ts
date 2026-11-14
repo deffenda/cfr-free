@@ -1144,3 +1144,125 @@ describe('cfr-free search', () => {
     expect(out).toContain('terms not answered by these hits: zzz');
   });
 });
+
+describe('vibe coder pack cli commands', () => {
+  it('parses mcp install arguments', () => {
+    expect(parseArgs(['mcp-install', '--print', '--client', 'cursor'])).toEqual({
+      command: 'mcp-install',
+      client: 'cursor',
+      workspace: undefined,
+      print: true,
+    });
+    expect(parseArgs(['mcp-install', '--workspace'])).toEqual({
+      command: 'mcp-install',
+      client: undefined,
+      workspace: true,
+      print: false,
+    });
+    expect(() => parseArgs(['mcp-install', '--unknown'])).toThrow(CliError);
+    expect(() => parseArgs(['mcp-install', '--client', 'invalid'])).toThrow(CliError);
+  });
+
+  it('runs mcp install --print through main', async () => {
+    const { out, err, io } = makeIo();
+    const code = await main(['mcp-install', '--print', '--client', 'cursor'], io);
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('"cfr-free"');
+    expect(err.join('')).toBe('');
+  });
+
+  it('parses vibe rules and prompt arguments', () => {
+    expect(parseArgs(['vibe', 'rules', '--format', 'cursor', '--write'])).toEqual({
+      command: 'vibe-rules',
+      format: 'cursor',
+      write: true,
+    });
+    expect(parseArgs(['vibe', 'prompt', 'ratings'])).toEqual({
+      command: 'vibe-prompt',
+      preset: 'ratings',
+    });
+    expect(() => parseArgs(['vibe', 'rules', '--format', 'bad'])).toThrow(CliError);
+    expect(() => parseArgs(['vibe', 'prompt', 'bad'])).toThrow(CliError);
+  });
+
+  it('runs vibe rules and vibe prompt through main', async () => {
+    const rulesIo = makeIo();
+    const code1 = await main(['vibe', 'rules', '--format', 'claude'], rulesIo.io);
+    expect(code1).toBe(0);
+    expect(rulesIo.out.join('')).toContain('Model Context Protocol');
+
+    const promptIo = makeIo();
+    const code2 = await main(['vibe', 'prompt', 'adjudicator'], promptIo.io);
+    expect(code2).toBe(0);
+    expect(promptIo.out.join('')).toContain('VA Disability Claim Adjudication Prompt');
+  });
+
+  it('parses search --demo and demo commands', () => {
+    expect(parseArgs(['search', '--demo', 'tinnitus'])).toEqual({
+      command: 'search',
+      query: 'tinnitus',
+      json: false,
+      page: 1,
+      perPage: 10,
+      demo: true,
+    });
+    expect(parseArgs(['demo'])).toEqual({
+      command: 'serve',
+      demo: true,
+    });
+    expect(() => parseArgs(['demo', 'extra'])).toThrow(CliError);
+  });
+
+  it('executes search --demo without needing an existing index file or network', async () => {
+    const { out, err, io } = makeIo();
+    const code = await main(['search', '--demo', 'tinnitus'], io);
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('38 C.F.R. § 4.87');
+    expect(err.join('')).toBe('');
+  });
+
+  it('parses and executes vibe ui command', async () => {
+    expect(parseArgs(['vibe', 'ui', 'rating-card', '--framework', 'react'])).toEqual({
+      command: 'vibe-ui',
+      component: 'rating-card',
+      framework: 'react',
+      write: undefined,
+      list: false,
+    });
+    const { out, err, io } = makeIo();
+    const code = await main(['vibe', 'ui', 'rating-card'], io);
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('DisabilityRatingCard');
+    expect(err.join('')).toBe('');
+  });
+
+  it('parses and executes vibe combine command', async () => {
+    expect(parseArgs(['vibe', 'combine', '50', '30', '10'])).toEqual({
+      command: 'vibe-combine',
+      ratings: [50, 30, 10],
+    });
+    const { out, err, io } = makeIo();
+    const code = await main(['vibe', 'combine', '50', '30'], io);
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('Combined Rating:      70%');
+    expect(err.join('')).toBe('');
+  });
+
+  it('parses search --semantic and executes clinical expansion', async () => {
+    expect(parseArgs(['search', '--demo', '--semantic', 'ringing in ears'])).toEqual({
+      command: 'search',
+      query: 'ringing in ears',
+      json: false,
+      page: 1,
+      perPage: 10,
+      demo: true,
+      semantic: true,
+    });
+    const { out, err, io } = makeIo();
+    const code = await main(['search', '--demo', '--semantic', 'ringing in ears'], io);
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('38 C.F.R. § 4.87');
+    expect(out.join('')).toContain('clinical semantic mapping: Tinnitus');
+    expect(err.join('')).toBe('');
+  });
+});

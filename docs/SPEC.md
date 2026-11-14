@@ -20,7 +20,18 @@ mcp  sync  diff  redline  historical  search  serve  export  help  version
 ```
 
 Signatures and one-line purposes live in `USAGE` (`src/cli.ts`); `help`
-and `version` dispatch there, the other eight in `src/commands/`.
+and `version` dispatch there, the other entrypoints in `src/commands/`.
+The CLI additionally supports agent and developer automation: `cfr-free mcp install`
+for zero-config editor MCP client setup (Cursor, Claude Desktop,
+Windsurf, VS Code), `cfr-free vibe rules` and `cfr-free vibe prompt` for
+pre-packaged agent system rules and claim evaluation workflows,
+`cfr-free vibe ui` for copy-paste Tailwind and React components (v0, Lovable, Cursor),
+`cfr-free vibe combine` and `/api/v1/vibe/combine` for 38 C.F.R. § 4.25 VA Math
+combined disability rating calculations, `cfr-free search --semantic` and
+`/api/v1/search?semantic=1` for clinical symptom-to-code expansion,
+`cfr-free demo` / `cfr-free serve --demo` for instant offline testing against
+curated Title 38 provisions without network sync, and `/playground` for an
+interactive visual browser sandbox.
 
 `cfr-free search` takes a query of 3–200 characters; a query outside that
 range is refused before the index is opened, so a rejected query costs no
@@ -35,12 +46,14 @@ src/
   process-utils.ts    idempotent shutdown handling shared by serve/mcp
   version.ts          package-version resolution seam
   commands/           per-subcommand entrypoints (diff, export,
-                      historical, mcp, redline, search, serve, sync)
+                      historical, mcp, mcp-install, redline, search,
+                      serve, sync, vibe, vibe-ui)
                       plus two internal helpers (ensure-index,
                       refresh-scheduler)
   core/
     changes.ts        sync change report: hash diff between syncs
     citations.ts      parse/normalize "38 CFR 4.125", "38 C.F.R. § 4.125", "§ 4.125", "4.125"
+    demo-data.ts      offline fixture store populated with core Title 38 provisions
     diff.ts           point-in-time diff (no local index): fetch two issue dates, hash per citation
     ecfr.ts           eCFR endpoints: dates, structure, full-title XML, search
     errors.ts         the error types the whole service speaks: ServiceError, StructureError
@@ -50,10 +63,12 @@ src/
     query.ts          the query language: tokenizer, synonyms, FTS5 fragments, stopwords
     redline.ts        per-provision line redline between two issue dates
     references.ts     cross-reference extraction for search results
+    semantic-expansion.ts clinical complaint to Title 38 statutory terms mapping
     service.ts        facade shared by MCP + HTTP: search/getSection/browse/status
     store.ts          SQLite schema, queries (FTS5), transactional rebuild
     structure.ts      browse-tree validation + browse
     sync.ts           index build pipeline
+    va-math.ts        38 C.F.R. § 4.25 combined ratings table calculation
     xml.ts            XML → markdown/text renderer + section extractor
   mcp/
     client-safe.ts    client-safe error text (sanitized messages on the wire)

@@ -7,6 +7,7 @@ import { CFRService } from '../core/service.js';
 import { Store } from '../core/store.js';
 import { createShutdownController } from '../process-utils.js';
 import { createHttpServer, type DiskSnapshot } from '../titan/http-server.js';
+import { openDemoStore } from '../core/demo-data.js';
 import { syncIndex } from '../core/sync.js';
 import { ensureIndex, createEcfrApi } from './ensure-index.js';
 import { startRefreshScheduler } from './refresh-scheduler.js';
@@ -33,9 +34,11 @@ function listenExitCode(error: unknown): number {
  */
 export interface ServeOptions {
   /** Called with the URL once the server is listening. */
-  readonly onListening?: (url: string) => void;
+  readonly onListening?: ((url: string) => void) | undefined;
   /** Stops the server when the signal aborts; the process signals are the default. */
-  readonly stop?: AbortSignal;
+  readonly stop?: AbortSignal | undefined;
+  /** Boot in instant demo mode using curated offline provisions without network sync. */
+  readonly demo?: boolean | undefined;
 }
 
 export async function runServeCommand(
@@ -43,7 +46,7 @@ export async function runServeCommand(
   logger: Logger,
   options: ServeOptions = {},
 ): Promise<number> {
-  const store = Store.open(config.indexPath);
+  const store = options.demo === true ? openDemoStore() : Store.open(config.indexPath);
   try {
     // ONE eCFR client serves the whole process — the startup sync, the
     // diff facade, /api/v1/diff and the background refresh scheduler all
@@ -51,7 +54,12 @@ export async function runServeCommand(
     // THIS process, not each caller separately. The diff facade and
     // /api/v1/diff need a live client; it is the same one.
     const ecfr = createEcfrApi();
-    const freshness = await ensureIndex(store, config, logger, { createEcfr: () => ecfr });
+    let freshness: string | undefined;
+    if (options.demo !== true) {
+      freshness = await ensureIndex(store, config, logger, { createEcfr: () => ecfr });
+    } else {
+      freshness = 'demo';
+    }
     const service = new CFRService(store, config.maxAgeDays, ecfr, logger);
 
     // Disk capacity for /health and /metrics (delivery log §13 #22): probed once at
@@ -63,6 +71,10 @@ export async function runServeCommand(
     // stale reading beats an erased one.
     let diskSnapshot: DiskSnapshot | null = null;
     const probeDisk = async (): Promise<void> => {
+      if (options.demo === true) {
+        diskSnapshot = { freeBytes: 1024 * 1024 * 1024, totalBytes: 1024 * 1024 * 2048 };
+        return;
+      }
       try {
         const stats = await fs.statfs(path.dirname(config.indexPath));
         diskSnapshot = {
@@ -109,7 +121,7 @@ export async function runServeCommand(
     // Opt-in background refresh (CFR_REFRESH_HOURS): armed only after a
     // successful bind, so a failed listen exits with no timer left behind.
     const scheduler =
-      config.refreshHours > 0
+      !options.demo && config.refreshHours > 0
         ? startRefreshScheduler({
             refreshHours: config.refreshHours,
             logger,
