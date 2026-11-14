@@ -32,6 +32,17 @@ describe('loadConfig', () => {
     ]);
   });
 
+  it('reads trusted proxy IP addresses', () => {
+    expect(loadConfig({}).trustedProxies).toEqual([]);
+    expect(loadConfig({ CFR_TRUSTED_PROXIES: '127.0.0.1, 10.0.0.1, ::1' }).trustedProxies).toEqual([
+      '127.0.0.1',
+      '10.0.0.1',
+      '::1',
+    ]);
+    expect(() => loadConfig({ CFR_TRUSTED_PROXIES: 'not-an-ip' })).toThrow(ConfigError);
+    expect(loadConfig({ CFR_TRUSTED_PROXIES: '' }).trustedProxies).toEqual([]);
+  });
+
   it('honors explicit values', () => {
     const config = loadConfig({
       CFR_INDEX_PATH: '/tmp/custom.sqlite',

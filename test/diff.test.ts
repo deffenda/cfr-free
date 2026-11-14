@@ -143,6 +143,9 @@ describe('diffIssues', () => {
       // network round-trip.
       ['2026-13-01', TO_DATE],
       ['2026-02-30', TO_DATE],
+      // Future dates must fail synchronously before any network round-trip.
+      ['2099-01-01', TO_DATE],
+      [FROM_DATE, '2099-12-31'],
     ] as const) {
       const error = await rejection(diffIssues(deps, from, to));
       expect(error).toBeInstanceOf(ServiceError);
