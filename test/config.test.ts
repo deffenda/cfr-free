@@ -21,6 +21,15 @@ describe('loadConfig', () => {
       'b.example',
     ]);
     expect(() => loadConfig({ CFR_ALLOWED_HOSTS: 'a b' })).toThrow(ConfigError);
+    // Blanks are "no name there", never a startup failure.
+    for (const blank of ['', ' ', ',', 'a.example,', ' a.example , b.example ,,']) {
+      expect(() => loadConfig({ CFR_ALLOWED_HOSTS: blank }), JSON.stringify(blank)).not.toThrow();
+    }
+    expect(loadConfig({ CFR_ALLOWED_HOSTS: '' }).allowedHosts).toEqual([]);
+    expect(loadConfig({ CFR_ALLOWED_HOSTS: ' a.example , b.example ,,' }).allowedHosts).toEqual([
+      'a.example',
+      'b.example',
+    ]);
   });
 
   it('honors explicit values', () => {

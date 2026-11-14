@@ -64,12 +64,24 @@ const envSchema = z.object({
   CFR_ALLOWED_HOSTS: z
     .string()
     .max(500)
-    .refine((value) => value.split(',').every((name) => /^[A-Za-z0-9.-]+$/.test(name)), {
+    .refine((value) => hostNames(value).every((name) => /^[A-Za-z0-9.-]+$/.test(name)), {
       message: 'must be comma-separated host names',
     })
     .optional(),
   CFR_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).optional(),
 });
+
+/**
+ * The names in a comma-separated list, blanks dropped. An empty value, a
+ * trailing comma or a space after a comma (`CFR_ALLOWED_HOSTS=` from a
+ * compose file's `${X:-}`) means "no name there", not a startup failure.
+ */
+function hostNames(list: string): string[] {
+  return list
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => name !== '');
+}
 
 function parseBoundedInt(
   raw: string | undefined,
@@ -123,10 +135,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     refreshHours: parseBoundedInt(e.CFR_REFRESH_HOURS, 0, 0, 168, 'CFR_REFRESH_HOURS'),
     host,
     port: parseBoundedInt(e.CFR_PORT, DEFAULT_PORT, 1, 65_535, 'CFR_PORT'),
-    allowedHosts: (e.CFR_ALLOWED_HOSTS ?? '')
-      .split(',')
-      .filter((name) => name !== '')
-      .map((name) => name.toLowerCase()),
+    allowedHosts: hostNames(e.CFR_ALLOWED_HOSTS ?? '').map((name) => name.toLowerCase()),
     allowRemote,
     logLevel: e.CFR_LOG_LEVEL ?? 'info',
   };
