@@ -77,4 +77,28 @@ describe('loadConfig', () => {
   it('names the environment when a failure carries no field path', () => {
     expect(() => loadConfig(null as never)).toThrow(/env:/);
   });
+
+  it('defaults the enabled titles to [38]', () => {
+    expect(loadConfig({}).titles).toEqual([38]);
+  });
+
+  it('parses CFR_TITLES sorted, deduplicated, blanks dropped', () => {
+    expect(loadConfig({ CFR_TITLES: '38' }).titles).toEqual([38]);
+    expect(loadConfig({ CFR_TITLES: '32,38' }).titles).toEqual([32, 38]);
+    expect(loadConfig({ CFR_TITLES: '38, 32, 38,' }).titles).toEqual([32, 38]);
+    expect(loadConfig({ CFR_TITLES: '5,1' }).titles).toEqual([1, 5]);
+  });
+
+  it('treats a blank CFR_TITLES as the default (compose ${X:-} case)', () => {
+    expect(loadConfig({ CFR_TITLES: '' }).titles).toEqual([38]);
+    expect(loadConfig({ CFR_TITLES: ' , ,' }).titles).toEqual([38]);
+  });
+
+  it.each([
+    [{ CFR_TITLES: '0' }, 'between 1 and 50'],
+    [{ CFR_TITLES: '51' }, 'between 1 and 50'],
+    [{ CFR_TITLES: 'abc' }, 'comma-separated CFR title numbers'],
+  ])('rejects %j', (env, expected) => {
+    expect(() => loadConfig(env)).toThrow(expected);
+  });
 });

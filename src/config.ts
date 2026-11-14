@@ -18,6 +18,12 @@ export interface AppConfig {
   readonly autoSync: boolean;
   /** Hours between background index refreshes while serving; 0 disables background refresh. */
   readonly refreshHours: number;
+  /**
+   * The enabled CFR titles, sorted ascending, deduplicated. Sync refreshes
+   * these titles (38 first, then ascending); every read surface defaults to
+   * Title 38. Parsed from `CFR_TITLES`; defaults to [38].
+   */
+  readonly titles: readonly number[];
   /** Bind address for the HTTP API. */
   readonly host: string;
   /** Bind port for the HTTP API. */
@@ -61,6 +67,13 @@ const envSchema = z.object({
     .regex(/^\d{2,5}$/)
     .optional(),
   CFR_ALLOW_REMOTE: z.enum(['0', '1']).optional(),
+  CFR_TITLES: z
+    .string()
+    .max(200)
+    .refine((value) => value.split(',').every((entry) => /^\s*\d{0,2}\s*$/.test(entry)), {
+      message: 'must be comma-separated CFR title numbers (1-50)',
+    })
+    .optional(),
   CFR_ALLOWED_HOSTS: z
     .string()
     .max(500)
@@ -81,6 +94,32 @@ function hostNames(list: string): string[] {
     .split(',')
     .map((name) => name.trim())
     .filter((name) => name !== '');
+}
+
+/**
+ * The titles in a comma-separated list: blanks dropped (a trailing comma or
+ * a compose `${X:-}` expansion means "no title there"), each parsed and
+ * bounds-checked against the live eCFR's 1-50 range, deduplicated, sorted
+ * ascending. A variable that names no titles — unset or blank — means the
+ * default [38]; a title number outside 1-50 is a startup failure.
+ */
+function parseTitles(raw: string | undefined): readonly number[] {
+  if (raw === undefined) return [38];
+  const titles = raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '')
+    .map((entry) => {
+      const title = Number.parseInt(entry, 10);
+      if (title < 1 || title > 50) {
+        throw new ConfigError(
+          `CFR_TITLES entries must be CFR title numbers between 1 and 50, got "${entry}"`,
+        );
+      }
+      return title;
+    });
+  if (titles.length === 0) return [38];
+  return [...new Set(titles)].sort((a, b) => a - b);
 }
 
 function parseBoundedInt(
@@ -133,6 +172,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ),
     autoSync: e.CFR_AUTO_SYNC !== '0',
     refreshHours: parseBoundedInt(e.CFR_REFRESH_HOURS, 0, 0, 168, 'CFR_REFRESH_HOURS'),
+    titles: parseTitles(e.CFR_TITLES),
     host,
     port: parseBoundedInt(e.CFR_PORT, DEFAULT_PORT, 1, 65_535, 'CFR_PORT'),
     allowedHosts: hostNames(e.CFR_ALLOWED_HOSTS ?? '').map((name) => name.toLowerCase()),

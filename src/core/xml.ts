@@ -12,8 +12,14 @@ import { XMLParser } from 'fast-xml-parser';
 
 export type SectionKind = 'section' | 'appendix';
 
-/** A section (or appendix) extracted from the Title 38 XML document. */
+/** A section (or appendix) extracted from a title's XML document. */
 export interface RawSection {
+  /**
+   * The CFR title this section belongs to (e.g. 38, 32). Absent means 38:
+   * the parser emits Title 38 rows and every existing caller keeps working.
+   * Multi-title sync sets it explicitly.
+   */
+  readonly title?: number;
   readonly citation: string;
   readonly kind: SectionKind;
   readonly heading: string;

@@ -362,8 +362,22 @@ describe('Store resilience', () => {
 describe('Store schema versioning', () => {
   /** A raw file stamped with `version` (only the version gate inspects it). */
   // What an older cfr-free file holds, as far as the "is this ours" check can see.
-  const OLD_INDEX_TABLES =
-    'CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT); CREATE TABLE sections(citation TEXT, markdown TEXT)';
+  // A realistic pre-versioning file: the v1 sections shape (no title column,
+  // no section_references table). v3 adoption rewrites the sections table
+  // around these columns, so the skeleton must carry the real ones.
+  const OLD_INDEX_TABLES = `CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE sections(
+      id INTEGER PRIMARY KEY,
+      citation TEXT NOT NULL UNIQUE,
+      kind TEXT NOT NULL CHECK (kind IN ('section', 'appendix')),
+      heading TEXT NOT NULL,
+      chapter TEXT, subchapter TEXT, part TEXT, subpart TEXT,
+      subject_group TEXT,
+      path TEXT NOT NULL,
+      text TEXT NOT NULL,
+      markdown TEXT NOT NULL,
+      issue_date TEXT NOT NULL
+    )`;
 
   function makeVersionedFile(version: number): { file: string; cleanup: () => void } {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-free-version-'));
@@ -569,6 +583,135 @@ describe('Store section backlinks', () => {
       raw.exec("DELETE FROM sections WHERE citation = '4.106'");
       raw.close();
       expect(temp.store.citedBy('4.105')).toEqual(['4.107']);
+    } finally {
+      temp.cleanup();
+    }
+  });
+});
+
+describe('Store multi-title (schema v3)', () => {
+  it('stores the same citation in two titles under the (title, citation) key', () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({ citation: '3.1', heading: 'Veterans benefits general.' }),
+        makeSection({ citation: '3.1', title: 32, heading: 'Defense property management.' }),
+      ],
+    });
+    try {
+      expect(temp.store.countSections()).toBe(2);
+      // Default reads scope to Title 38; the title parameter selects 32.
+      expect(temp.store.getSection('3.1', 'section')?.heading).toBe('Veterans benefits general.');
+      expect(temp.store.getSection('3.1', 'section', 32)?.heading).toBe(
+        'Defense property management.',
+      );
+      expect(temp.store.hasSection('3.1')).toBe(true);
+      expect(temp.store.hasSection('3.1', 32)).toBe(true);
+      expect(temp.store.hasSection('3.1', 20)).toBe(false);
+      // Rows carry their title; a section without one defaults to 38.
+      expect(temp.store.getSection('3.1', 'section')?.title).toBe(38);
+      expect(temp.store.getSection('3.1', 'section', 32)?.title).toBe(32);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it("scopes citedBy to the citing row's title — edges never blend authorities", () => {
+    const temp = openTempStore({
+      sections: [
+        makeSection({ citation: '4.105', text: 'Basic entitlement criteria apply.' }),
+        makeSection({ citation: '70.1', title: 32, text: 'See § 4.105 for entitlement criteria.' }),
+      ],
+    });
+    try {
+      // The Title 32 edge answers a Title 32 citedBy; a default (38) lookup
+      // must not see it.
+      expect(temp.store.citedBy('4.105', 32)).toEqual(['70.1']);
+      expect(temp.store.citedBy('4.105')).toEqual([]);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('writes per-title issue-date meta alongside the legacy key', () => {
+    const temp = openTempStore({
+      sections: [makeSection({ citation: '3.1' }), makeSection({ citation: '70.1', title: 32 })],
+    });
+    try {
+      expect(temp.store.getMeta('title.38.issue_date')).toBe('2026-10-09');
+      expect(temp.store.getMeta('title.32.issue_date')).toBe('2026-10-09');
+      // Legacy key keeps serving existing readers until the wire PR moves them.
+      expect(temp.store.getMeta('issue_date')).toBe('2026-10-09');
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('adopts a v1 file to the v3 shape preserving rows (title defaults to 38)', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cfr-free-v3-adopt-'));
+    const file = path.join(dir, 'index.sqlite');
+    try {
+      // A realistic v1 file: full old columns, no title, UNIQUE(citation).
+      const raw = new DatabaseSync(file);
+      raw.exec(`CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
+        CREATE TABLE sections(
+          id INTEGER PRIMARY KEY,
+          citation TEXT NOT NULL UNIQUE,
+          kind TEXT NOT NULL CHECK (kind IN ('section', 'appendix')),
+          heading TEXT NOT NULL,
+          chapter TEXT, subchapter TEXT, part TEXT, subpart TEXT,
+          subject_group TEXT,
+          path TEXT NOT NULL,
+          text TEXT NOT NULL,
+          markdown TEXT NOT NULL,
+          issue_date TEXT NOT NULL
+        );
+        INSERT INTO sections (citation, kind, heading, path, text, markdown, issue_date)
+        VALUES ('4.125', 'section', 'Diagnosis of mental disorders.', '/x', 'body', 'md', '2026-01-01');
+        PRAGMA user_version = 1`);
+      raw.close();
+      const store = Store.open(file, { allowSchemaUpgrade: true });
+      try {
+        const row = store.getSection('4.125', 'section');
+        expect(row?.title).toBe(38);
+        expect(row?.heading).toBe('Diagnosis of mental disorders.');
+        // The shape upgrade rebuilds the FTS index from the copied rows, so
+        // the adopted file is fully servable before its first sync.
+        expect(store.search({ query: 'diagnosis', page: 1, perPage: 10 }).total).toBe(1);
+        store.replaceAll(
+          [makeSection({ citation: '4.125', heading: 'Diagnosis of mental disorders.' })],
+          '2026-10-09',
+          {},
+        );
+        expect(store.search({ query: 'diagnosis', page: 1, perPage: 10 }).total).toBe(1);
+        // The new (title, citation) key replaced the old UNIQUE(citation):
+        // the preserved citation is insertable under another title, and a
+        // duplicate of the same (title, citation) pair is rejected.
+        const raw2 = new DatabaseSync(file);
+        raw2.exec(`INSERT INTO sections
+          (title, citation, kind, heading, path, text, markdown, issue_date)
+          VALUES (32, '4.125', 'section', 'h', '/p', 't', 'm', '2026-01-01')`);
+        expect(() =>
+          raw2.exec(`INSERT INTO sections
+            (title, citation, kind, heading, path, text, markdown, issue_date)
+            VALUES (32, '4.125', 'section', 'h', '/p', 't', 'm', '2026-01-01')`),
+        ).toThrow();
+        raw2.close();
+      } finally {
+        store.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('scopes the direct-match pin check to a title', () => {
+    const temp = openTempStore({
+      sections: [makeSection({ citation: '3.1' }), makeSection({ citation: '3.1', title: 32 })],
+    });
+    try {
+      expect(temp.store.hasSearchMatch('or', 'searchable terms', '3.1')).toBe(true);
+      expect(temp.store.hasSearchMatch('or', 'searchable terms', '3.1', 32)).toBe(true);
+      expect(temp.store.hasSearchMatch('or', 'searchable terms', '3.1', 20)).toBe(false);
     } finally {
       temp.cleanup();
     }
