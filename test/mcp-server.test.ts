@@ -806,6 +806,34 @@ describe('MCP diff_issues tool (ecfr injected)', () => {
     }
   });
 
+  it('directs truncated historical reads to the requested revision', async () => {
+    const body = 'A'.repeat(PROVISION_TEXT_CAP + 5_000);
+    const probe = await connectedServer(
+      stubEcfr({ '2024-03-10': diffXml(diffSection('4.125', body)) }),
+    );
+    try {
+      const listed = await probe.client.listTools();
+      const description = listed.tools.find((tool) => tool.name === 'get_section_at')?.description;
+      expect(description).toContain('read the rest from the sourceUrlAtRequestedDate');
+      expect(description).not.toContain('read the rest from the sourceUrl.');
+      const result = (await probe.client.callTool({
+        name: 'get_section_at',
+        arguments: { at_date: '2024-03-10', citation: '4.125' },
+      })) as ToolCallResult;
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent?.['truncated']).toBe(true);
+      expect(String(result.structuredContent?.['text']).length).toBe(PROVISION_TEXT_CAP);
+      expect(String(result.structuredContent?.['sourceUrlAtRequestedDate'])).toContain(
+        '/on/2024-03-10/title-38/section-4.125',
+      );
+      expect(result.structuredContent?.['sourceUrlAtRequestedDate']).not.toBe(
+        result.structuredContent?.['sourceUrl'],
+      );
+    } finally {
+      await probe.close();
+    }
+  });
+
   it('describes at_date as a read date, not an issue date, and keeps the format check (tools/list wire text)', async () => {
     const probe = await connectedServer(stubEcfr({}));
     try {

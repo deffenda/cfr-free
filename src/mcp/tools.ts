@@ -557,7 +557,7 @@ export function registerTools(
           'date-of-claim and CUE questions ("what did this section say when the claim was ' +
           'filed?"); for the CURRENT text use get_section. ' +
           `The body is capped at ${PROVISION_TEXT_CAP} characters; a body that was cut sets \`truncated: true\`, ` +
-          'and the truncated text is incomplete — read the rest from the sourceUrl. ' +
+          'and the truncated text is incomplete — read the rest from the sourceUrlAtRequestedDate. ' +
           UNTRUSTED_DATA_NOTE,
         inputSchema: {
           // at_date is a REQUESTED date, not an issue date: eCFR serves the
