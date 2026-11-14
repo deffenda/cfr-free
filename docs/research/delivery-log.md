@@ -803,8 +803,11 @@ revised**, as recorded in the protocol, and the previously unhandled §11.2
 branch is closed — a cohort that misses SC-1 while at least 2 of N asked
 for another session is a CHANGE, not an unhandled case.
 **The criteria were agreed on 2026-10-21** (the §8 table's decision column
-records it), so the M6 acceptance condition is met; what remains is
-operator-arranged: recruitment and consent, and the sessions themselves.
+records it), so the M6 acceptance condition is met; what remains was
+operator-arranged: recruitment and consent, and the sessions themselves —
+both dropped by operator decision on 2026-11-13 (recorded in the
+preparation-chain section below); demand validation passes to user feedback
+through GitHub issues and discussions.
 
 **The instrument is now continuously checked (2026-10-22).** The protocol's
 own rehearsal record ended with a standing instruction — "a rehearsal of
@@ -841,7 +844,7 @@ selectors, not a stamp of the revision served). All three are fixed, and
 the limit now lives in one constant — `POINT_IN_TIME_NOTICE`, used by both
 the diff and the redline — so they cannot drift apart in wording.
 
-### M6 — the preparation chain is complete (2026-11-01); the pilot itself is the operator's step
+### M6 — the preparation chain is complete (2026-11-01); the pilot step was dropped (2026-11-13)
 
 Every M6 deliverable has landed: the protocol
 (#100), the criteria revision (#103), the sibling re-anchoring (#119),
@@ -861,6 +864,14 @@ the proposed five-practitioner cohort, the sessions themselves, and the
 results template filled with real numbers. M6's acceptance therefore
 stands as: criteria agreed and runnable, rehearsal regression-checked,
 pilot pending operator arrangement.
+
+**Superseded (2026-11-13).** The practitioner study this note leaves to the
+operator was dropped by operator decision: no cohort will be recruited and
+no sessions will run. M6's demand-validation role passes to user feedback —
+GitHub issues and discussions on the public repository, recorded as it
+arrives — and stage E's dependency is observed demand, not pilot evidence.
+The preparation-chain record above stands as what was built and verified;
+the pilot step it describes will not happen.
 
 ### Historical delivery record — original top 20
 

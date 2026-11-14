@@ -100,17 +100,19 @@ establish the privacy properties of a separately chosen AI client.
 
 ### Delivery order and exit gates
 
-| Stage                     | Work                | Exit evidence                                                                                         |
-| ------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------- |
-| A: trustworthy baseline   | P1-01 through P1-04 | Four fixing PRs, reviewed SHAs, gate tails; no silent loss of graphics or stale-route repaint.        |
-| B: reproducible retrieval | M1, M2, M3          | Offline fidelity fixtures, dated provenance, frozen retrieval evaluation and measured baseline.       |
-| C: usable distribution    | M4, M5              | Verified onboarding and one end-to-end research/export workflow; reuse already queued E-items.        |
-| D: validate demand        | M6                  | Operator-arranged practitioner study, task-level results, explicit continue/change/stop decision.     |
-| E: selective expansion    | M7, M8              | Demand evidence and operator-approved scope; integration/support before corpus or platform expansion. |
+| Stage                     | Work                | Exit evidence                                                                                                                               |
+| ------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| A: trustworthy baseline   | P1-01 through P1-04 | Four fixing PRs, reviewed SHAs, gate tails; no silent loss of graphics or stale-route repaint.                                              |
+| B: reproducible retrieval | M1, M2, M3          | Offline fidelity fixtures, dated provenance, frozen retrieval evaluation and measured baseline.                                             |
+| C: usable distribution    | M4, M5              | Verified onboarding and one end-to-end research/export workflow; reuse already queued E-items.                                              |
+| D: validate demand        | M6                  | The practitioner study was dropped by operator decision (2026-11-13); demand signal is user feedback through GitHub issues and discussions. |
+| E: selective expansion    | M7, M8              | Observed user demand and operator-approved scope; integration/support before corpus or platform expansion.                                  |
 
-M6 study design may start during A; recruiting, messages, and live sessions
-remain operator-arranged or explicitly authorized. Stages specify acceptance
-dependencies, not deadlines or a mandate to run all tasks in one session.
+M6's practitioner study was dropped by operator decision (2026-11-13): no
+recruitment, no sessions. Demand validation passes to user feedback — GitHub
+issues and discussions on the public repository — recorded as it arrives.
+Stages specify acceptance dependencies, not deadlines or a mandate to run all
+tasks in one session.
 Stages A–C are delivered — their records are in the delivery log — so the open
 work is stage D (M6) and stage E (M7, M8).
 
@@ -150,15 +152,17 @@ at least three participants complete four of five tasks without a citation/
 version error and request repeat use; explicitly label this an initial
 decision threshold, not statistical proof or a revenue forecast.
 
-**What remains open:** the operator-arranged part — recruitment and consent,
-and the sessions themselves. The criteria review, the automated instrument
-check and the three closed tool behaviours are delivery records; they are in
-the [delivery log](docs/research/delivery-log.md).
+**What remains open: nothing in this repository.** The practitioner study
+was dropped by operator decision (2026-11-13) — no recruitment, no sessions —
+and its demand-validation role passes to user feedback through GitHub issues
+and discussions on the public repository. The criteria review, the automated
+instrument check and the three closed tool behaviours are delivery records;
+they are in the [delivery log](docs/research/delivery-log.md).
 
-### M7 — Integrations and support, conditional on pilot demand
+### M7 — Integrations and support, conditional on observed demand
 
-**Dependency:** M6 evidence. **Risk:** LOW for a decision brief; runtime
-integration MEDIUM, auth/secrets/CI changes HIGH.
+**Dependency:** the M6 record plus observed user demand. **Risk:** LOW for a
+decision brief; runtime integration MEDIUM, auth/secrets/CI changes HIGH.
 Choose one demonstrated destination, such as a local research assistant or
 an existing advocacy tool's documented import flow. Verify that destination's
 actual API/import format, permissions, licensing, and user need first. Prefer
@@ -172,7 +176,8 @@ claim outcomes, or a commercial advantage from public-domain content alone.
 
 ### M8 — Corpus/platform expansion decision gate
 
-**Dependency:** M6/M7 evidence plus explicit operator scope approval.
+**Dependency:** the M6/M7 records, observed user demand, and explicit
+operator scope approval.
 **Risk:** LOW research; schema/auth/release implementation HIGH.
 Keep Title 38 specialization by default, consistent with
 `docs/research/multi-title.md`. Research adjacent statutes, M21-1, decisions,
