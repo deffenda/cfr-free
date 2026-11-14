@@ -49,6 +49,9 @@ to justify them.
 
 ## Decision sought from the operator
 
-- [ ] Accept: close row 24 as "Rejected speculative (this brief)".
-- [ ] Or schedule multi-title as a real design round (est. multi-day,
-      touching schema + API contract + all count surfaces; see table).
+- [x] Accept: close row 24 as "Rejected speculative (this brief)".
+
+**Update (2026-11-13):** revisit trigger 1 fired — operator demand for a
+second title. The implementation design round is scheduled in
+[multi-title-implementation-design-2026-11-13](multi-title-implementation-design-2026-11-13.md)
+(Title 32 first).
