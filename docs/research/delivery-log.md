@@ -803,11 +803,11 @@ revised**, as recorded in the protocol, and the previously unhandled §11.2
 branch is closed — a cohort that misses SC-1 while at least 2 of N asked
 for another session is a CHANGE, not an unhandled case.
 **The criteria were agreed on 2026-10-21** (the §8 table's decision column
-records it), so the M6 acceptance condition is met; what remains was
-operator-arranged: recruitment and consent, and the sessions themselves —
-both dropped by operator decision on 2026-11-13 (recorded in the
-preparation-chain section below); demand validation passes to user feedback
-through GitHub issues and discussions.
+records it), so the M6 acceptance condition is met. What was operator-arranged —
+recruitment and consent, and the sessions themselves — was dropped by
+operator decision on 2026-11-13 (recorded in the preparation-chain section
+below); demand validation passes to user feedback through GitHub issues
+and discussions.
 
 **The instrument is now continuously checked (2026-10-22).** The protocol's
 own rehearsal record ended with a standing instruction — "a rehearsal of

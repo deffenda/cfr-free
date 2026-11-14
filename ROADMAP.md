@@ -160,10 +160,11 @@ and discussions on the public repository. The criteria review, the automated
 instrument check and the three closed tool behaviours are delivery records;
 they are in the [delivery log](docs/research/delivery-log.md).
 
-### M7 — Integrations and support, conditional on observed demand
+### M7 — Integrations and support, conditional on observed user demand
 
-**Dependency:** the M6 record plus observed user demand. **Risk:** LOW for a
-decision brief; runtime integration MEDIUM, auth/secrets/CI changes HIGH.
+**Dependency:** the M6 record (its study was dropped 2026-11-13) plus
+observed user demand. **Risk:** LOW for a decision brief; runtime
+integration MEDIUM, auth/secrets/CI changes HIGH.
 Choose one demonstrated destination, such as a local research assistant or
 an existing advocacy tool's documented import flow. Verify that destination's
 actual API/import format, permissions, licensing, and user need first. Prefer
@@ -177,8 +178,8 @@ claim outcomes, or a commercial advantage from public-domain content alone.
 
 ### M8 — Corpus/platform expansion decision gate
 
-**Dependency:** the M6/M7 records, observed user demand, and explicit
-operator scope approval.
+**Dependency:** the M6/M7 records (M6's study was dropped 2026-11-13),
+observed user demand, and explicit operator scope approval.
 **Risk:** LOW research; schema/auth/release implementation HIGH.
 Keep Title 38 specialization by default, consistent with
 `docs/research/multi-title.md`. Research adjacent statutes, M21-1, decisions,
