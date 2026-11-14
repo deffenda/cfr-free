@@ -57,8 +57,9 @@ info:
     after it has priced the route (a malformed date, an oversized `q`)
     costs that route's price. All schema
     fields listed under `required` are always
-    present (the optional `Health.diskFree`/`diskTotal` and
-    `RedlineResult.fromText`/`toText` are the deliberate exceptions); nullable
+    present (the optional `Health.diskFree`/`diskTotal`,
+    `RedlineResult.fromText`/`toText`, and
+    `SearchResponse.semanticMatches` are the deliberate exceptions); nullable
     ones use OpenAPI 3.1 `type: [string, "null"]` (never `nullable: true`).
 servers:
   - url: http://127.0.0.1:8787
@@ -134,6 +135,31 @@ paths:
       responses:
         '200':
           description: 'Status and headers as GET, empty body (src/titan/http-server.ts#sendStatic); errors mirror GET, also body-less.'
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /playground:
+    # source: src/titan/http-server.ts#dispatch
+    get:
+      summary: Interactive visual developer playground (HTML shell)
+      responses:
+        '200':
+          description: 'Developer sandbox for live Title 38 search, VA math calculations, and UI previews. Sent with strict Content-Security-Policy.'
+          content:
+            text/html:
+              schema: { type: string }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    head:
+      summary: Headers-only playground probe
+      responses:
+        '200':
+          description: 'Status and headers as GET, empty body.'
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '414': { $ref: '#/components/responses/UriTooLong' }
@@ -287,6 +313,11 @@ paths:
           in: query
           description: 'Restrict to one chapter by Roman-numeral identifier — exact and case-sensitive (e.g. "I").'
           schema: { type: string, minLength: 1, maxLength: 8, pattern: '^[IVXLCDM]+$' }
+        - name: semantic
+          in: query
+          required: false
+          description: 'Enable clinical symptom-to-code semantic query expansion.'
+          schema: { type: string, enum: ['0', '1', 'true', 'false'] }
     head:
       summary: Headers-only search probe
       responses:
@@ -326,6 +357,11 @@ paths:
           in: query
           description: 'Restrict to one chapter by Roman-numeral identifier — exact and case-sensitive (e.g. "I").'
           schema: { type: string, minLength: 1, maxLength: 8, pattern: '^[IVXLCDM]+$' }
+        - name: semantic
+          in: query
+          required: false
+          description: 'Enable clinical symptom-to-code semantic query expansion.'
+          schema: { type: string, enum: ['0', '1', 'true', 'false'] }
   /api/v1/sections/{citation}:
     # source: src/titan/http-server.ts#dispatch (router), handleSection (revalidatable send)
     get:
@@ -568,6 +604,43 @@ paths:
           required: true
           description: 'Provision to redline — 4.125, § 4.125, 38 CFR 4.125, or an appendix name (≤ 120 chars). Missing from BOTH dates → 404.'
           schema: { type: string, minLength: 1, maxLength: 120 }
+  /api/v1/vibe/combine:
+    # source: src/titan/http-server.ts#dispatch (router), handleVibeCombine
+    get:
+      summary: Combined disability rating calculation (38 C.F.R. § 4.25 VA Math)
+      responses:
+        '200':
+          description: 'Calculated combined rating, raw disability percentage, and Table I steps.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VibeCombineResponse' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+      parameters:
+        - name: ratings
+          in: query
+          required: true
+          description: 'Comma-separated disability percentage ratings (each 0 to 100).'
+          schema: { type: string }
+    head:
+      summary: Headers-only combined rating probe
+      responses:
+        '200':
+          description: 'Status and headers as GET, empty body.'
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '414': { $ref: '#/components/responses/UriTooLong' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+      parameters:
+        - name: ratings
+          in: query
+          required: true
+          description: 'Comma-separated disability percentage ratings (each 0 to 100).'
+          schema: { type: string }
 components:
   responses:
     BadRequest:
@@ -779,6 +852,10 @@ components:
           type: array
           items: { type: string }
           description: "The query's content terms NO returned hit answered. This describes the RESULTS, never what Title 38 covers: a term can be unmatched because the governing provision is outside the returned window, because it uses other words, or because the corpus does not discuss it."
+        semanticMatches:
+          type: array
+          description: 'Clinical semantic mapping matches triggered when semantic expansion is enabled.'
+          items: { $ref: '#/components/schemas/SemanticMatch' }
       additionalProperties: false
     SearchHit:
       type: object
@@ -1003,4 +1080,58 @@ components:
         notice:
           type: string
           description: 'The limit on what the two dates MEAN, stated on the surface that shows the comparison: eCFR serves the revision in force on the requested date and does not report which issue date that is, so the dates are selectors and not a stamp of the revision served.'
+      additionalProperties: false
+    SemanticMatch:
+      type: object
+      required: [canonicalName, diagnosticCode, citation]
+      properties:
+        canonicalName:
+          type: string
+          description: Canonical diagnostic condition name.
+        diagnosticCode:
+          type: string
+          description: Diagnostic code in Title 38.
+        citation:
+          type: string
+          description: Section citation in Title 38 (e.g. 4.87).
+      additionalProperties: false
+    VibeCombineResponse:
+      type: object
+      required: [inputRatings, sortedRatings, rawDisabilityPercent, combinedRating, steps]
+      properties:
+        inputRatings:
+          type: array
+          items: { type: number }
+          description: Original unsorted list of disability percentages.
+        sortedRatings:
+          type: array
+          items: { type: number }
+          description: Disability ratings sorted in descending order.
+        rawDisabilityPercent:
+          type: number
+          description: Calculated raw combined disability percentage before § 4.25 degree rounding.
+        combinedRating:
+          type: integer
+          description: Final combined disability rating rounded to nearest 10 degrees per § 4.25.
+        steps:
+          type: array
+          items: { $ref: '#/components/schemas/VibeCombineStep' }
+          description: Step-by-step audit trail of each combination stage using Table I.
+      additionalProperties: false
+    VibeCombineStep:
+      type: object
+      required: [rating, efficiencyBeforePercent, pointsAppliedPercent, efficiencyAfterPercent]
+      properties:
+        rating:
+          type: number
+          description: Disability rating applied in this step.
+        efficiencyBeforePercent:
+          type: number
+          description: Remaining whole-person efficiency before applying this rating.
+        pointsAppliedPercent:
+          type: number
+          description: Efficiency points deducted by this rating.
+        efficiencyAfterPercent:
+          type: number
+          description: Remaining efficiency after intermediate whole-number combination per Table I.
       additionalProperties: false

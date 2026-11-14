@@ -268,6 +268,7 @@ const KNOWN_PATHS = [
   '/',
   '/ui.js',
   '/ui.css',
+  '/playground',
   '/openapi.yaml',
   '/health',
   '/metrics',
@@ -277,6 +278,7 @@ const KNOWN_PATHS = [
   '/api/v1/browse',
   '/api/v1/diff',
   '/api/v1/redline',
+  '/api/v1/vibe/combine',
 ] as const;
 
 interface OperationEntry {
@@ -404,6 +406,7 @@ const CONDITIONAL_FIELDS: Readonly<Record<string, readonly string[]>> = {
   // (added/removed) — the same "absent when not applicable" shape as Health's
   // disk fields and browse's `available`.
   RedlineResult: ['fromText', 'toText'],
+  SearchResponse: ['semanticMatches'],
 };
 
 describe('OpenAPI spec well-formedness (docs/openapi.yaml)', () => {
@@ -586,6 +589,8 @@ const ROUTE_PROBES: Readonly<
     requestPath: '/api/v1/redline',
     query: 'from=2026-01-01&to=2026-06-01&citation=4.125',
   },
+  '/playground': { requestPath: '/playground' },
+  '/api/v1/vibe/combine': { requestPath: '/api/v1/vibe/combine', query: 'ratings=50,30' },
 };
 
 /**

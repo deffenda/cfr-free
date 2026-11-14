@@ -651,6 +651,12 @@ const ROUTE_INDEX: JsonBody = {
       summary: 'Line-level redline of one provision.',
       required: ['from', 'to', 'citation'],
     },
+    {
+      method: 'GET',
+      path: '/api/v1/vibe/combine',
+      summary: 'Combined disability rating evaluation (38 C.F.R. § 4.25 VA Math).',
+      required: ['ratings'],
+    },
     { method: 'GET', path: '/health', summary: 'Freshness and status.', required: [] },
     { method: 'GET', path: '/metrics', summary: 'Prometheus exposition text.', required: [] },
   ],
