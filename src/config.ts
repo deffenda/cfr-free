@@ -22,6 +22,11 @@ export interface AppConfig {
   readonly host: string;
   /** Bind port for the HTTP API. */
   readonly port: number;
+  /**
+   * Extra host names a loopback bind answers to, for a reverse proxy on this
+   * machine that forwards the public `Host` (lower-case, no port).
+   */
+  readonly allowedHosts: readonly string[];
   /** Explicit opt-in required for non-loopback binds. */
   readonly allowRemote: boolean;
   /** Log verbosity (stderr only). */
@@ -29,6 +34,12 @@ export interface AppConfig {
 }
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost', '[::1]']);
+
+/** Whether a bind address is loopback: reachable only from this machine. */
+export function isLoopbackHost(host: string): boolean {
+  return LOOPBACK_HOSTS.has(host);
+}
+
 const DEFAULT_MAX_AGE_DAYS = 7;
 const DEFAULT_PORT = 8787;
 
@@ -50,6 +61,13 @@ const envSchema = z.object({
     .regex(/^\d{2,5}$/)
     .optional(),
   CFR_ALLOW_REMOTE: z.enum(['0', '1']).optional(),
+  CFR_ALLOWED_HOSTS: z
+    .string()
+    .max(500)
+    .refine((value) => value.split(',').every((name) => /^[A-Za-z0-9.-]+$/.test(name)), {
+      message: 'must be comma-separated host names',
+    })
+    .optional(),
   CFR_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).optional(),
 });
 
@@ -105,6 +123,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     refreshHours: parseBoundedInt(e.CFR_REFRESH_HOURS, 0, 0, 168, 'CFR_REFRESH_HOURS'),
     host,
     port: parseBoundedInt(e.CFR_PORT, DEFAULT_PORT, 1, 65_535, 'CFR_PORT'),
+    allowedHosts: (e.CFR_ALLOWED_HOSTS ?? '')
+      .split(',')
+      .filter((name) => name !== '')
+      .map((name) => name.toLowerCase()),
     allowRemote,
     logLevel: e.CFR_LOG_LEVEL ?? 'info',
   };

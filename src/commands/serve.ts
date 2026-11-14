@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { AppConfig } from '../config.js';
+import { isLoopbackHost, type AppConfig } from '../config.js';
 import type { Logger } from '../logger.js';
 import { CommandError, EXIT } from '../exit-codes.js';
 import { CFRService } from '../core/service.js';
@@ -81,6 +81,12 @@ export async function runServeCommand(
       // loopback, while local tooling must never throttle itself.
       ...(config.allowRemote ? { rateLimit: { capacity: 60, refillPerSec: 10 } } : {}),
       disk: () => diskSnapshot,
+      // A loopback bind is only as private as the browsers on this machine:
+      // any web page can aim a name it controls at 127.0.0.1. Insist on a
+      // loopback Host and refuse cross-site requests (see HttpServerOptions).
+      ...(isLoopbackHost(config.host)
+        ? { localOnly: true, allowedHosts: config.allowedHosts }
+        : {}),
     });
 
     await new Promise<void>((resolve, reject) => {
