@@ -1,4 +1,6 @@
-import { existsSync, lstatSync, statSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, linkSync, lstatSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import type { AppConfig } from '../config.js';
 import { CommandError, EXIT } from '../exit-codes.js';
 import type { Logger } from '../logger.js';
@@ -54,7 +56,7 @@ function toJsonlLine(row: SectionRow): string {
 function writeJsonl(store: Store, target: string): number {
   const rows = store.allSections();
   const chunks: string[] = rows.map(toJsonlLine);
-  writeFileSync(target, chunks.join(''), { encoding: 'utf8', flag: 'wx' });
+  writeExclusive(target, chunks.join(''));
   return rows.length;
 }
 
@@ -78,8 +80,56 @@ function writeMarkdown(store: Store, target: string): number {
     const body = row.text.endsWith('\n') ? row.text : `${row.text}\n`;
     chunks.push(`\n## ${row.citation} — ${row.heading}\n${body}\n---\n`);
   }
-  writeFileSync(target, chunks.join(''), { encoding: 'utf8', flag: 'wx' });
+  writeExclusive(target, chunks.join(''));
   return rows.length;
+}
+
+/**
+ * Snapshot the index to `target` without ever following or replacing
+ * whatever is at that path. SQLite's `VACUUM INTO` opens its output by name,
+ * so a symlink planted after the existence check would be written through.
+ * Write a private temporary file beside the target instead, then `link` it
+ * into place: `link` fails with EEXIST on any existing path, a symlink
+ * included, at the moment of linking.
+ */
+function snapshotExclusive(store: Store, target: string): void {
+  const temporary = path.join(
+    path.dirname(target),
+    `.${path.basename(target)}.${randomBytes(6).toString('hex')}.tmp`,
+  );
+  try {
+    store.backupTo(temporary);
+    try {
+      linkSync(temporary, target);
+    } catch (error) {
+      throw refusedIfExists(error, target);
+    }
+  } finally {
+    try {
+      unlinkSync(temporary);
+    } catch {
+      // never created, or already gone
+    }
+  }
+}
+
+function writeExclusive(target: string, text: string): void {
+  try {
+    writeFileSync(target, text, { encoding: 'utf8', flag: 'wx' });
+  } catch (error) {
+    throw refusedIfExists(error, target);
+  }
+}
+
+/** An EEXIST from an exclusive create is the refusal contract, not a crash. */
+function refusedIfExists(error: unknown, target: string): unknown {
+  if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+    return new CommandError(
+      `refusing to overwrite existing file: ${target} — remove it first`,
+      EXIT.REFUSED,
+    );
+  }
+  return error;
 }
 
 /** Whether anything, a dangling symlink included, is at `target`. */
@@ -119,8 +169,9 @@ export function runExportCommand(
   }
   // `lstat`, not `existsSync`: a dangling symlink "does not exist" to
   // `existsSync`, and the write that follows would create the file it points
-  // at, wherever that is. The writers below also open with `wx`, which
-  // refuses an existing path (symlink included) at the moment of writing.
+  // at, wherever that is. The writers below create exclusively (`wx`, or
+  // `link` for the snapshot), which refuses an existing path (symlink
+  // included) at the moment of writing.
   if (pathExists(target)) {
     throw new CommandError(
       `refusing to overwrite existing file: ${target} — remove it first`,
@@ -134,7 +185,7 @@ export function runExportCommand(
   let provisions: number;
   try {
     if (format === undefined) {
-      store.backupTo(target);
+      snapshotExclusive(store, target);
       provisions = store.countSections();
     } else if (format === 'jsonl') {
       provisions = writeJsonl(store, target);

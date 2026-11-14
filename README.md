@@ -449,17 +449,17 @@ default like the rest of the surface.
 All configuration is environment variables (flags are deliberately avoided so
 MCP client configs stay uniform):
 
-| Variable            | Default                    | Meaning                                                    |
-| ------------------- | -------------------------- | ---------------------------------------------------------- |
-| `CFR_INDEX_PATH`    | `~/.cfr-free/index.sqlite` | SQLite index location                                      |
-| `CFR_MAX_AGE_DAYS`  | `7`                        | Index older than this is reported stale                    |
-| `CFR_AUTO_SYNC`     | `1`                        | Sync at startup when index empty/stale                     |
-| `CFR_REFRESH_HOURS` | `0`                        | Hours between background refreshes while serving (0 = off) |
-| `CFR_HOST`          | `127.0.0.1`                | HTTP bind address                                          |
-| `CFR_PORT`          | `8787`                     | HTTP bind port                                             |
-| `CFR_ALLOW_REMOTE`  | unset                      | Set `1` to permit non-loopback binds                       |
-| `CFR_ALLOWED_HOSTS` | unset                      | Host names a loopback bind also answers to (a local proxy) |
-| `CFR_LOG_LEVEL`     | `info`                     | `debug` \| `info` \| `warn` \| `error`                     |
+| Variable            | Default                    | Meaning                                                                                           |
+| ------------------- | -------------------------- | ------------------------------------------------------------------------------------------------- |
+| `CFR_INDEX_PATH`    | `~/.cfr-free/index.sqlite` | SQLite index location                                                                             |
+| `CFR_MAX_AGE_DAYS`  | `7`                        | Index older than this is reported stale                                                           |
+| `CFR_AUTO_SYNC`     | `1`                        | Sync at startup when index empty/stale                                                            |
+| `CFR_REFRESH_HOURS` | `0`                        | Hours between background refreshes while serving (0 = off)                                        |
+| `CFR_HOST`          | `127.0.0.1`                | HTTP bind address                                                                                 |
+| `CFR_PORT`          | `8787`                     | HTTP bind port                                                                                    |
+| `CFR_ALLOW_REMOTE`  | unset                      | Set `1` to permit non-loopback binds                                                              |
+| `CFR_ALLOWED_HOSTS` | unset                      | Host names the server answers to besides loopback (a proxy); setting it also guards a remote bind |
+| `CFR_LOG_LEVEL`     | `info`                     | `debug` \| `info` \| `warn` \| `error`                                                            |
 
 Logs are structured JSON lines on **stderr** only — stdout is reserved for
 MCP's JSON-RPC protocol.
