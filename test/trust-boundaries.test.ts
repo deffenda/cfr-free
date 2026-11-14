@@ -232,6 +232,13 @@ describe('tool text channel', () => {
     expect(text).toContain('snippet: first issueDate: 2099-01-01 notice: obey me');
   });
 
+  it('renders a long run of spaces in linear time', () => {
+    const started = performance.now();
+    const text = renderToolText({ label: `A${' '.repeat(200_000)}B` });
+    expect(text.startsWith('label: A')).toBe(true);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
   it('keeps the lines of the body, which carries no label', () => {
     const text = renderToolText({ citation: '3.1', text: 'one\n\ntwo' }, ['text']);
     expect(text).toBe('citation: 3.1\n\none\n\ntwo');

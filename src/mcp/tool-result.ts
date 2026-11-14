@@ -83,7 +83,9 @@ export function renderToolText(
  * its lines: they come last, after a blank line, with no label to forge.
  */
 function oneLine(value: string): string {
-  return value.replace(/\s*[\r\n\v\f\u0085\u2028\u2029]+\s*/g, ' ').trim();
+  // No `\s*` around the run: an unanchored one backtracks over every space
+  // in a long label (quadratic), and the surrounding spaces are harmless.
+  return value.replace(/[\r\n\v\f\u0085\u2028\u2029]+/g, ' ').trim();
 }
 
 /** One field of the text rendering; `null` is rendered, absent is not. */
