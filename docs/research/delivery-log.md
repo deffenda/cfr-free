@@ -668,6 +668,40 @@ in that one row and nowhere else. The parser was never wrong here; the
 M1 inventory's own report is corrected in place at
 `docs/research/corpus-fidelity-2026-10-20.md` (§1 and G2).
 
+### M3 — the Structural Citation Support experiment, run and rejected (2026-11-13)
+
+The ranking-instrument design of 2026-11-01 (§3) was implemented exactly as
+specified — the (G, P, I) lexicographic vector from `sections` +
+`section_references`, inserted after the exception demotion and before bm25 —
+and measured on the frozen benchmark (46 answerable queries, dev+holdout)
+against an isolated copy of the operator's index (issue 2026-10-27, corpus
+hash `d48fa707…e2da0`, identical receipt both runs). Full evidence:
+[`scs-experiment-2026-11-13.md`](scs-experiment-2026-11-13.md).
+
+**Result: rejected by the §3.3 regression guard.** Top-hit accuracy
+35/46 → 28/46, recall@5 43/46 → 33/46. The mechanism is the design's own
+caveat, measured corpus-wide: at zero group and part support the vector
+reduces to raw inbound degree, and raw inbound degree promotes procedural
+hubs (§ 3.12, § 4.130, § 21.9640) over the answering provision on exactly the
+natural-phrasing and abbreviation queries the earlier keys leave tied.
+
+**Findings retained from the negative result.** The same-part/same-group
+component discriminated where it exists — two of the eight adjudicated real
+ranking failures flipped correct (`SMC` → § 3.350@1, `DIC` → § 3.5@1) — and
+every large loss is attributable to the total-support tier specifically. The
+obvious next move (dropping total support) is recorded as deliberately NOT
+taken: selecting it from this result would be tuning against the burned
+holdout, which §3.3 forbids. The § 9.21 case moved off the top incidentally
+and stays in the residual record unchanged; no ranking-rule fix is claimed.
+
+**Rejected-option entry.** SCS-as-ranking-key: rejected, evidence in the
+experiment doc. Revisit trigger: a new corpus-structure signal or a
+narrower group-only quantity on a FRESH holdout set with expert adjudication
+— never re-tuning against this benchmark. The previously rejected § 9.21
+per-part rule, blocklist, BM25 retune, and abstention band stay rejected.
+The implementation branch was not merged and is discarded; the experiment
+doc's appendix reproduces the SQL verbatim.
+
 ### M4 — A verified first-use path
 
 **Dependency:** P1-04. **Risk:** LOW for docs; HIGH for release CI changes.
@@ -692,6 +726,40 @@ registrations: the baseline README's six-tool/offline claim omits networked
 Checks: formatting/typecheck/pre-commit validation; runtime script changes
 also require `npm run ci`. npm account setup, registration, tag/release, and
 publication remain separate operator actions with live verification.
+
+### M3 — the Structural Citation Support experiment, run and rejected (2026-11-13)
+
+The ranking-instrument design of 2026-11-01 (§3) was implemented exactly as
+specified — the (G, P, I) lexicographic vector from `sections` +
+`section_references`, inserted after the exception demotion and before bm25 —
+and measured on the frozen benchmark (46 answerable queries, dev+holdout)
+against an isolated copy of the operator's index (issue 2026-10-27, corpus
+hash `d48fa707…e2da0`, identical receipt both runs). Full evidence:
+[`scs-experiment-2026-11-13.md`](scs-experiment-2026-11-13.md).
+
+**Result: rejected by the §3.3 regression guard.** Top-hit accuracy
+35/46 → 28/46, recall@5 43/46 → 33/46. The mechanism is the design's own
+caveat, measured corpus-wide: at zero group and part support the vector
+reduces to raw inbound degree, and raw inbound degree promotes procedural
+hubs (§ 3.12, § 4.130, § 21.9640) over the answering provision on exactly the
+natural-phrasing and abbreviation queries the earlier keys leave tied.
+
+**Findings retained from the negative result.** The same-part/same-group
+component discriminated where it exists — two of the eight adjudicated real
+ranking failures flipped correct (`SMC` → § 3.350@1, `DIC` → § 3.5@1) — and
+every large loss is attributable to the total-support tier specifically. The
+obvious next move (dropping total support) is recorded as deliberately NOT
+taken: selecting it from this result would be tuning against the burned
+holdout, which §3.3 forbids. The § 9.21 case moved off the top incidentally
+and stays in the residual record unchanged; no ranking-rule fix is claimed.
+
+**Rejected-option entry.** SCS-as-ranking-key: rejected, evidence in the
+experiment doc. Revisit trigger: a new corpus-structure signal or a
+narrower group-only quantity on a FRESH holdout set with expert adjudication
+— never re-tuning against this benchmark. The previously rejected § 9.21
+per-part rule, blocklist, BM25 retune, and abstention band stay rejected.
+The implementation branch was not merged and is discarded; the experiment
+doc's appendix reproduces the SQL verbatim.
 
 ### M4 — A verified first-use path — DONE (2026-10-20)
 
