@@ -106,10 +106,17 @@ export const CLINICAL_SEMANTIC_MAP: readonly SemanticMapping[] = [
   },
   {
     canonicalName: 'Gastroesophageal Reflux Disease (GERD)',
+    diagnosticCode: '7206',
+    citation: '4.114',
+    statutoryKeywords: ['gastroesophageal', 'reflux', 'esophagus', 'heartburn', '7206'],
+    triggers: ['gerd', 'acid reflux', 'reflux', 'heartburn', 'esophagitis'],
+  },
+  {
+    canonicalName: 'Hernia, Hiatal',
     diagnosticCode: '7346',
     citation: '4.114',
-    statutoryKeywords: ['hernia', 'hiatal', 'esophagus', 'reflux', 'heartburn', '7346'],
-    triggers: ['gerd', 'acid reflux', 'reflux', 'heartburn', 'hiatal hernia', 'esophagitis'],
+    statutoryKeywords: ['hernia', 'hiatal', 'paraesophageal', '7346'],
+    triggers: ['hiatal hernia', 'paraesophageal hernia'],
   },
   {
     canonicalName: 'Flatfoot (Pes Planus)',
@@ -179,7 +186,10 @@ export interface SemanticExpansionResult {
 }
 
 /** Expand a user's natural language query with clinical/statutory Title 38 terms. */
-export function expandSemanticQuery(rawQuery: string): SemanticExpansionResult {
+export function expandSemanticQuery(
+  rawQuery: string,
+  maxQueryLength = 200,
+): SemanticExpansionResult {
   const normalized = rawQuery.toLowerCase().trim();
   const matchedMappings: SemanticMapping[] = [];
   const addedTermsSet = new Set<string>();
@@ -214,14 +224,21 @@ export function expandSemanticQuery(rawQuery: string): SemanticExpansionResult {
     citation: m.citation,
   }));
 
-  // Build expanded query: keep user query as primary, add diagnostic codes and canonical names
+  // Build expanded query: keep user query as primary, append diagnostic codes and canonical names
+  // only if within maxQueryLength (200 characters max for searchInputSchema).
   const extraTokens: string[] = [];
   for (const m of matchedMappings) {
     if (!normalized.includes(m.diagnosticCode)) extraTokens.push(m.diagnosticCode);
     if (!normalized.includes(m.canonicalName.toLowerCase())) extraTokens.push(m.canonicalName);
   }
 
-  const expandedQuery = extraTokens.length > 0 ? `${rawQuery} ${extraTokens.join(' ')}` : rawQuery;
+  let expandedQuery = rawQuery;
+  for (const token of extraTokens) {
+    const candidate = `${expandedQuery} ${token}`;
+    if (candidate.length <= maxQueryLength) {
+      expandedQuery = candidate;
+    }
+  }
 
   return {
     originalQuery: rawQuery,

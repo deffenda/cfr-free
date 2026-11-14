@@ -55,31 +55,42 @@ export function calculateCombinedRating(ratings: readonly number[]): CombineResu
   // Sort descending
   const sorted = [...ratings].sort((a, b) => b - a);
 
-  let currentEfficiency = 1.0;
+  let currentDisability = 0;
+  let currentEfficiency = 100;
   const steps: CombineStep[] = [];
 
-  for (const rating of sorted) {
-    const effBefore = currentEfficiency * 100;
-    const applied = (rating / 100) * currentEfficiency;
-    currentEfficiency -= applied;
-    const effAfter = currentEfficiency * 100;
-
-    steps.push({
-      rating,
-      efficiencyBeforePercent: Math.round(effBefore * 10) / 10,
-      pointsAppliedPercent: Math.round(applied * 1000) / 10,
-      efficiencyAfterPercent: Math.round(effAfter * 10) / 10,
-    });
+  for (let i = 0; i < sorted.length; i += 1) {
+    const rating = sorted[i] as number;
+    if (i === 0) {
+      currentDisability = rating;
+      currentEfficiency = 100 - rating;
+      steps.push({
+        rating,
+        efficiencyBeforePercent: 100,
+        pointsAppliedPercent: rating,
+        efficiencyAfterPercent: currentEfficiency,
+      });
+    } else {
+      const effBefore = currentEfficiency;
+      const applied = (rating * effBefore) / 100;
+      // 38 C.F.R. § 4.25(a): Take intermediate combined value from Table I (whole number rounding)
+      currentDisability = Math.round(currentDisability + applied);
+      currentEfficiency = 100 - currentDisability;
+      steps.push({
+        rating,
+        efficiencyBeforePercent: effBefore,
+        pointsAppliedPercent: Math.round(applied * 10) / 10,
+        efficiencyAfterPercent: currentEfficiency,
+      });
+    }
   }
 
-  const rawDisability = (1.0 - currentEfficiency) * 100;
-  const roundedDisability = Math.round(rawDisability * 10) / 10;
-  const combined = roundVaRating(roundedDisability);
+  const combined = roundVaRating(currentDisability);
 
   return {
     inputRatings: [...ratings],
     sortedRatings: sorted,
-    rawDisabilityPercent: roundedDisability,
+    rawDisabilityPercent: currentDisability,
     combinedRating: combined,
     steps,
   };

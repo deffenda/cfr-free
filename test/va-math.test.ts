@@ -40,6 +40,14 @@ describe('va-math: 38 C.F.R. § 4.25 combined ratings', () => {
     expect(res.combinedRating).toBe(70);
   });
 
+  it('preserves whole-number Table I values between ratings (40 + 40 + 30 = 80%)', () => {
+    const res = calculateCombinedRating([40, 40, 30]);
+    expect(res.sortedRatings).toEqual([40, 40, 30]);
+    // 40 combined with 40 is 64; 64 combined with 30 is 75 (Table I rounding); 75 rounds to 80%
+    expect(res.rawDisabilityPercent).toBe(75);
+    expect(res.combinedRating).toBe(80);
+  });
+
   it('calculates 70% + 20% = 80%', () => {
     const res = calculateCombinedRating([70, 20]);
     expect(res.rawDisabilityPercent).toBe(76);

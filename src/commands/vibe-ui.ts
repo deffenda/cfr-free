@@ -242,18 +242,18 @@ export function CitationBadge({ citation, sourceUrl, issueDate }: CitationBadgeP
 export function CombinedRatingsEvaluator() {
   const [ratings, setRatings] = useState<number[]>([50, 30, 10]);
 
-  // § 4.25 Combined ratings formula (VA Math)
+  // § 4.25 Combined ratings formula (Table I intermediate whole-number rounding)
   const calculateCombined = (arr: number[]) => {
+    if (arr.length === 0) return { raw: '0', final: 0 };
     const sorted = [...arr].sort((a, b) => b - a);
-    let efficiency = 1.0;
-    for (const r of sorted) {
-      efficiency -= (r / 100) * efficiency;
+    let combined = sorted[0]!;
+    for (let i = 1; i < sorted.length; i++) {
+      const effBefore = 100 - combined;
+      combined = Math.round(combined + (sorted[i]! * effBefore) / 100);
     }
-    const raw = (1.0 - efficiency) * 100;
-    const rounded = Math.round(raw);
-    const remainder = rounded % 10;
-    const final = remainder >= 5 ? Math.ceil(rounded / 10) * 10 : Math.floor(rounded / 10) * 10;
-    return { raw: raw.toFixed(1), final: Math.min(100, final) };
+    const remainder = combined % 10;
+    const final = remainder >= 5 ? Math.ceil(combined / 10) * 10 : Math.floor(combined / 10) * 10;
+    return { raw: combined.toString(), final: Math.min(100, final) };
   };
 
   const combined = calculateCombined(ratings);

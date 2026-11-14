@@ -27,6 +27,26 @@ describe('semantic-expansion: clinical complaint to statutory terms', () => {
     expect(codes).toContain('5237');
   });
 
+  it('maps "gerd" to DC 7206 and separates hiatal hernia as DC 7346', () => {
+    const gerdRes = expandSemanticQuery('veteran diagnosed with gerd and acid reflux');
+    expect(gerdRes.matches).toHaveLength(1);
+    expect(gerdRes.matches[0]?.diagnosticCode).toBe('7206');
+    expect(gerdRes.matches[0]?.canonicalName).toContain('GERD');
+
+    const herniaRes = expandSemanticQuery('veteran has hiatal hernia');
+    expect(herniaRes.matches).toHaveLength(1);
+    expect(herniaRes.matches[0]?.diagnosticCode).toBe('7346');
+    expect(herniaRes.matches[0]?.canonicalName).toContain('Hernia, Hiatal');
+  });
+
+  it('keeps expanded query within maxQueryLength budget (200 characters)', () => {
+    const base = 'ringing in ears ' + 'x'.repeat(180); // 196 chars
+    expect(base.length).toBe(196);
+    const res = expandSemanticQuery(base, 200);
+    expect(res.matches).toHaveLength(1);
+    expect(res.expandedQuery.length).toBeLessThanOrEqual(200);
+  });
+
   it('returns original query untouched when no clinical triggers match', () => {
     const res = expandSemanticQuery('contractual obligation notice');
     expect(res.matches).toEqual([]);
