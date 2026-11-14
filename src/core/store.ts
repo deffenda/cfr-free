@@ -18,10 +18,10 @@ import { extractReferences } from './references.js';
 import type { SectionKind, RawSection } from './xml.js';
 
 /**
- * SQLite index of Title 38: one row per section/appendix, plus an FTS5
- * external-content index kept consistent by triggers. All writes happen in a
- * single transaction so concurrent readers (WAL) never observe a partial
- * index.
+ * SQLite index of the eCFR corpus: one row per section/appendix per title,
+ * plus an FTS5 external-content index kept consistent by triggers. All
+ * writes happen in a single transaction so concurrent readers (WAL) never
+ * observe a partial index.
  */
 
 type Statement = ReturnType<DatabaseSync['prepare']>;
@@ -31,7 +31,16 @@ export class StoreError extends Error {
   override readonly name = 'StoreError';
 }
 
+/**
+ * The title every read path scopes to when the caller names none, and the
+ * default a write stamps when a section omits its title. Title 38 (Veterans
+ * Benefits) is the product's mission surface; every other title is opt-in
+ * per query (multi-title design, 2026-11-13).
+ */
+export const DEFAULT_TITLE = 38;
+
 export interface SectionRow {
+  readonly title: number;
   readonly citation: string;
   readonly kind: SectionKind;
   readonly heading: string;
@@ -86,54 +95,14 @@ export interface SearchOutcome {
   readonly matchMode: MatchMode;
 }
 
-const SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS meta (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-) WITHOUT ROWID;
-
-CREATE TABLE IF NOT EXISTS sections (
-  id INTEGER PRIMARY KEY,
-  citation TEXT NOT NULL UNIQUE,
-  kind TEXT NOT NULL CHECK (kind IN ('section', 'appendix')),
-  heading TEXT NOT NULL,
-  chapter TEXT,
-  subchapter TEXT,
-  part TEXT,
-  subpart TEXT,
-  subject_group TEXT,
-  path TEXT NOT NULL,
-  text TEXT NOT NULL,
-  markdown TEXT NOT NULL,
-  issue_date TEXT NOT NULL
-);
-
--- Reverse cross-reference edges ("what cites X"), the materialized
--- counterpart of the forward "references" list a section read computes on
--- the fly. Populated inside the rebuild transaction from the same
--- extractReferences() pass the service uses, so both directions always
--- describe the same corpus. citing_id cascades with its section row;
--- cited_citation stores the lowercase form extractReferences() emits,
--- matching the (lowercase) section citations the corpus actually uses.
-CREATE TABLE IF NOT EXISTS section_references (
-  citing_id INTEGER NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
-  cited_citation TEXT NOT NULL,
-  PRIMARY KEY (citing_id, cited_citation)
-) WITHOUT ROWID;
-
-CREATE INDEX IF NOT EXISTS section_references_cited ON section_references(cited_citation);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS sections_fts USING fts5(
-  citation, heading, text,
-  content = 'sections',
-  content_rowid = 'id',
-  tokenize = 'porter unicode61'
-);
-
--- FTS external-content triggers: keep the index consistent with the
--- 'sections' table on every write path. All three must be updated together
--- if columns ever change (single schema, no migrations: index is rebuilt
--- wholesale by sync).
+/**
+ * FTS external-content triggers: keep the index consistent with the
+ * 'sections' table on every write path. All three must be updated together
+ * if columns ever change (single schema, no migrations: index is rebuilt
+ * wholesale by sync). Shared with upgradeSchemaShape, which drops and
+ * recreates them when adopting a pre-v3 file.
+ */
+const FTS_TRIGGER_SQL = `
 CREATE TRIGGER IF NOT EXISTS sections_ai AFTER INSERT ON sections BEGIN
   INSERT INTO sections_fts(rowid, citation, heading, text)
   VALUES (new.id, new.citation, new.heading, new.text);
@@ -155,25 +124,81 @@ CREATE TRIGGER IF NOT EXISTS sections_au AFTER UPDATE ON sections BEGIN
 END;
 `;
 
+const SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS sections (
+  id INTEGER PRIMARY KEY,
+  title INTEGER NOT NULL DEFAULT 38,
+  citation TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('section', 'appendix')),
+  heading TEXT NOT NULL,
+  chapter TEXT,
+  subchapter TEXT,
+  part TEXT,
+  subpart TEXT,
+  subject_group TEXT,
+  path TEXT NOT NULL,
+  text TEXT NOT NULL,
+  markdown TEXT NOT NULL,
+  issue_date TEXT NOT NULL,
+  UNIQUE (title, citation)
+);
+
+-- Reverse cross-reference edges ("what cites X"), the materialized
+-- counterpart of the forward "references" list a section read computes on
+-- the fly. Populated inside the rebuild transaction from the same
+-- extractReferences() pass the service uses, so both directions always
+-- describe the same corpus. citing_id cascades with its section row;
+-- cited_citation stores the lowercase form extractReferences() emits,
+-- matching the (lowercase) section citations the corpus actually uses.
+-- citing_title is the citing row's title, denormalized so a citedBy lookup
+-- scopes to one authority without re-joining: a Title 32 section citing
+-- "§ 70.3" means Title 32's § 70.3 — edges never cross titles (multi-title
+-- design, 2026-11-13).
+CREATE TABLE IF NOT EXISTS section_references (
+  citing_id INTEGER NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
+  citing_title INTEGER NOT NULL DEFAULT 38,
+  cited_citation TEXT NOT NULL,
+  PRIMARY KEY (citing_id, cited_citation)
+) WITHOUT ROWID;
+
+CREATE INDEX IF NOT EXISTS section_references_cited ON section_references(cited_citation);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS sections_fts USING fts5(
+  citation, heading, text,
+  content = 'sections',
+  content_rowid = 'id',
+  tokenize = 'porter unicode61'
+);
+
+${FTS_TRIGGER_SQL}`;
+
 const INSERT_SECTION_SQL = `
 INSERT INTO sections (
-  citation, kind, heading, chapter, subchapter, part, subpart,
+  title, citation, kind, heading, chapter, subchapter, part, subpart,
   subject_group, path, text, markdown, issue_date
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-// citing_id comes from the section INSERT's lastInsertRowid; cited_citation
-// is one already-lowercased extractReferences() entry (deduped by the
-// PRIMARY KEY below, which also bounds self-citations to one row each).
+// citing_id comes from the section INSERT's lastInsertRowid; citing_title is
+// that row's title (edges are scoped to one authority); cited_citation is one
+// already-lowercased extractReferences() entry (deduped by the PRIMARY KEY
+// below, which also bounds self-citations to one row each).
 const INSERT_SECTION_REFERENCE_SQL = `
-INSERT INTO section_references (citing_id, cited_citation) VALUES (?, ?)`;
+INSERT INTO section_references (citing_id, citing_title, cited_citation) VALUES (?, ?, ?)`;
 
-// Reverse lookup: which sections cite `cited_citation`. Deterministic order
-// (citing citation, lexicographic) so wire consumers see a stable list.
+// Reverse lookup: which sections of `title` cite `cited_citation`. Scope is
+// the citing row's title — a Title 32 section's edge never answers a Title 38
+// citedBy. Deterministic order (citing citation, lexicographic) so wire
+// consumers see a stable list.
 const CITED_BY_SQL = `
 SELECT s.citation
 FROM section_references r
 JOIN sections s ON s.id = r.citing_id
-WHERE r.cited_citation = ?
+WHERE r.cited_citation = ? AND r.citing_title = ?
 ORDER BY s.citation`;
 
 // Full-corpus read for the export command: same row shape as getSection
@@ -193,9 +218,12 @@ const SNIPPET_HEADING = `snippet(sections_fts, 1, '', '', '…', 36)`;
 const SNIPPET_EXPR = `CASE WHEN ${SNIPPET_TEXT} = '' THEN ${SNIPPET_HEADING} ELSE ${SNIPPET_TEXT} END`;
 
 /** Current schema version, stored in `PRAGMA user_version`.
- *  v2: section_references reverse-reference edge table added. v1 files are
- *  not migrated in place — the version-mismatch path guides a rebuild. */
-export const SCHEMA_VERSION = 2;
+ *  v3: multi-title — sections.title with (title, citation) uniqueness and
+ *  section_references.citing_title edge scope. v2/v1 files are not migrated
+ *  in place: `title`'s DEFAULT 38 keeps pre-upgrade rows schema-valid, and
+ *  the version-mismatch path guides a wholesale rebuild (sync's single
+ *  transaction rolls a failed rebuild back to the intact pre-upgrade rows). */
+export const SCHEMA_VERSION = 3;
 
 /** How long a connection waits on a locked database before failing. */
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
@@ -206,10 +234,12 @@ export interface StoreOpenOptions {
   /**
    * Adopt an OLDER schema version (0 < version < SCHEMA_VERSION) instead of
    * failing. Only the sync path may set this: `syncIndex` immediately
-   * wholesale-rebuilds every row via replaceAllWithBaseline (which also
-   * populates the new section_references edge table), so adoption is never
-   * left holding stale-shaped data. Downgrade (version > SCHEMA_VERSION)
-   * always fails regardless of this flag.
+   * wholesale-rebuilds every row via replaceAllWithBaseline, so adoption is
+   * never left holding stale-shaped data (v2's added edge table and v3's
+   * title columns are both covered by the wholesale rebuild; the title
+   * columns' DEFAULT 38 keeps pre-upgrade rows valid even before it runs).
+   * Downgrade (version > SCHEMA_VERSION) always fails regardless of this
+   * flag.
    */
   readonly allowSchemaUpgrade?: boolean;
 }
@@ -309,7 +339,7 @@ const DIRECT_MATCH_SQL = `
 SELECT 1
 FROM sections_fts
 JOIN sections s ON s.id = sections_fts.rowid
-WHERE sections_fts MATCH ? AND s.citation = ? COLLATE NOCASE
+WHERE sections_fts MATCH ? AND s.citation = ? COLLATE NOCASE AND s.title = ?
 LIMIT 1`;
 
 /**
@@ -338,11 +368,80 @@ function ensureSchemaVersion(db: DatabaseSync, allowSchemaUpgrade: boolean): voi
     );
   }
   // Adopting version 0 (pre-versioning) or an older versioned file whose
-  // caller vouches for a full rebuild. Failure window: if that rebuild then
-  // fails, the file is marked SCHEMA_VERSION with pre-upgrade rows and an
-  // empty section_references table — reads stay servable (citedBy answers
-  // []) and the next successful sync completes the edge population.
+  // caller vouches for a full rebuild. v3 changes the shape of EXISTING
+  // tables (unlike v2, which only added one), so first bring the tables to
+  // the v3 shape: rows are preserved (title defaults to 38) and the rebuild
+  // itself runs in one transaction, so a failed rebuild rolls back to those
+  // intact pre-upgrade rows rather than a half-migrated store.
+  upgradeSchemaShape(db);
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+
+/**
+ * Bring a pre-v3 file's tables to the v3 shape, preserving rows.
+ *
+ * Runs only on the adoption path (see ensureSchemaVersion). `CREATE TABLE IF
+ * NOT EXISTS` cannot change an existing table's shape, and the old
+ * `UNIQUE(citation)` would wrongly reject a citation shared across titles
+ * even after a rebuild — so `sections` is rebuilt as a new table with rows
+ * copied (ids preserved, title stamped 38), while `section_references` only
+ * gains a defaulted column (its key is per citing row and stays correct).
+ * Dropping `sections` drops its FTS triggers with it; they are recreated
+ * here. Dropping and recreating the FTS5 external-content table's content
+ * table under the same name also breaks the virtual table's cached state on
+ * this connection (a later DML threw "database disk image is malformed" in
+ * reproduction), so the FTS index is rebuilt from the copied rows — one
+ * `rebuild` command, keyed by the preserved rowids.
+ */
+function upgradeSchemaShape(db: DatabaseSync): void {
+  const sectionColumns = new Set(
+    db
+      .prepare("SELECT name FROM pragma_table_info('sections')")
+      .all()
+      .map((row) => String((row as Record<string, unknown>)['name'])),
+  );
+  if (!sectionColumns.has('title')) {
+    db.exec(`
+      CREATE TABLE sections_v3 (
+        id INTEGER PRIMARY KEY,
+        title INTEGER NOT NULL DEFAULT 38,
+        citation TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('section', 'appendix')),
+        heading TEXT NOT NULL,
+        chapter TEXT,
+        subchapter TEXT,
+        part TEXT,
+        subpart TEXT,
+        subject_group TEXT,
+        path TEXT NOT NULL,
+        text TEXT NOT NULL,
+        markdown TEXT NOT NULL,
+        issue_date TEXT NOT NULL,
+        UNIQUE (title, citation)
+      );
+      INSERT INTO sections_v3 (
+        id, title, citation, kind, heading, chapter, subchapter, part, subpart,
+        subject_group, path, text, markdown, issue_date
+      )
+        SELECT id, 38, citation, kind, heading, chapter, subchapter, part,
+               subpart, subject_group, path, text, markdown, issue_date
+        FROM sections;
+      DROP TABLE sections;
+      ALTER TABLE sections_v3 RENAME TO sections;
+      INSERT INTO sections_fts(sections_fts) VALUES ('rebuild');
+      ${FTS_TRIGGER_SQL}
+    `);
+  }
+  const edgeColumns = new Set(
+    db
+      .prepare("SELECT name FROM pragma_table_info('section_references')")
+      .all()
+      .map((row) => String((row as Record<string, unknown>)['name'])),
+  );
+  if (!edgeColumns.has('citing_title')) {
+    // v2 file: SCHEMA_SQL's IF NOT EXISTS kept the table at its old shape.
+    db.exec('ALTER TABLE section_references ADD COLUMN citing_title INTEGER NOT NULL DEFAULT 38');
+  }
 }
 
 /**
@@ -397,6 +496,7 @@ function nullableString(value: unknown): string | null {
 
 function toSectionRow(row: Record<string, unknown>): SectionRow {
   return {
+    title: Number(row['title'] ?? DEFAULT_TITLE),
     citation: String(row['citation']),
     kind: row['kind'] === 'appendix' ? 'appendix' : 'section',
     heading: String(row['heading']),
@@ -603,7 +703,9 @@ export class Store {
       const insert = this.stmt(INSERT_SECTION_SQL);
       const insertReference = this.stmt(INSERT_SECTION_REFERENCE_SQL);
       for (const section of sections) {
+        const title = section.title ?? DEFAULT_TITLE;
         const { lastInsertRowid } = insert.run(
+          title,
           section.citation,
           section.kind,
           section.heading,
@@ -620,13 +722,20 @@ export class Store {
         // Reverse-reference edges, materialized in the SAME transaction as
         // the sections they describe (extractReferences is the exact pass
         // the service runs on read, so both directions stay consistent).
+        // citing_title stamps the edge with the citing row's authority.
         const citingId = Number(lastInsertRowid);
         for (const cited of extractReferences(section.text)) {
-          insertReference.run(citingId, cited);
+          insertReference.run(citingId, title, cited);
         }
       }
       const upsert = this.stmt(UPSERT_META_SQL);
       for (const [key, value] of Object.entries(meta)) upsert.run(key, value);
+      // Per-title issue dates alongside the legacy Title-38 `issue_date` key
+      // (meta keys `title.<N>.issue_date`); legacy readers keep working until
+      // the wire PR moves them onto the per-title keys.
+      for (const title of new Set(sections.map((section) => section.title ?? DEFAULT_TITLE))) {
+        upsert.run(`title.${title}.issue_date`, issueDate);
+      }
     });
     return result;
   }
@@ -681,33 +790,44 @@ export class Store {
     this.stmt(UPSERT_META_SQL).run(key, value);
   }
 
-  /** Look up one section/appendix by canonical citation. */
-  getSection(citation: string, kind: SectionKind): SectionRow | null {
+  /**
+   * Look up one section/appendix by canonical citation, scoped to one title
+   * (default {@link DEFAULT_TITLE}). The title scope keeps a citation that
+   * exists in several titles from silently resolving to the wrong authority.
+   */
+  getSection(
+    citation: string,
+    kind: SectionKind,
+    title: number = DEFAULT_TITLE,
+  ): SectionRow | null {
     const sql =
       kind === 'appendix'
-        ? 'SELECT * FROM sections WHERE kind = ? AND citation = ? COLLATE NOCASE'
-        : 'SELECT * FROM sections WHERE kind = ? AND citation = ?';
-    const row = this.stmt(sql).get(kind, citation) as Record<string, unknown> | undefined;
+        ? 'SELECT * FROM sections WHERE kind = ? AND citation = ? COLLATE NOCASE AND title = ?'
+        : 'SELECT * FROM sections WHERE kind = ? AND citation = ? AND title = ?';
+    const row = this.stmt(sql).get(kind, citation, title) as Record<string, unknown> | undefined;
     return row ? toSectionRow(row) : null;
   }
 
-  /** Whether any indexed row (section or appendix) carries this citation. */
-  hasSection(citation: string): boolean {
-    const row = this.stmt('SELECT 1 FROM sections WHERE citation = ? COLLATE NOCASE LIMIT 1').get(
-      citation,
-    );
+  /** Whether any indexed row (section or appendix) of `title` (default
+   * {@link DEFAULT_TITLE}) carries this citation. */
+  hasSection(citation: string, title: number = DEFAULT_TITLE): boolean {
+    const row = this.stmt(
+      'SELECT 1 FROM sections WHERE citation = ? COLLATE NOCASE AND title = ? LIMIT 1',
+    ).get(citation, title);
     return row !== undefined;
   }
 
   /**
-   * Citations of indexed sections whose text references `citation` — the
-   * reverse of the forward `references` list on a section read. Sorted
-   * lexicographically by citing citation (deterministic wire output); empty
-   * array when nothing cites it. `citation` is bound as a parameter and
-   * matched exactly against the lowercase form extractReferences emits.
+   * Citations of indexed sections of `title` (default {@link DEFAULT_TITLE})
+   * whose text references `citation` — the reverse of the forward
+   * `references` list on a section read. Sorted lexicographically by citing
+   * citation (deterministic wire output); empty array when nothing cites it.
+   * `citation` is bound as a parameter and matched exactly against the
+   * lowercase form extractReferences emits; the edge scope is the citing
+   * row's title, so a lookup never blends two authorities' edges.
    */
-  citedBy(citation: string): string[] {
-    const rows = this.stmt(CITED_BY_SQL).all(citation) as Record<string, unknown>[];
+  citedBy(citation: string, title: number = DEFAULT_TITLE): string[] {
+    const rows = this.stmt(CITED_BY_SQL).all(citation, title) as Record<string, unknown>[];
     return rows.map((row) => String(row['citation']));
   }
 
@@ -837,10 +957,15 @@ export class Store {
    * results?" has to ask about the OR tier, or the pin's `total` adjustment
    * counts a citation the results already contain.
    */
-  hasSearchMatch(mode: MatchMode, rawQuery: string, citation: string): boolean {
+  hasSearchMatch(
+    mode: MatchMode,
+    rawQuery: string,
+    citation: string,
+    title: number = DEFAULT_TITLE,
+  ): boolean {
     const ftsQuery = toFtsQuery(rawQuery, mode);
     if (ftsQuery === null) return false;
-    const row = this.stmt(DIRECT_MATCH_SQL).get(ftsQuery, citation);
+    const row = this.stmt(DIRECT_MATCH_SQL).get(ftsQuery, citation, title);
     return row !== undefined;
   }
 

@@ -190,15 +190,20 @@ Policies: HTTP timeout 15 s, max response 50 MB, `User-Agent: cfr-free/<version>
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE sections (
   id INTEGER PRIMARY KEY,
-  citation TEXT NOT NULL UNIQUE,     -- '4.125' | 'Appendix A to Part 4'
+  title INTEGER NOT NULL DEFAULT 38, -- the CFR title; 38 = Veterans Benefits
+  citation TEXT NOT NULL,            -- '4.125' | 'Appendix A to Part 4'
   kind TEXT NOT NULL CHECK (kind IN ('section','appendix')),
   heading TEXT NOT NULL,             -- 'Diagnosis of mental disorders.'
   chapter TEXT, subchapter TEXT, part TEXT, subpart TEXT, subject_group TEXT,
   path TEXT NOT NULL,                -- '/chapter:I/part:4/subpart:B/...'
   text TEXT NOT NULL,                -- plain text
   markdown TEXT NOT NULL,            -- rendered markdown
-  issue_date TEXT NOT NULL
+  issue_date TEXT NOT NULL,
+  UNIQUE (title, citation)           -- one row per provision per title
 );
+-- section_references (citing_id → cited_citation reverse edges) carries
+-- citing_title — the citing row's title — so a citedBy lookup is scoped to
+-- one authority and never blends two titles' edges.
 CREATE VIRTUAL TABLE sections_fts USING fts5(
   citation, heading, text, content='sections', content_rowid='id',
   tokenize='porter unicode61'
