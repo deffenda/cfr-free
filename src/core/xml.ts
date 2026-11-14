@@ -534,7 +534,7 @@ function extractSection(
     subjectGroup: stackField(stack, 'SUBJGRP'),
     path: stackPath(stack),
     text: rendered.text,
-    markdown: rendered.markdown,
+    markdown: rendered.markdown.replace(/!\[/g, '!\\['),
   };
 }
 

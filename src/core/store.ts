@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { hashContent } from './changes.js';
@@ -456,6 +456,27 @@ function refuseForeignDatabase(db: DatabaseSync): void {
   }
 }
 
+function ensureDirectoryPermissions(filePath: string): void {
+  if (filePath === ':memory:') return;
+  const directory = path.dirname(filePath);
+  if (directory.length === 0 || directory === '.') return;
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  try {
+    chmodSync(directory, 0o700);
+  } catch {
+    // ignore directory permission errors if non-owned or read-only
+  }
+}
+
+function enforceFilePermissions(filePath: string): void {
+  if (filePath === ':memory:' || !existsSync(filePath)) return;
+  try {
+    chmodSync(filePath, 0o600);
+  } catch {
+    // ignore file permission errors if filesystem does not support POSIX modes
+  }
+}
+
 export class Store {
   private readonly db: DatabaseSync;
   private readonly statements = new Map<string, Statement>();
@@ -472,12 +493,12 @@ export class Store {
    * @throws {StoreError} when the file fails its integrity check.
    */
   static open(filePath: string, options: StoreOpenOptions = {}): Store {
-    const directory = path.dirname(filePath);
-    if (directory.length > 0 && directory !== '.') mkdirSync(directory, { recursive: true });
+    ensureDirectoryPermissions(filePath);
 
     let db: DatabaseSync | undefined;
     try {
       db = new DatabaseSync(filePath);
+      enforceFilePermissions(filePath);
       // The file is an INPUT: `export` exists so an index can be handed to
       // someone else, and `CFR_INDEX_PATH` can name any file. Views and
       // triggers stored in a schema we did not write must not be allowed to

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -20,6 +20,10 @@ describe('Store', () => {
     try {
       expect(temp.store.path).toContain('index.sqlite');
       expect(temp.store.countSections()).toBe(FIXTURE_SECTIONS.length);
+      if (process.platform !== 'win32') {
+        expect(statSync(temp.dir).mode & 0o777).toBe(0o700);
+        expect(statSync(temp.store.path).mode & 0o777).toBe(0o600);
+      }
     } finally {
       temp.cleanup();
     }

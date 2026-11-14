@@ -27,11 +27,16 @@ describe('loopback server and the browser', () => {
     for (const cleanup of cleanups.splice(0)) await cleanup();
   });
 
-  async function start(localOnly: boolean, allowedHosts: string[] = []): Promise<number> {
+  async function start(
+    localOnly: boolean,
+    allowedHosts: string[] = [],
+    extraOpts: Record<string, unknown> = {},
+  ): Promise<number> {
     const temp = openTempStore();
     const server = createHttpServer(new CFRService(temp.store, 7), createTestLogger(), {
       localOnly,
       allowedHosts,
+      ...extraOpts,
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     cleanups.push(async () => {
@@ -124,6 +129,79 @@ describe('loopback server and the browser', () => {
   it('leaves a deliberately remote bind alone (its host names are unknowable)', async () => {
     const port = await start(false);
     expect((await request(port, { host: 'cfr.example.org' })).status).toBe(200);
+  });
+
+  it('refuses cross-site requests unconditionally, even on remote binds', async () => {
+    const port = await start(false);
+    const result = await request(
+      port,
+      { host: 'cfr.example.org', 'sec-fetch-site': 'cross-site' },
+      '/health',
+    );
+    expect(result.status).toBe(403);
+  });
+
+  it('resolves X-Forwarded-For only when the direct peer is a trusted proxy', async () => {
+    // 1. Direct connection from loopback without trustedProxies: XFF is ignored, 127.0.0.1 is throttled
+    const untrustedPort = await start(false, [], {
+      rateLimit: { capacity: 1, refillPerSec: 0.1 },
+      trustedProxies: [],
+    });
+    expect(
+      (
+        await request(
+          untrustedPort,
+          { host: 'localhost', 'x-forwarded-for': '203.0.113.1' },
+          '/health',
+        )
+      ).status,
+    ).toBe(200);
+    // Second request with different XFF still 429s because 127.0.0.1 was charged
+    expect(
+      (
+        await request(
+          untrustedPort,
+          { host: 'localhost', 'x-forwarded-for': '203.0.113.2' },
+          '/health',
+        )
+      ).status,
+    ).toBe(429);
+
+    // 2. Direct connection from loopback with 127.0.0.1 as a trusted proxy: client IP is resolved from XFF
+    const trustedPort = await start(false, [], {
+      rateLimit: { capacity: 1, refillPerSec: 0.1 },
+      trustedProxies: ['127.0.0.1'],
+    });
+    // First client IP allowed
+    expect(
+      (
+        await request(
+          trustedPort,
+          { host: 'localhost', 'x-forwarded-for': '203.0.113.1' },
+          '/health',
+        )
+      ).status,
+    ).toBe(200);
+    // Same client IP throttled
+    expect(
+      (
+        await request(
+          trustedPort,
+          { host: 'localhost', 'x-forwarded-for': '203.0.113.1' },
+          '/health',
+        )
+      ).status,
+    ).toBe(429);
+    // Distinct client IP allowed through trusted proxy
+    expect(
+      (
+        await request(
+          trustedPort,
+          { host: 'localhost', 'x-forwarded-for': '203.0.113.2' },
+          '/health',
+        )
+      ).status,
+    ).toBe(200);
   });
 
   it('sends the referrer policy on a 304 too', async () => {

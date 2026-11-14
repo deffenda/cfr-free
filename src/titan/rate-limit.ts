@@ -1,3 +1,5 @@
+import net from 'node:net';
+
 /**
  * Per-peer token bucket for the HTTP API when it is deliberately exposed
  * (`CFR_ALLOW_REMOTE=1`). The API ships unauthenticated by design; a coarse
@@ -30,6 +32,50 @@ interface Bucket {
   lastMs: number;
 }
 
+/** Expand an IPv6 address and extract its canonical /64 prefix (first 4 hextets). */
+function ipv6Subnet64(ip: string): string {
+  const parts = ip.split('::');
+  let left: string[];
+  let right: string[];
+  if (parts.length === 1) {
+    left = parts[0] ? parts[0].split(':') : [];
+    right = [];
+  } else if (parts.length === 2) {
+    left = parts[0] ? parts[0].split(':') : [];
+    right = parts[1] ? parts[1].split(':') : [];
+  } else {
+    return ip;
+  }
+  const missing = 8 - (left.length + right.length);
+  if (missing < 0) return ip;
+  const full = [...left, ...Array<string>(missing).fill('0'), ...right];
+  if (full.length !== 8) return ip;
+  const canonical = full.map((h) => {
+    const num = Number.parseInt(h || '0', 16);
+    return Number.isNaN(num) ? '0' : num.toString(16);
+  });
+  return `${canonical.slice(0, 4).join(':')}::/64`;
+}
+
+/**
+ * Normalize a peer identifier:
+ * - Unmaps IPv4-mapped IPv6 addresses (`::ffff:192.0.2.1` -> `192.0.2.1`).
+ * - Collapses IPv6 addresses to their `/64` subnet prefix so rotating interface
+ *   identifiers within the same network allocation share a single rate-limit bucket.
+ * - Leaves standard IPv4 and non-IP hostnames unchanged.
+ */
+export function normalizePeerAddress(address: string): string {
+  const trimmed = address.trim();
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith('::ffff:')) {
+    const v4Candidate = trimmed.slice(7);
+    if (net.isIPv4(v4Candidate)) return v4Candidate;
+  }
+  if (net.isIPv4(trimmed)) return trimmed;
+  if (!net.isIPv6(trimmed)) return trimmed;
+  return ipv6Subnet64(lower);
+}
+
 export class RateLimiter {
   private readonly capacity: number;
   private readonly refillPerSec: number;
@@ -55,13 +101,14 @@ export class RateLimiter {
    * documents a second, because a diff or a redline pulls two of them.
    */
   consume(peer: string, cost = 1): RateVerdict {
+    const normalized = normalizePeerAddress(peer);
     const nowMs = this.now();
-    const bucket = this.buckets.get(peer) ?? { tokens: this.capacity, lastMs: nowMs };
+    const bucket = this.buckets.get(normalized) ?? { tokens: this.capacity, lastMs: nowMs };
     // Refill proportionally to elapsed time, capped at capacity.
     const elapsedSec = Math.max(0, (nowMs - bucket.lastMs) / 1000);
     bucket.tokens = Math.min(this.capacity, bucket.tokens + elapsedSec * this.refillPerSec);
     bucket.lastMs = nowMs;
-    this.buckets.set(peer, bucket);
+    this.buckets.set(normalized, bucket);
     if (this.buckets.size > this.maxPeers) this.prune();
 
     const wanted = Math.max(1, cost);
@@ -96,18 +143,16 @@ export class RateLimiter {
    * Drop the least-recently-seen peers once the map exceeds `maxPeers` —
    * bounding memory against peer-address floods (IPv6 spaces are huge).
    *
-   * Known trade-offs, deliberate: a client rotating source addresses (a
-   * single IPv6 /64 is enough) mints fresh full-capacity buckets, and
-   * eviction drops a legitimate peer's accumulated spend — inherent to any
-   * per-address limiter and accepted over a global bucket (which one
-   * abusive peer could exhaust for everyone). Eviction sorts at most
-   * `maxPeers` entries and only runs when a *new* peer pushes the map over
-   * the cap; established peers never trigger it.
+   * To prevent an $O(N \log N)$ sort on every single request under an address
+   * flood, pruning evicts down to a batch threshold (up to 10% below maxPeers)
+   * while always respecting `maxPeers` as the upper bound.
    */
   prune(): void {
     if (this.buckets.size <= this.maxPeers) return;
+    const target = Math.max(1, Math.min(this.maxPeers, Math.floor(this.maxPeers * 0.9)));
     const entries = [...this.buckets.entries()].sort((a, b) => a[1].lastMs - b[1].lastMs);
-    for (const [key] of entries.slice(0, this.buckets.size - this.maxPeers)) {
+    const toRemove = this.buckets.size - target;
+    for (const [key] of entries.slice(0, toRemove)) {
       this.buckets.delete(key);
     }
   }
