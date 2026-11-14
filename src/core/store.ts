@@ -475,7 +475,7 @@ export class Store {
     const directory = path.dirname(filePath);
     if (directory.length > 0 && directory !== '.') mkdirSync(directory, { recursive: true });
 
-    let db: DatabaseSync;
+    let db: DatabaseSync | undefined;
     try {
       db = new DatabaseSync(filePath);
       // The file is an INPUT: `export` exists so an index can be handed to
@@ -499,7 +499,14 @@ export class Store {
       if (result !== 'ok') throw new StoreError(`integrity check failed: ${result || 'no result'}`);
       db.exec(SCHEMA_SQL);
       ensureSchemaVersion(db, options.allowSchemaUpgrade ?? false);
+      return new Store(db, filePath);
     } catch (error) {
+      // Do not hold the file (or its descriptor) open after a refusal.
+      try {
+        db?.close();
+      } catch {
+        // already closed, or never opened
+      }
       if (error instanceof StoreError) {
         throw new StoreError(`cannot open index at ${filePath}: ${error.message}`);
       }
@@ -507,7 +514,6 @@ export class Store {
         `cannot open index at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-    return new Store(db, filePath);
   }
 
   get path(): string {

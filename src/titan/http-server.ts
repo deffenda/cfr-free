@@ -786,7 +786,8 @@ export interface HttpServerOptions {
    *   answer), but a page could still spend the diff and redline routes'
    *   upstream fetches, so they are refused (403).
    *
-   * Unset for a deliberately remote bind: its hostnames are unknowable here.
+   * Unset for a remote bind whose host names the operator has not listed
+   * (`CFR_ALLOWED_HOSTS`): they are unknowable here.
    */
   readonly localOnly?: boolean;
   /**

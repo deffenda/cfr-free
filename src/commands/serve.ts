@@ -84,7 +84,9 @@ export async function runServeCommand(
       // A loopback bind is only as private as the browsers on this machine:
       // any web page can aim a name it controls at 127.0.0.1. Insist on a
       // loopback Host and refuse cross-site requests (see HttpServerOptions).
-      ...(isLoopbackHost(config.host)
+      // A remote bind (the container image) is guarded too once the operator
+      // has named its hosts in CFR_ALLOWED_HOSTS: then the names are known.
+      ...(isLoopbackHost(config.host) || config.allowedHosts.length > 0
         ? { localOnly: true, allowedHosts: config.allowedHosts }
         : {}),
     });

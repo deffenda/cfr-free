@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import type { AddressInfo } from 'node:net';
@@ -155,6 +155,21 @@ describe('export target', () => {
         );
       }
       expect(existsSync(outside)).toBe(false);
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it('leaves no temporary file behind, refused or not', () => {
+    const temp = openTempStore();
+    try {
+      const config = loadConfig({ CFR_INDEX_PATH: temp.indexPath });
+      const before = readdirSync(temp.dir).sort();
+      const target = path.join(temp.dir, 'snapshot.sqlite');
+      runExportCommand(config, target, createTestLogger());
+      expect(readdirSync(temp.dir).sort()).toEqual([...before, 'snapshot.sqlite'].sort());
+      expect(() => runExportCommand(config, target, createTestLogger())).toThrow(CommandError);
+      expect(readdirSync(temp.dir).sort()).toEqual([...before, 'snapshot.sqlite'].sort());
     } finally {
       temp.cleanup();
     }
