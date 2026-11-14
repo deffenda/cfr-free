@@ -224,8 +224,8 @@ export function expandSemanticQuery(
     citation: m.citation,
   }));
 
-  // Build expanded query: keep user query as primary, append diagnostic codes and canonical names
-  // only if within maxQueryLength (200 characters max for searchInputSchema).
+  // Prepend semantic terms so they are prioritized within the search term budget (MAX_TERMS = 12).
+  // If prefix + rawQuery exceeds maxQueryLength, reserve budget for semantic prefix and truncate rawQuery.
   const extraTokens: string[] = [];
   for (const m of matchedMappings) {
     if (!normalized.includes(m.diagnosticCode)) extraTokens.push(m.diagnosticCode);
@@ -233,10 +233,17 @@ export function expandSemanticQuery(
   }
 
   let expandedQuery = rawQuery;
-  for (const token of extraTokens) {
-    const candidate = `${expandedQuery} ${token}`;
-    if (candidate.length <= maxQueryLength) {
-      expandedQuery = candidate;
+  if (extraTokens.length > 0) {
+    const prefix = extraTokens.join(' ');
+    if (`${prefix} ${rawQuery}`.length <= maxQueryLength) {
+      expandedQuery = `${prefix} ${rawQuery}`;
+    } else {
+      const available = maxQueryLength - prefix.length - 1;
+      if (available > 0) {
+        expandedQuery = `${prefix} ${rawQuery.slice(0, available).trimEnd()}`;
+      } else {
+        expandedQuery = prefix.slice(0, maxQueryLength);
+      }
     }
   }
 

@@ -39,6 +39,14 @@ describe('semantic-expansion: clinical complaint to statutory terms', () => {
     expect(herniaRes.matches[0]?.canonicalName).toContain('Hernia, Hiatal');
   });
 
+  it('prepends semantic terms so they reach the MAX_TERMS = 12 search budget', () => {
+    const longQuery =
+      'I have persistent ringing in ears every night since returning from deployment overseas';
+    const res = expandSemanticQuery(longQuery);
+    expect(res.expandedQuery.startsWith('6260 Tinnitus')).toBe(true);
+    expect(res.expandedQuery).toContain('ringing in ears');
+  });
+
   it('keeps expanded query within maxQueryLength budget (200 characters)', () => {
     const base = 'ringing in ears ' + 'x'.repeat(180); // 196 chars
     expect(base.length).toBe(196);
