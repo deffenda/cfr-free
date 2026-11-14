@@ -45,7 +45,8 @@ cited_citation)` resolved through the citing row's title (edges stay
    within one title at extraction — a Title 32 section citing "§ 70.3" means
    Title 32's; cross-title references are out of scope and recorded as a
    non-goal). FTS5 external-content triggers move together with the schema
-   (all three, per the single-schema rule) and key on `rowid` as today; the
+   (all three — insert, update, delete — per the single-schema rule) and key
+   on `rowid` as today; the
    FTS citation column keeps indexing the bare citation text for matching —
    disambiguation is the `sections` join's job.
 2. **`TITLE_38 = 38` and the versioner URL templates** → `EcfrApi` takes the
@@ -62,7 +63,11 @@ cited_citation)` resolved through the citing row's title (edges stay
    queries stay a SQL filter away. Migration: schema version bump; existing
    files adopt through the established wholesale-rebuild path
    (`allowSchemaUpgrade` + full re-sync, ~5 s measured for Title 38). No
-   per-title migration states.
+   per-title migration states. Adoption failure window: `title` is added as
+   `INTEGER NOT NULL DEFAULT 38` so pre-upgrade rows stay schema-valid, and
+   sync's rebuild already runs in a single transaction
+   (`replaceAllWithBaseline`), so a failed rebuild rolls back to the intact
+   pre-upgrade rows instead of a half-migrated store.
 5. **Count/metric/wire surfaces** → `meta` carries per-title `issue_date`
    and corpus receipt (the receipt becomes a title → hash map; comparability
    stays per-title). Search responses gain a `title` field on every hit;
@@ -92,7 +97,9 @@ cited_citation)` resolved through the citing row's title (edges stay
   within the selected title.
 - The citation pin (exact "§ 70.1"-style lookup) requires a title when the
   citation exists in more than one enabled title — an ambiguity error beats
-  a silent Title-38 assumption.
+  a silent Title-38 assumption. (The error is scoped to the exact-pin
+  endpoint only; free-text search with `title=all` still returns every
+  matching hit, each labeled with its own title.)
 - Cross-title citation edges, cross-title ranking weights, and multi-title
   redline/diff are non-goals for this packet; each is its own design round.
 - Per-title amendment/structure probes run before first sync; a title whose
