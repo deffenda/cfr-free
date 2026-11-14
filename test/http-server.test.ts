@@ -1671,4 +1671,41 @@ describe('Titan HTTP conditional requests (ETag / 304)', () => {
       expect(headers.get('etag'), `${path} must carry no ETag`).toBeNull();
     }
   });
+
+  it('serves the vibe developer playground at /playground with CSP', async () => {
+    const res = await request('/playground');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    expect(res.headers.get('content-security-policy')).toContain("default-src 'none'");
+    expect(res.text).toContain('Vibe Playground');
+    expect(res.text).toContain('38 C.F.R. § 4.25');
+  });
+
+  it('evaluates combined ratings at /api/v1/vibe/combine', async () => {
+    const res = await request('/api/v1/vibe/combine?ratings=50,30');
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.text) as {
+      combinedRating: number;
+      rawDisabilityPercent: number;
+      steps: unknown[];
+    };
+    expect(body.combinedRating).toBe(70);
+    expect(body.rawDisabilityPercent).toBe(65);
+    expect(body.steps).toHaveLength(2);
+
+    const bad = await request('/api/v1/vibe/combine?ratings=invalid');
+    expect(bad.status).toBe(400);
+    expect((JSON.parse(bad.text) as { error: string }).error).toBe('invalid_input');
+  });
+
+  it('expands clinical queries when semantic=1 on /api/v1/search', async () => {
+    const res = await request('/api/v1/search?q=ringing%20in%20ears&semantic=1');
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.text) as {
+      semanticMatches?: Array<{ canonicalName: string; diagnosticCode: string }>;
+    };
+    expect(body.semanticMatches).toBeDefined();
+    expect(body.semanticMatches?.[0]?.canonicalName).toBe('Tinnitus');
+    expect(body.semanticMatches?.[0]?.diagnosticCode).toBe('6260');
+  });
 });

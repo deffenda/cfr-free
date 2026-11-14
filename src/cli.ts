@@ -11,6 +11,8 @@ import { formatIssueDiff, runDiffCommand } from './commands/diff.js';
 import { formatSectionRedline, runRedlineCommand } from './commands/redline.js';
 import { formatHistoricalSection, runHistoricalCommand } from './commands/historical.js';
 import { generateVibePrompt, generateVibeRules } from './commands/vibe.js';
+import { runVibeUiCommand } from './commands/vibe-ui.js';
+import { calculateCombinedRating, formatCombineResult } from './core/va-math.js';
 import {
   formatSearchResults,
   formatSearchResultsJson,
@@ -34,8 +36,13 @@ Usage:
   cfr-free [mcp]          Start the MCP server on stdio (default)
   cfr-free mcp install    Configure MCP server in Cursor, Claude Desktop, Windsurf or VS Code
                             Options: --client <cursor|claude|windsurf|vscode|all>, --workspace, --print
-  cfr-free vibe <rules|prompt> Generate agent rules (.cursorrules) or prompts
-                            Options: --format <cursor|claude|markdown>, --write
+  cfr-free vibe <subcommand> Developer & agent tooling suite (rules, prompt, ui, combine, playground)
+                            Subcommands:
+                              rules [--format cursor|claude|markdown] [--write]
+                              prompt <adjudicator|researcher|ratings>
+                              ui <rating-card|search-bar|citation-badge|evaluator> [--framework react|html] [--write] [--list]
+                              combine <ratings...> (38 C.F.R. § 4.25 VA math)
+                              playground (launch instant visual developer sandbox)
   cfr-free sync           Rebuild the local index from eCFR
   cfr-free diff <from> [to]  Show provision changes between two eCFR issue dates
                              (to defaults to the index's issue date)
@@ -45,7 +52,7 @@ Usage:
                                      point-in-time archive, 2017 onward)
   cfr-free search <query>  Ranked provisions from the local index
                              Options: --json, --page N, --per-page N,
-                             --part P, --kind section|appendix, --chapter C, --demo
+                             --part P, --kind section|appendix, --chapter C, --demo, --semantic
   cfr-free serve          Start the Titan HTTP API (default http://127.0.0.1:8787; --demo for sample data)
   cfr-free demo           Instant offline demo server with core rating schedules
   cfr-free export <path> [jsonl|md]  Snapshot the index (sqlite default;
@@ -171,6 +178,8 @@ export type Command =
   | 'mcp-install'
   | 'vibe-rules'
   | 'vibe-prompt'
+  | 'vibe-ui'
+  | 'vibe-combine'
   | 'sync'
   | 'diff'
   | 'redline'
@@ -197,6 +206,17 @@ export type ParsedCommand =
   | {
       readonly command: 'vibe-prompt';
       readonly preset: 'adjudicator' | 'researcher' | 'ratings';
+    }
+  | {
+      readonly command: 'vibe-ui';
+      readonly component?: string | undefined;
+      readonly framework?: 'react' | 'html' | undefined;
+      readonly write?: string | undefined;
+      readonly list?: boolean | undefined;
+    }
+  | {
+      readonly command: 'vibe-combine';
+      readonly ratings: readonly number[];
     }
   | {
       readonly command: 'serve';
@@ -226,6 +246,7 @@ export type ParsedCommand =
       readonly kind?: 'section' | 'appendix' | undefined;
       readonly chapter?: string | undefined;
       readonly demo?: boolean | undefined;
+      readonly semantic?: boolean | undefined;
     }
   | { readonly command: 'help'; readonly topic?: string }
   | {
@@ -240,6 +261,8 @@ export type ParsedCommand =
         | 'mcp-install'
         | 'vibe-rules'
         | 'vibe-prompt'
+        | 'vibe-ui'
+        | 'vibe-combine'
         | 'serve'
       >;
     };
@@ -403,13 +426,73 @@ function parseVibePromptArgs(args: readonly string[]): ParsedCommand {
   return { command: 'vibe-prompt', preset };
 }
 
-/** Parse `vibe` arguments: `vibe rules` or `vibe prompt`. */
+function parseFrameworkOption(val: string | undefined): 'react' | 'html' {
+  const lower = val?.toLowerCase();
+  if (lower !== 'react' && lower !== 'html') {
+    throw new CliError(`framework must be react or html, got: ${val ?? 'missing'}`);
+  }
+  return lower;
+}
+
+function parseVibeUiArgs(args: readonly string[]): ParsedCommand {
+  let component: string | undefined;
+  let framework: 'react' | 'html' | undefined;
+  let write: string | undefined;
+  let list = false;
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] as string;
+    if (arg === '--list') {
+      list = true;
+    } else if (arg.startsWith('--framework=')) {
+      framework = parseFrameworkOption(arg.slice(12));
+    } else if (arg === '--framework') {
+      framework = parseFrameworkOption(args[i + 1]);
+      i += 1;
+    } else if (arg.startsWith('--write=')) {
+      write = arg.slice(8);
+    } else if (arg === '--write') {
+      const next = args[i + 1];
+      if (!next || next.startsWith('-')) throw new CliError('--write requires a file path');
+      write = next;
+      i += 1;
+    } else if (!arg.startsWith('-') && !component) {
+      component = arg;
+    } else {
+      throw new CliError(`unknown option for vibe ui: ${arg}`);
+    }
+  }
+
+  return { command: 'vibe-ui', component, framework, write, list };
+}
+
+function parseVibeCombineArgs(args: readonly string[]): ParsedCommand {
+  const ratings: number[] = [];
+  for (const arg of args) {
+    const n = Number(arg);
+    if (Number.isNaN(n) || n < 0 || n > 100) {
+      throw new CliError(`rating must be a number between 0 and 100, got: ${arg}`);
+    }
+    ratings.push(n);
+  }
+  if (ratings.length === 0) {
+    throw new CliError(
+      'vibe combine requires at least one rating percentage (e.g. `cfr-free vibe combine 50 30 10`)',
+    );
+  }
+  return { command: 'vibe-combine', ratings };
+}
+
+/** Parse `vibe` arguments: `vibe rules`, `vibe prompt`, `vibe ui`, `vibe combine`, or `vibe playground`. */
 function parseVibeArgs(rest: readonly string[]): ParsedCommand {
   const sub = rest[0];
   if (sub === 'rules') return parseVibeRulesArgs(rest.slice(1));
   if (sub === 'prompt') return parseVibePromptArgs(rest.slice(1));
+  if (sub === 'ui') return parseVibeUiArgs(rest.slice(1));
+  if (sub === 'combine') return parseVibeCombineArgs(rest.slice(1));
+  if (sub === 'playground') return { command: 'serve', demo: true };
   throw new CliError(
-    `vibe requires a subcommand: 'rules' or 'prompt' (e.g. \`cfr-free vibe rules\`)`,
+    `vibe requires a subcommand: 'rules', 'prompt', 'ui', 'combine', or 'playground'`,
   );
 }
 
@@ -427,6 +510,7 @@ const SEARCH_FLAGS: Readonly<Record<string, boolean>> = {
   '--kind': true,
   '--chapter': true,
   '--demo': false,
+  '--semantic': false,
 };
 
 /** The search arguments, split into query words, value flags and switches. */
@@ -555,6 +639,7 @@ function parseSearchArgs(rest: readonly string[]): ParsedCommand {
     kind: input.kind,
     chapter: input.chapter,
     ...(switches.has('--demo') ? { demo: true } : {}),
+    ...(switches.has('--semantic') ? { semantic: true } : {}),
   };
 }
 
@@ -762,6 +847,21 @@ function runVibeCoderCommand(parsed: ParsedCommand, io: MainIO): boolean {
     io.out(prompt + '\n');
     return true;
   }
+  if (parsed.command === 'vibe-ui') {
+    const report = runVibeUiCommand({
+      component: parsed.component,
+      framework: parsed.framework,
+      write: parsed.write,
+      list: parsed.list,
+    });
+    io.out(report.output);
+    return true;
+  }
+  if (parsed.command === 'vibe-combine') {
+    const result = calculateCombinedRating(parsed.ratings);
+    io.out(formatCombineResult(result));
+    return true;
+  }
   return false;
 }
 
@@ -829,6 +929,7 @@ export async function main(argv: readonly string[], io: MainIO): Promise<number>
         kind: parsed.kind,
         chapter: parsed.chapter,
         demo: parsed.demo,
+        semantic: parsed.semantic,
       });
       io.out(parsed.json ? formatSearchResultsJson(result) : formatSearchResults(result));
       return 0;
