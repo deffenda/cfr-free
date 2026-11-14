@@ -98,10 +98,10 @@ function hostNames(list: string): string[] {
 
 /**
  * The titles in a comma-separated list: blanks dropped (a trailing comma or
- * `${X:-}` expansion means "no title there"), each parsed and bounds-checked
- * against the live eCFR's 1-50 range, deduplicated, sorted ascending. An
- * explicitly-set variable that names no valid title is a startup failure,
- * not a silent fallback to 38.
+ * a compose `${X:-}` expansion means "no title there"), each parsed and
+ * bounds-checked against the live eCFR's 1-50 range, deduplicated, sorted
+ * ascending. A variable that names no titles — unset or blank — means the
+ * default [38]; a title number outside 1-50 is a startup failure.
  */
 function parseTitles(raw: string | undefined): readonly number[] {
   if (raw === undefined) return [38];
@@ -118,9 +118,7 @@ function parseTitles(raw: string | undefined): readonly number[] {
       }
       return title;
     });
-  if (titles.length === 0) {
-    throw new ConfigError('CFR_TITLES is set but names no titles');
-  }
+  if (titles.length === 0) return [38];
   return [...new Set(titles)].sort((a, b) => a - b);
 }
 
