@@ -126,9 +126,10 @@ work is stage D (M6) and stage E (M7, M8).
 | M4 — a verified first-use path                      | shipped                | [delivery log](docs/research/delivery-log.md) |
 | M5 — one complete research-and-citation workflow    | shipped, 4 of 4 slices | [delivery log](docs/research/delivery-log.md) |
 
-### M6 — Practitioner validation before expansion
+### M6 — Practitioner validation (study dropped 2026-11-13)
 
-**Dependency:** study design can start now; usable pilot requires A and C.
+**Dependency (planning record):** a usable pilot required A and C; the study
+itself was dropped before either dependency mattered.
 **Risk:** LOW documentation/research; external participation needs operator
 arrangement/authorization. Proposed starting cohort: five practitioners or
 tool builders; this is a planning target, not existing demand evidence.
