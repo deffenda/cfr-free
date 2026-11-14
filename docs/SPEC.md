@@ -20,7 +20,13 @@ mcp  sync  diff  redline  historical  search  serve  export  help  version
 ```
 
 Signatures and one-line purposes live in `USAGE` (`src/cli.ts`); `help`
-and `version` dispatch there, the other eight in `src/commands/`.
+and `version` dispatch there, the other entrypoints in `src/commands/`.
+The CLI additionally supports agent and developer automation: `cfr-free mcp install`
+for zero-config editor MCP client setup (Cursor, Claude Desktop,
+Windsurf, VS Code), `cfr-free vibe rules` and `cfr-free vibe prompt` for
+pre-packaged agent system rules and claim evaluation workflows, and
+`cfr-free demo` / `cfr-free serve --demo` for instant offline testing against
+curated Title 38 provisions without network sync.
 
 `cfr-free search` takes a query of 3–200 characters; a query outside that
 range is refused before the index is opened, so a rejected query costs no
@@ -35,12 +41,14 @@ src/
   process-utils.ts    idempotent shutdown handling shared by serve/mcp
   version.ts          package-version resolution seam
   commands/           per-subcommand entrypoints (diff, export,
-                      historical, mcp, redline, search, serve, sync)
+                      historical, mcp, mcp-install, redline, search,
+                      serve, sync, vibe)
                       plus two internal helpers (ensure-index,
                       refresh-scheduler)
   core/
     changes.ts        sync change report: hash diff between syncs
     citations.ts      parse/normalize "38 CFR 4.125", "38 C.F.R. § 4.125", "§ 4.125", "4.125"
+    demo-data.ts      offline fixture store populated with core Title 38 provisions
     diff.ts           point-in-time diff (no local index): fetch two issue dates, hash per citation
     ecfr.ts           eCFR endpoints: dates, structure, full-title XML, search
     errors.ts         the error types the whole service speaks: ServiceError, StructureError

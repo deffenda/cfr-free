@@ -1144,3 +1144,80 @@ describe('cfr-free search', () => {
     expect(out).toContain('terms not answered by these hits: zzz');
   });
 });
+
+describe('vibe coder pack cli commands', () => {
+  it('parses mcp install arguments', () => {
+    expect(parseArgs(['mcp-install', '--print', '--client', 'cursor'])).toEqual({
+      command: 'mcp-install',
+      client: 'cursor',
+      workspace: undefined,
+      print: true,
+    });
+    expect(parseArgs(['mcp-install', '--workspace'])).toEqual({
+      command: 'mcp-install',
+      client: undefined,
+      workspace: true,
+      print: false,
+    });
+    expect(() => parseArgs(['mcp-install', '--unknown'])).toThrow(CliError);
+    expect(() => parseArgs(['mcp-install', '--client', 'invalid'])).toThrow(CliError);
+  });
+
+  it('runs mcp install --print through main', async () => {
+    const { out, err, io } = makeIo();
+    const code = await main(['mcp-install', '--print', '--client', 'cursor'], io);
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('"cfr-free"');
+    expect(err.join('')).toBe('');
+  });
+
+  it('parses vibe rules and prompt arguments', () => {
+    expect(parseArgs(['vibe', 'rules', '--format', 'cursor', '--write'])).toEqual({
+      command: 'vibe-rules',
+      format: 'cursor',
+      write: true,
+    });
+    expect(parseArgs(['vibe', 'prompt', 'ratings'])).toEqual({
+      command: 'vibe-prompt',
+      preset: 'ratings',
+    });
+    expect(() => parseArgs(['vibe', 'rules', '--format', 'bad'])).toThrow(CliError);
+    expect(() => parseArgs(['vibe', 'prompt', 'bad'])).toThrow(CliError);
+  });
+
+  it('runs vibe rules and vibe prompt through main', async () => {
+    const rulesIo = makeIo();
+    const code1 = await main(['vibe', 'rules', '--format', 'claude'], rulesIo.io);
+    expect(code1).toBe(0);
+    expect(rulesIo.out.join('')).toContain('Model Context Protocol');
+
+    const promptIo = makeIo();
+    const code2 = await main(['vibe', 'prompt', 'adjudicator'], promptIo.io);
+    expect(code2).toBe(0);
+    expect(promptIo.out.join('')).toContain('VA Disability Claim Adjudication Prompt');
+  });
+
+  it('parses search --demo and demo commands', () => {
+    expect(parseArgs(['search', '--demo', 'tinnitus'])).toEqual({
+      command: 'search',
+      query: 'tinnitus',
+      json: false,
+      page: 1,
+      perPage: 10,
+      demo: true,
+    });
+    expect(parseArgs(['demo'])).toEqual({
+      command: 'serve',
+      demo: true,
+    });
+    expect(() => parseArgs(['demo', 'extra'])).toThrow(CliError);
+  });
+
+  it('executes search --demo without needing an existing index file or network', async () => {
+    const { out, err, io } = makeIo();
+    const code = await main(['search', '--demo', 'tinnitus'], io);
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('38 C.F.R. § 4.87');
+    expect(err.join('')).toBe('');
+  });
+});
